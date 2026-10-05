@@ -1,0 +1,239 @@
+# NoOrbit
+
+IDE nativa per a escriptori amb **agent IA local**, integracions reals amb **Blender** i **Unreal Engine 5**, suport per a **Android/iOS natius** (Kotlin+Compose, Swift+SwiftUI) amb emuladors, i un sistema obert d'**extensions**, **skills** i **MCP**.
+
+Construïda amb [Tauri 2](https://tauri.app) + [React](https://react.dev) + [TypeScript](https://www.typescriptlang.org) + [Monaco Editor](https://microsoft.github.io/monaco-editor/). Lleugera, sense Electron.
+
+<p align="center">
+  <img src="apps/desktop/src-tauri/icons/128x128@2x.png" alt="NoOrbit" width="128" />
+</p>
+
+---
+
+## Contents
+
+- [Què és NoOrbit](#què-és-noorbit)
+- [Instal·lació (usuari final)](#instal·lació-usuari-final)
+- [Compilar des del codi font](#compilar-des-del-codi-font)
+- [On són els instal·ladors un cop compilats](#on-són-els-instal·ladors-un-cop-compilats)
+- [Wiki](#wiki)
+- [Arquitectura](#arquitectura)
+- [Llicència](#llicència)
+
+---
+
+## Què és NoOrbit
+
+| Àmbit | Què inclou |
+|---|---|
+| **Editor** | Monaco amb multi-cursor, Quick Open, Cerca global, Command Palette, pestanes, git diff integrat. |
+| **Terminal** | PTY real multi-sessió connectat al backend Rust. |
+| **IA** | Xat multi-sessió amb streaming en viu, **materialització automàtica** de fitxers mentre la IA encara està escrivint, i **reintents automàtics** si l'equip es queda sense memòria/context. |
+| **Mòbil natiu** | Selector de plataforma per xat (escriptori / Android / iOS). Android: Kotlin + Jetpack Compose + Material 3. iOS: Swift + SwiftUI. Gestió d'AVDs i simuladors, *live view* amb captures periòdiques. |
+| **Blender** | Add-on Python (`blender-scripts/noorbit_bridge.py`) + client socket. Executa scripts dins la sessió de Blender i llegeix l'escena. |
+| **Unreal** | Remote Control API + bootstrap Python (`unreal-scripts/bootstrap.py`). Build, launcher i execució de scripts. |
+| **Extensions** | Skills (carpetes amb `SKILL.md`), plugins natius i servidors **MCP**. |
+| **Especialistes** | Rols amb model, temperatura i prompt propis per tasques concretes. |
+| **i18n** | **Català com a idioma base**. Extensible amb fitxers JSON a `apps/desktop/src/i18n/locales/`. |
+
+Tota la documentació ampliada és a la **wiki**: <https://github.com/jpuigbert/noorbit/wiki>
+
+---
+
+## Instal·lació (usuari final)
+
+### Descàrrega de binaris
+
+Els instal·ladors publicats es troben a la secció **Releases** del repositori:
+
+**👉 <https://github.com/jpuigbert/noorbit/releases>**
+
+Cada release inclou, per a cada sistema, l'arxiu corresponent:
+
+| Sistema | Fitxer que has de descarregar |
+|---|---|
+| **macOS** (Apple Silicon) | `NoOrbit_0.5.0_aarch64.dmg` |
+| **macOS** (Intel) | `NoOrbit_0.5.0_x64.dmg` |
+| **macOS** (universal, recomanat) | `NoOrbit_0.5.0_universal.dmg` |
+| **Windows** (10 / 11) | `NoOrbit_0.5.0_x64-setup.exe` |
+| **Linux** (Debian / Ubuntu) | `no-orbit_0.5.0_amd64.deb` |
+| **Linux** (Fedora / RHEL) | `no-orbit-0.5.0-1.x86_64.rpm` |
+| **Linux** (universal) | `NoOrbit-0.5.0.AppImage` |
+
+> Encara no s'han penjat assets cap a GitHub Releases. Si vols, obre un issue o edita un tag perquè es publiquin — actualment cal compilar-ho des del codi font (secció següent).
+
+### Instruccions per sistema
+
+**macOS**
+1. Obre el `.dmg` i arrossega **NoOrbit** a la carpeta **Aplicacions**.
+2. La primera vegada, com que l'app **no està signada ni notaritzada**, macOS la bloqueja. Fes **clic dret → Obre** (només cal una vegada), o bé:
+   ```bash
+   xattr -d com.apple.quarantine /Applications/NoOrbit.app
+   ```
+
+**Windows**
+1. Doble clic a `NoOrbit_0.5.0_x64-setup.exe`.
+2. S'instal·la **per a l'usuari actual**, sense necessitat de drets d'administrador.
+3. L'executable apareix al menú Inici.
+
+**Linux (Debian/Ubuntu)**
+```bash
+sudo apt install ./no-orbit_0.5.0_amd64.deb
+# si el paquet ja està descarregat i vols instal·lar-lo "a la vella":
+sudo dpkg -i no-orbit_0.5.0_amd64.deb && sudo apt -f install
+```
+Executa'l amb `no-orbit` o des del menú d'aplicacions.
+
+**Linux (Fedora/RHEL)**
+```bash
+sudo dnf install ./no-orbit-0.5.0-1.x86_64.rpm
+```
+
+**Linux (AppImage)**
+```bash
+chmod +x NoOrbit-0.5.0.AppImage
+./NoOrbit-0.5.0.AppImage
+```
+
+---
+
+## Compilar des del codi font
+
+### Requisits comuns (a totes les plataformes)
+
+| Eina | Versió mínima | Com install·lar |
+|------|----------------|-----------------|
+| Node.js | 20 | <https://nodejs.org> |
+| pnpm | 9 | `corepack enable` |
+| Rust | 1.77 | <https://rustup.rs> |
+
+**Dependències del sistema operatiu**:
+
+- **macOS**: `xcode-select --install` (Command Line Tools).
+- **Linux (Debian/Ubuntu)**:
+  ```bash
+  sudo apt update && sudo apt install -y \
+    libwebkit2gtk-4.1-dev build-essential curl wget file \
+    libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+  ```
+- **Windows**: Microsoft **C++ Build Tools** (workload *Desktop development with C++*) + **WebView2 Runtime** (a Windows 11 ja ve inclòs; a Windows 10 es baixa sol gràcies a `webviewInstallMode: downloadBootstrapper`).
+
+### Passos
+
+```bash
+git clone https://github.com/jpuigbert/noorbit.git
+cd noorbit
+pnpm install
+
+# Mode desenvolupament (hot reload)
+pnpm app:dev
+
+# Compilar paquets segons el sistema:
+pnpm app:build:mac:universal   # macOS: DMG universal (Intel + Apple Silicon)
+pnpm app:build:mac:intel       # macOS: només Intel
+pnpm app:build:mac:arm         # macOS: només Apple Silicon
+pnpm app:build:deb             # Linux: .deb
+pnpm app:build:linux           # Linux: .deb + .rpm + AppImage
+pnpm app:build:win             # Windows: .exe (NSIS) + .msi
+pnpm app:build                 # El paquet natiu del SO on s'està executant
+```
+
+> ⚠️ Cada instal·lador s'ha de **construir des del seu sistema operatiu** (o en CI). Des de macOS no es poden crear `.deb` de Linux ni `.exe` de Windows de forma fiable perquè enllacen biblioteques pròpies d'aquelles plataformes. El que sí es pot fer des d'un sol Mac és produir un **DMG universal** (Intel + Apple Silicon).
+
+---
+
+## On són els instal·ladors un cop compilats
+
+Tots els paquets es generen a:
+
+```
+apps/desktop/src-tauri/target/[<triple>]/release/bundle/
+```
+
+Rutes completes segons sistema:
+
+### macOS (des de macOS)
+
+```
+apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/
+├── dmg/NoOrbit_0.5.0_universal.dmg      ← compartiu això
+└── macos/NoOrbit.app                     ← app "nua" (provable directament)
+```
+
+Per a només Intel (`--target x86_64-apple-darwin`) o només Apple Silicon (`--target aarch64-apple-darwin`), substitueix `universal-apple-darwin` per l'altre triple.
+
+### Windows (des de Windows)
+
+```
+apps\desktop\src-tauri\target\release\bundle\
+├── nsis\NoOrbit_0.5.0_x64-setup.exe      ← instal·lador clàssic (recomanat)
+└── msi\NoOrbit_0.5.0_x64_en-US.msi        ← paquet per a desplegaments empresarials (GPO/SCCM)
+```
+
+### Linux (des de Linux)
+
+```
+apps/desktop/src-tauri/target/release/bundle/
+├── deb/no-orbit_0.5.0_amd64.deb           ← Debian / Ubuntu
+├── rpm/no-orbit-0.5.0-1.x86_64.rpm        ← Fedora / RHEL
+└── appimage/NoOrbit-0.5.0.AppImage        ← universal (tots els distros)
+```
+
+En una ARM Linux (p. ex. Raspberry Pi) afegeix `--target aarch64-unknown-linux-gnu` i ajusta el nom del paquet.
+
+---
+
+## Wiki
+
+La documentació detallada (arquitectura, integracions, extensions, dreceres, guia de contribució) és a:
+
+**📚 <https://github.com/jpuigbert/noorbit/wiki>**
+
+Pàgines disponibles:
+
+- [[Instalació]]
+- [[Funcionalitats]]
+- [[IA-en-NoOrbit]]
+- [[Desenvolupament-mòbil-natiu]]
+- [[Integració-Blender]]
+- [[Integració-Unreal]]
+- [[Extensions]]
+- [[Dreceres-de-teclat]]
+- [[Arquitectura]]
+- [[Contribució]]
+
+---
+
+## Arquitectura
+
+```
+noorbit/
+├── apps/desktop/                 ← única app (Tauri)
+│   ├── src/                      ← frontend React/TypeScript (components/, stores/, i18n/, editor/, core/, help/)
+│   ├── src-tauri/                ← backend Rust (commands/, ai/, agent/, mobile/, blender/, unreal/, experts/, plugins/, skills/, lsp/, computer/, autonomous/, api/)
+│   └── package.json
+├── blender-scripts/              ← add-on Python per connectar amb Blender
+├── unreal-scripts/              ← bootstrap Python per Unreal
+├── scripts/                      ← instal·ladors (install-unreal.sh)
+└── tools/                        ← eines de build (make-icons.mjs)
+```
+
+Fluxos clau:
+
+- **Streaming IA**: el backend emet l'event `ai://chunk` etiquetat per `sessionId`; el frontend (`agentStore.appendStream`) acumula el text i **crida `scheduleLiveMaterialize`** per escriure fitxers reals a disk **en viu**, mentre el model encara està generant.
+- **Reintents automàtics**: si Ollama/LM Studio fallan per `out of memory` o el stream es talla, NoOrbit torna a intentar-ho automat­icament amb context **reduït → sense codi → sense historial**, sense intervenció humana.
+- **Invoke**: comandaments Rust cridats des de TS via `invoke("name", { args })` de `@tauri-apps/api/core`.
+
+---
+
+## Llicència
+
+Distribuïda sota **MIT** — veure [`LICENSE`](LICENSE) i [`NOTICE`](NOTICE).
+
+Part del disseny i alguns fragments deriven o estan inspirats en **Visual Studio Code**, i utilitzen el **Monaco Editor**, ambdós llicenciats sota MIT per Microsoft Corporation. L'atribució completa és a `NOTICE`.
+
+---
+
+## Estat del projecte
+
+Versió actual: **0.5.0**. El projecte està en desenvolupament actiu. Si trobes un bug o vols una funcionalitat, obre un [issue](https://github.com/jpuigbert/noorbit/issues).

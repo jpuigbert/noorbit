@@ -5,3 +5,6 @@ target/
 .DS_Store
 .env
 apps/desktop/src-tauri/gen/
+
+# Clon local de la wiki (repo git separat, no forma part del codi)
+/.wiki-staging/
