@@ -77,12 +77,37 @@ Cada release inclou, per a cada sistema, l'arxiu corresponent (substitueix la ve
 
 ### Instruccions per sistema
 
-**macOS**
+**macOS — primera arrencada (app no signada)**
+
+NoOrbit **no està signada amb Developer ID ni notaritzada** per Apple (això requereix un compte de desenvolupador de 99 $/any). macOS aplica *Gatekeeper* i bloqueja l'arrencada el primer cop. **No és un error de la app**: és el comportament esperat de qualsevol app descarregada d'Internet sense signar. Tens 3 manes d'activar-la, de més suau a més directa:
+
+**Mètode 1 — Clic dret → Obre (el més recomanable)**
 1. Obre el `.dmg` i arrossega **NoOrbit** a la carpeta **Aplicacions**.
-2. La primera vegada, com que l'app **no està signada ni notaritzada**, macOS la bloqueja. Fes **clic dret → Obre** (només cal una vegada), o bé:
-   ```bash
-   xattr -d com.apple.quarantine /Applications/NoOrbit.app
-   ```
+2. Al **Finder**, ves a **Aplicacions**, fes **clic dret** (o `Control`+clic) sobre **NoOrbit.app** → **Obre**.
+3. Apareixerà el diàleg *«No es pot verificar el desenvolupador»* — prem **Obre**.
+4. **Només cal fer-ho un cop.** A partir d'ara, l'obriràs amb doble clic normal.
+
+**Mètode 2 — Configuració del Sistema (si el clic dret no mostra el botó Obre)**
+1. Fes doble clic a NoOrbit (refusarà obrir-la; és normal).
+2. Obre **Configuració del Sistema → Privadesa i seguretat**.
+3. Baixa fins a l'apartat **Seguretat**; hi apareixerà:
+   *«S'ha bloquejat NoOrbit.app perquè prové d'un desenvolupador no identificat»* → prem **Obre de totes maneres**.
+4. Escriu la contrasenya del Mac i confirma. Torna a obrir la app.
+
+**Mètode 3 — Terminal (elimina l'atribut de quarantena)**
+Si els dos mètodes anteriors no funcionen o vols automatitzar-ho:
+```bash
+xattr -dr com.apple.quarantine /Applications/NoOrbit.app
+```
+(No cal `sudo` si la app és a Aplicacions i la vas moure tu. Després obre NoOrbit normalment amb doble clic.)
+
+> ⚠️ **Missatge «NoOrbit està malmès i no es pot obrir»**? Sembla alarmant però gairebé sempre significa una d'aquestes dues coses:
+> - La descàrrega s'ha tallat a mitges → torna-la a descarregar i compara el SHA-256 amb l'asset del Release.
+> - El `.dmg` s'ha obert des de la còpia temporal de Safari/Chrome sense moure la app a Aplicacions → mou **NoOrbit.app** a **Aplicacions** primer, i després aplica el Mètode 1 o el 3.
+
+**Nota per a Apple Silicon (M1–M4)**: no cal cap pas addicional. El bloqueig és el mateix Gatekeeper que a Intel; l'arquitectura universal ja inclou el codi natiu arm64.
+
+**Per què no es firma?** La signatura i notarització exigeixen un compte de desenvolupador d'Apple de pagament. Si vols una versió signada (sense bloquejos ni passos manuals), col·labora amb el projecte o crea un issue per prioritzar-ho: el workflow de CI ja prepara els binaris i només caldria afegir-hi els secrets `APPLE_SIGNING_IDENTITY`, `APPLE_ID` i `APPLE_APP_SPECIFIC_PASSWORD`.
 
 **Windows**
 1. Doble clic a `NoOrbit_0.6.0_x64-setup.exe`.
