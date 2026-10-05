@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ClipboardEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { ListChecks, Zap, CheckCircle2, XCircle, Server, Download, RefreshCw, Cpu, UserCog, Send, Square, Brain, Boxes, X, Plus, Trash2, FolderPlus, FileDown, FolderTree, GitFork, Smartphone, Apple, Monitor } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { ListChecks, Zap, CheckCircle2, XCircle, Server, Download, RefreshCw, Cpu, UserCog, Send, Square, Brain, Boxes, X, Plus, Trash2, FolderPlus, FileDown, FolderTree, GitFork, Smartphone, Apple, Monitor, Copy, FolderOpen, ImagePlus, ImageOff } from "lucide-react";
 import { useT } from "../../i18n";
-import { useAgentStore, useActiveChat, extractRecommendedPaths } from "../../stores/agentStore";
+import { useAgentStore, useActiveChat, extractRecommendedPaths, extractChatImagePaths } from "../../stores/agentStore";
 import { useAIStore } from "../../stores/aiStore";
 import { useExpertStore } from "../../stores/expertStore";
 import { useProviderStore } from "../../stores/providerStore";
@@ -15,6 +16,11 @@ export default function AgentPanel() {
   const [prompt, setPrompt] = useState("");
   const [showDownload, setShowDownload] = useState(false);
   const [modelName, setModelName] = useState("");
+  // Imatges adjuntes pendents d'enviar (enganxades amb ⌘V o triades al disc):
+  // rutes absolutes dins la carpeta de dades de NoOrbit.
+  const [pendingImgs, setPendingImgs] = useState<string[]>([]);
+  const [attachErr, setAttachErr] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const {
     backends,
@@ -160,6 +166,8 @@ export default function AgentPanel() {
   }, [messages, running, timeline, lastResult, stream, activeId]);
 
   const hasText = prompt.trim().length > 0;
+  // Es pot enviar amb text, amb imatges enganxades, o amb totes dues coses.
+  const canSend = hasText || pendingImgs.length > 0;
   const disabled = running || !hasText;
   const pullBusy = Object.keys(pulling).length > 0;
 
@@ -167,14 +175,22 @@ export default function AgentPanel() {
   const activeExpert = experts.find((e) => e.id === sess.expertId) ?? null;
 
   // Acció principal del xat. Si la IA ja treballa AQUÍ, el text s'afegeix a la
-  // cua d'aquest xat; si no, s'envia ara. Mentre genera, es pot obrir un altre
-  // xat (botó +) i treballar-hi en paral·lel amb una altra IA.
+  // cua d'aquest xat; si no, s'envia ara. Les imatges adjuntes viatgen com a
+  // entrada visual pels models amb visió; a la cua es posen les seves rutes
+  // al text, on «send» les reconeix com a adjunts quan els toca el torn.
   const handleSend = () => {
     const text = prompt.trim();
-    if (!text) return;
+    const imgs = pendingImgs;
+    if (!text && imgs.length === 0) return;
     setPrompt("");
-    if (running) enqueue(text);
-    else void send(text);
+    setPendingImgs([]);
+    setAttachErr(null);
+    if (running) {
+      const queued = [text, ...imgs].filter(Boolean).join("\n");
+      enqueue(queued);
+    } else {
+      void send(text || "(imatge adjunta)", undefined, imgs);
+    }
   };
 
   // Resposta ràpida: consulta de text directa (o l'expert d'aquest xat).
@@ -232,6 +248,37 @@ export default function AgentPanel() {
       e.preventDefault();
       handleSend();
     }
+  };
+
+  // Enganxar (⌘V) o triar fitxers: les imatges es desen a la carpeta de
+  // dades amb «image_import» i apareixen com a miniatures sota l'entrada.
+  const importImageFiles = async (files: File[]) => {
+    for (const f of files) {
+      try {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(String(r.result));
+          r.onerror = () => reject(r.error);
+          r.readAsDataURL(f);
+        });
+        const path = await invoke<string>("image_import", {
+          dataBase64: dataUrl,
+          name: f.name || "enganxat.png",
+        });
+        setPendingImgs((p) => (p.includes(path) ? p : [...p, path]));
+      } catch (e) {
+        setAttachErr(String(e));
+      }
+    }
+  };
+
+  const onPromptPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
+      f.type.startsWith("image/")
+    );
+    if (files.length === 0) return; // text normal: deixem l'enganxat habitual
+    e.preventDefault();
+    void importImageFiles(files);
   };
 
   const doDownload = async () => {
@@ -433,10 +480,24 @@ export default function AgentPanel() {
         ))}
 
       <div className="agent-prompt">
+        {/* Miniatures de les imatges adjuntes pendents (clic a la X les treu). */}
+        {(pendingImgs.length > 0 || attachErr) && (
+          <div className="ap-attach-row">
+            {pendingImgs.map((p) => (
+              <ChatThumb
+                key={p}
+                path={p}
+                onRemove={() => setPendingImgs((x) => x.filter((y) => y !== p))}
+              />
+            ))}
+            {attachErr && <span className="ap-attach-err">{attachErr}</span>}
+          </div>
+        )}
         <textarea
-          placeholder={t("agent.promptPlaceholder")}
+          placeholder={t("agent.promptPlaceholder") + " · enganxa-hi imatges amb ⌘V"}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
+          onPaste={onPromptPaste}
           onKeyDown={onPromptKey}
         />
         <div className="agent-actions">
@@ -448,6 +509,25 @@ export default function AgentPanel() {
           >
             <FolderTree size={13} /> {t("agent.ctxToggle")}
           </button>
+          {/* Adjuntar imatges des del disc (mateix efecte que enganxar-les). */}
+          <button
+            className="btn sm ap-ctx"
+            onClick={() => fileRef.current?.click()}
+            title="Adjunta imatges: es mostren al xat i els models amb visió les reben"
+          >
+            <ImagePlus size={13} />
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={(e) => {
+              void importImageFiles(Array.from(e.target.files ?? []));
+              e.target.value = "";
+            }}
+          />
           {/* Què està veient realment la IA: nre. de fitxers o avís. */}
           {includeContext && contextInfo && (
             <span className="ap-ctx-info">{contextInfo}</span>
@@ -584,10 +664,22 @@ export default function AgentPanel() {
 
         {/* Historial del xat: bombolles d'usuari i de la IA, amb el
             raonament plegable i la durada, com els clients d'IA moderns. */}
-        {messages.map((m, i) =>
-          m.role === "user" ? (
+        {messages.map((m, i) => {
+          // Imatges del missatge: les adjuntes explícitament + les rutes que
+          // apareixen al text (p. ex. generades per la IA amb image_generate).
+          const msgImgs = Array.from(
+            new Set([...(m.images ?? []), ...extractChatImagePaths(m.text)])
+          );
+          return m.role === "user" ? (
             <div key={i} className="chat-row user">
               <div className="chat-bubble user">{m.text}</div>
+              {msgImgs.length > 0 && (
+                <div className="chat-imgs">
+                  {msgImgs.map((p) => (
+                    <ChatImage key={p} path={p} />
+                  ))}
+                </div>
+              )}
               {/* Fork des de la pregunta: prova un altre camí (altra IA, altre
                   especialista) sense perdre la conversa original. */}
               <button
@@ -632,6 +724,15 @@ export default function AgentPanel() {
               <div className={"chat-bubble assistant" + (m.error ? " err" : "")}>
                 {m.text}
               </div>
+              {/* Imatges esmentades a la resposta: previsualització amb botons
+                  de copiar al porta-retalls i mostrar al Finder. */}
+              {msgImgs.length > 0 && (
+                <div className="chat-imgs">
+                  {msgImgs.map((p) => (
+                    <ChatImage key={p} path={p} />
+                  ))}
+                </div>
+              )}
               {/* Objectiu 3: còpia del resultat (resposta, raonament) i desa
                   a fitxer, sense eixir del xat. */}
               {!m.error && m.text && (
@@ -680,8 +781,8 @@ export default function AgentPanel() {
                 </span>
               )}
             </div>
-          )
-        )}
+          );
+        })}
 
         {/* Torn en curs: bombolla pendent amb els passos que van arribant. */}
         {running && (
@@ -703,6 +804,14 @@ export default function AgentPanel() {
                   {ramChip}
                 </div>
               )}
+            {/* Si el stream ja anuncia una imatge generada, es mostra al moment. */}
+            {extractChatImagePaths(stream ?? "").length > 0 && (
+              <div className="chat-imgs">
+                {extractChatImagePaths(stream ?? "").map((p) => (
+                  <ChatImage key={p} path={p} />
+                ))}
+              </div>
+            )}
             {timeline.length > 0 && (
               <div className="chat-steps">
                 {timeline.map((s, k) => (
@@ -786,5 +895,102 @@ function PlatformButton({
     >
       {icon} {label}
     </button>
+  );
+}
+
+/** Cau de data-URLs de les imatges ja carregades: evita rellegir-les del
+    disc cada vegada que es repinta el xat. */
+const imgCache = new Map<string, string>();
+
+/** Llegeix una imatge local (Rust: «image_preview_base64») com a data-URL. */
+function useImageDataUrl(path: string): string | null {
+  const [url, setUrl] = useState<string | null>(() => imgCache.get(path) ?? null);
+  useEffect(() => {
+    const hit = imgCache.get(path);
+    if (hit) {
+      setUrl(hit);
+      return;
+    }
+    let alive = true;
+    invoke<string>("image_preview_base64", { path })
+      .then((d) => {
+        imgCache.set(path, d);
+        if (alive) setUrl(d);
+      })
+      .catch(() => {
+        if (alive) setUrl(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [path]);
+  return url;
+}
+
+/** Imatge dins del xat: previsualització + copiar al porta-retalls + mostrar
+    al Finder/explorador. Els models amb visió la reben si l'usuari l'adjunta. */
+function ChatImage({ path }: { path: string }) {
+  const url = useImageDataUrl(path);
+  const name = path.split(/[\\/]/).pop() ?? path;
+
+  // Copiar la imatge (no només el text): si el format no és PNG es converteix
+  // amb un canvas, perquè el porta-retalls només accepta PNG de forma fiable.
+  const copyImage = async () => {
+    try {
+      if (!url) throw new Error("sense dades");
+      const blob = await (await fetch(url)).blob();
+      let png = blob;
+      if (blob.type !== "image/png") {
+        const bmp = await createImageBitmap(blob);
+        const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+        canvas.getContext("2d")?.drawImage(bmp, 0, 0);
+        png = await canvas.convertToBlob({ type: "image/png" });
+      }
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+    } catch {
+      // Si no es pot copiar la imatge, almenys la ruta al porta-retalls.
+      await navigator.clipboard.writeText(path).catch(() => undefined);
+    }
+  };
+
+  return (
+    <figure className="chat-img" title={path}>
+      {url ? (
+        <img src={url} alt={name} loading="lazy" />
+      ) : (
+        <span className="chat-img-broken">
+          <ImageOff size={14} /> {name}
+        </span>
+      )}
+      <figcaption className="chat-img-actions">
+        <button
+          className="btn sm ghost"
+          onClick={() => void copyImage()}
+          title="Copia la imatge al porta-retalls"
+        >
+          <Copy size={11} /> Copiar
+        </button>
+        <button
+          className="btn sm ghost"
+          onClick={() => void invoke("reveal_in_finder", { path }).catch(() => undefined)}
+          title="Mostra al Finder / explorador de fitxers"
+        >
+          <FolderOpen size={11} /> Mostra
+        </button>
+      </figcaption>
+    </figure>
+  );
+}
+
+/** Miniatura d'una imatge adjunta pendent d'enviar, amb botó per treure-la. */
+function ChatThumb({ path, onRemove }: { path: string; onRemove: () => void }) {
+  const url = useImageDataUrl(path);
+  return (
+    <span className="ap-thumb" title={path}>
+      {url ? <img src={url} alt="" /> : <ImageOff size={14} />}
+      <button className="ap-thumb-x" onClick={onRemove} title="Treu aquesta imatge">
+        <X size={10} />
+      </button>
+    </span>
   );
 }

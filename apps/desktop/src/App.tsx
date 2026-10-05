@@ -13,6 +13,7 @@ import Sidebar from "./components/Sidebar";
 import EditorPane from "./components/Editor/EditorPane";
 import RightPanel from "./components/RightPanel/RightPanel";
 import ModelManagerModal from "./components/AI/ModelManagerModal";
+import IaCatalogModal from "./components/AI/IaCatalogModal";
 import PluginManager from "./components/Plugins/PluginManager";
 import SettingsModal from "./components/Settings/SettingsModal";
 import HelpModal from "./components/Help/HelpModal";
@@ -220,6 +221,7 @@ export default function App() {
       <StatusBar />
 
       <ModelManagerModal />
+      <IaCatalogModal />
       <PluginManager />
       <SettingsModal />
       <HelpModal />

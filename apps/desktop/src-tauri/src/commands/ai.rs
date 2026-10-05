@@ -10,8 +10,58 @@ fn sid_of(session: Option<String>) -> String {
     session.unwrap_or_else(|| crate::ai::DEFAULT_SESSION.to_string())
 }
 
+/// Un torn de xat amb el NAVEGADOR INTERN connectat: qualsevol resposta del
+/// model que continga directrius «NB|…» s'executa de veritat per NoOrbit, en
+/// torna el resultat al model i el model acaba la resposta amb ell. Així
+/// TOTES les IAs (local sense token, remota, experts) naveguen sense cap
+/// botó ni endollable: només cal que sàpiguen escriure la directriu.
+async fn chat_with_browser(
+    app: AppHandle,
+    ai: &Arc<AiManager>,
+    prompt: &str,
+    system: Option<&str>,
+    mut opts: ChatOpts,
+    sid: &str,
+    streaming: bool,
+) -> Result<String, String> {
+    use crate::browser::tools;
+    // El manual de directrius s'afegeix AL SYSTEM PROMPT DE TOTES les IAs.
+    let sys = match system {
+        Some(s) => format!("{}\n\n{}", s, tools::DIRECTIVE_PROMPT),
+        None => tools::DIRECTIVE_PROMPT.to_string(),
+    };
+    let mut current = prompt.to_string();
+    let mut text = String::new();
+    for round in 0..=tools::MAX_ROUNDS {
+        text = if streaming {
+            crate::ai::in_session(sid, ai.chat_stream(&app, &current, Some(&sys), &opts))
+                .await
+                .map_err(|e| e.to_string())?
+        } else {
+            crate::ai::in_session(sid, ai.chat_opts(&current, Some(&sys), &opts))
+                .await
+                .map_err(|e| e.to_string())?
+        };
+        let actions = tools::parse(&text);
+        // Sense directrius (o límit de torns assolit): resposta definitiva.
+        if actions.is_empty() || round == tools::MAX_ROUNDS {
+            break;
+        }
+        // El torn del model i el resultat del navegador entren a la conversa
+        // com un torn nou: el model veu les dades reals i respon sobre segur.
+        let report = tools::execute(&app, &actions).await;
+        opts.history.push(HistoryTurn {
+            role: "assistant".into(),
+            content: text.clone(),
+        });
+        current = report;
+    }
+    Ok(text)
+}
+
 #[command]
 pub async fn send_prompt(
+    app: AppHandle,
     state: State<'_, AppState>,
     prompt: String,
     system: Option<String>,
@@ -19,17 +69,17 @@ pub async fn send_prompt(
     provider: Option<String>,
     model: Option<String>,
     history: Option<Vec<HistoryTurn>>,
+    images: Option<Vec<String>>,
 ) -> Result<String, String> {
     let ai: Arc<AiManager> = state.ai_manager.clone();
     let opts = ChatOpts {
         provider,
         model,
         history: history.unwrap_or_default(),
+        images: images.unwrap_or_default(),
     };
     // Dins del xat: els events i la cancel·lació són d'aquell xat, no globals.
-    crate::ai::in_session(&sid_of(session), ai.chat_opts(&prompt, system.as_deref(), &opts))
-        .await
-        .map_err(|e| e.to_string())
+    chat_with_browser(app, &ai, &prompt, system.as_deref(), opts, &sid_of(session), false).await
 }
 
 /// Envia un prompt i va emetent fragments amb l'event «ai://chunk» mentre el
@@ -48,16 +98,27 @@ pub async fn send_prompt_stream(
     provider: Option<String>,
     model: Option<String>,
     history: Option<Vec<HistoryTurn>>,
+    images: Option<Vec<String>>,
 ) -> Result<String, String> {
     let ai: Arc<AiManager> = state.ai_manager.clone();
     let opts = ChatOpts {
         provider,
         model,
         history: history.unwrap_or_default(),
+        images: images.unwrap_or_default(),
     };
-    crate::ai::in_session(&sid_of(session), ai.chat_stream(&app, &prompt, system.as_deref(), &opts))
-        .await
-        .map_err(|e| e.to_string())
+    // També en streaming: si el model escriu directrius «NB|…», s'executen i
+    // la segona resposta continua al mateix xat (els chunks arriben igual).
+    chat_with_browser(
+        app,
+        &ai,
+        &prompt,
+        system.as_deref(),
+        opts,
+        &sid_of(session),
+        true,
+    )
+    .await
 }
 
 #[command]
@@ -309,6 +370,35 @@ pub async fn ai_last_thinking(
     Ok(ai.last_thinking(&sid_of(session)).await)
 }
 
+/// Descobreix les IAs locals EXTERNALS presents al sistema (Ollama, LM
+/// Studio, Jan, llama.cpp, vLLM…): en marxa o només instal·lades.
+#[command]
+pub async fn external_ias_discover(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::external_orchestrator::ExternalIa>, String> {
+    let ai = state.ai_manager.clone();
+    Ok(ai.external.discover().await)
+}
+
+/// Delega una tasca directament a una IA local externa o a un proveïdor
+/// oficial amb token (prova les IAs en marxa i retorna la primera resposta
+/// vàlida, amb el seu origen etiquetat). El xat normal ja fa este bot de
+/// rescat quan la IA principal no resol la tasca; esta comanda serveix per a
+/// provar-lo o usar-lo de forma explícita.
+#[command]
+pub async fn delegate_external_ia(
+    state: State<'_, AppState>,
+    prompt: String,
+    system: Option<String>,
+) -> Result<String, String> {
+    let ai = state.ai_manager.clone();
+    ai.external
+        .delegate(&prompt, system.as_deref())
+        .await
+        .map(|resp| resp.text)
+        .map_err(|e| e.to_string())
+}
+
 /// Retorna la carpeta on Ollama desa els models (buide = per defecte).
 #[command]
 pub async fn ollama_get_models_dir() -> Result<String, String> {
@@ -354,4 +444,132 @@ pub async fn list_external_volumes() -> Result<Vec<String>, String> {
         }
         Ok(out)
     }
+}
+
+// ── Catàleg d'IAs: característiques ABANS de descarregar-les ────────────────
+
+/// Entrada del catàleg que mostra el menú IA: mida aproximada, si és sense
+/// censura, si ACCEPTA imatges (visió), si EN genera (imatges/vídeo) i si ja
+/// és instal·lada. Mida 0 = model al núvol, no cal baixar res.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct IaCatalogEntry {
+    pub name: String,
+    /// «ollama» per als models locals; nom del proveïdor per als en línia.
+    pub source: String,
+    pub approx_size_gb: f64,
+    pub uncensored: bool,
+    pub vision: bool,
+    pub image_gen: bool,
+    pub video_gen: bool,
+    pub installed: bool,
+    pub note: String,
+}
+
+/// Consulta el catàleg: taula curated dels models locals més rellevants
+/// (mida aproximada de l'etiqueta estàndard; les variants «:3b» o q4 pesen
+/// molt menys) + els proveïdors en línia que l'usuari haja registrat.
+#[command]
+pub async fn ia_catalog(state: State<'_, AppState>) -> Result<Vec<IaCatalogEntry>, String> {
+    // (nom, GB aproximats, sense censura, visió, nota)
+    const LOCAL: [(&str, f64, bool, bool, &str); 24] = [
+        ("qwen3:8b", 5.2, false, false, "Raonament i codi; pesos oberts (Apache 2.0)"),
+        ("qwen2.5-coder:7b", 4.7, false, false, "Codi — equilibri qualitat/velocitat"),
+        ("qwen2.5-coder:3b", 1.9, false, false, "Codi — per a màquines modestes"),
+        ("llama3.2:3b", 2.0, false, false, "General — ràpid i multilingüe"),
+        ("mistral:7b", 4.4, false, false, "General — bo seguint instruccions"),
+        ("codellama:13b", 7.5, false, false, "Codi — més qualitat, més lent"),
+        ("deepseek-r1:8b", 5.2, false, false, "Raonament pas a pas (thinking visible)"),
+        ("gpt-oss:20b", 12.6, false, false, "OpenAI de pesos oberts — MoE eficient"),
+        ("gpt-oss:120b", 61.0, false, false, "Màxima qualitat local — requereix ~60 GB de RAM"),
+        ("dolphin-mistral:7b", 4.4, true, false, "Sense filtres — codi i raonament"),
+        ("dolphin-mixtral:8x7b", 26.0, true, false, "Sense filtres — MoE 8x7b (cal molta RAM)"),
+        ("goekdenizguelmez/JOSIEFIED-Qwen3", 5.0, true, false, "Sense filtres — Qwen3-8B abliterated"),
+        ("richardyoung/qwen3-8b-abliterated", 5.0, true, false, "Sense filtres — Qwen3 per a ús lliure"),
+        ("alibayram/mimo-7b-rl", 4.7, false, false, "Xiaomi MiMo — raonament mat/codi, thinking visible"),
+        ("maternion/mimo-v2.6", 6.0, false, false, "Xiaomi MiMo-V2.6 — agent 9B amb eines"),
+        ("llava:7b", 4.2, false, true, "Visió: descriu i respon sobre imatges"),
+        ("llava:13b", 8.0, false, true, "Visió — més qualitat que el 7B"),
+        ("llama3.2-vision:11b", 7.9, false, true, "Visió — Meta, bona lectura d'imatges"),
+        ("gemma3:4b", 3.3, false, true, "Visió — lleuger, de Google"),
+        ("gemma3:12b", 8.1, false, true, "Visió — equilibri"),
+        ("gemma3:27b", 17.0, false, true, "Visió — el millor gemma3, cal RAM"),
+        ("minicpm-v:8b", 6.6, false, true, "Visió — excel·lent en detalls i OCR"),
+        ("moondream:latest", 1.7, false, true, "Visió — miniatura (1.7 GB), ràpid"),
+        ("stable-diffusion-v2:latest", 4.9, false, false, "Genera imatges, però NoOrbit recomana ComfyUI (qualitat i control)"),
+    ];
+    let installed: Vec<String> = state
+        .ai_manager
+        .list_models()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| m.name)
+        .collect();
+    let mut out: Vec<IaCatalogEntry> = LOCAL
+        .iter()
+        .map(|(name, gb, unc, vis, note)| {
+            let fam = name.split(':').next().unwrap_or(name);
+            IaCatalogEntry {
+                name: name.to_string(),
+                source: "ollama".into(),
+                approx_size_gb: *gb,
+                uncensored: *unc,
+                vision: *vis,
+                image_gen: name.starts_with("stable-diffusion"),
+                // Cap model d'aquesta llista genera vídeo avui.
+                video_gen: false,
+                installed: installed
+                    .iter()
+                    .any(|i| i == name || i.split(':').next().unwrap_or(i) == fam),
+                note: note.to_string(),
+            }
+        })
+        .collect();
+
+    // Proveïdors en línia registrats per l'usuari: característiques conegudes
+    // segons la URL base (cap no genera vídeo de moment).
+    let guard = state.api_manager.lock().map_err(|e| e.to_string())?;
+    for p in guard.providers.iter().filter(|p| p.enabled) {
+        let base = p.base_url.to_lowercase();
+        let model = p.model.to_lowercase();
+        let (unc, vis, gen, note) = if base.contains("openai.com") {
+            (
+                false,
+                model.contains("4o") || model.contains("4.1") || model.contains("o1") || model.contains("o3"),
+                true,
+                "Genera imatges amb «dall-e-3»/«gpt-image-1» via l'API d'imatges".to_string(),
+            )
+        } else if base.contains("anthropic") {
+            (false, true, false, "Rep imatges com a entrada (visió); no en genera".to_string())
+        } else if base.contains("ollama.com") {
+            (false, false, false, "Models al núvol d'Ollama: no cal baixar res".to_string())
+        } else if base.contains("venice") {
+            (
+                true,
+                false,
+                true,
+                "Inferència sense filtres; model de xat «venice-uncensored», \
+                 imatges amb «venice-sd15»; API pròpia".to_string(),
+            )
+        } else if base.contains("deepseek") {
+            (false, false, false, "Només text (deepseek-chat / reasoner)".to_string())
+        } else if base.contains("perplexity") {
+            (false, false, false, "Cerca web en línia amb citacions; només text".to_string())
+        } else {
+            (false, false, false, "Sense metadades conegudes per a aquesta URL".to_string())
+        };
+        out.push(IaCatalogEntry {
+            name: format!("{} · {}", p.name, p.model),
+            source: p.name.clone(),
+            approx_size_gb: 0.0,
+            uncensored: unc,
+            vision: vis,
+            image_gen: gen,
+            video_gen: false,
+            installed: !p.token.trim().is_empty(),
+            note,
+        });
+    }
+    drop(guard);
+    Ok(out)
 }

@@ -13,6 +13,7 @@ Construïda amb [Tauri 2](https://tauri.app) + [React](https://react.dev) + [Typ
 ## Contents
 
 - [Què és NoOrbit](#què-és-noorbit)
+- [Novetats de la 0.6.0](#novetats-de-la-060)
 - [Instal·lació (usuari final)](#instal·lació-usuari-final)
 - [Compilar des del codi font](#compilar-des-del-codi-font)
 - [On són els instal·ladors un cop compilats](#on-són-els-instal·ladors-un-cop-compilats)
@@ -40,6 +41,18 @@ Tota la documentació ampliada és a la **wiki**: <https://github.com/jpuigbert/
 
 ---
 
+## Novetats de la 0.6.0
+
+- **Navegador intern controlat per totes les IAs, sense botons**: qualsevol IA del xat (local, remota o experta) pot obrir pàgines, llegir-ne el contingut i consultar IAs web (DeepSeek, ChatGPT, Claude, Gemini, Perplexity, Grok…) escrivint directrius de text `NB|OBRIR|`, `NB|LLEGIR|`, `NB|PREGUNTA_IA|` que NoOrbit executa. Abans de preguntar a una IA web es demana **permís a l'usuari** i la finestra sempre és visible (el login el fa sempre la persona).
+- **El codi dels xats web s'aprofita**: quan una IA web o una pàgina retorna codi, NoOrbit l'extreu en blocs estructurats (amb el llenguatge) i la IA local l'adapta i l'escriu al projecte com a fitxers reals (format `@file:` + automaterialització).
+- **Imatges al xat**: es mostren en línia, es poden copiar al porta-retalls i adjuntar/enganxar (⌘V) com a entrada dels models amb visió.
+- **Catàleg d'IAs** (menú IA): abans de descarregar veus la mida aproximada de cada model, si és sense censura, si té visió i si pot generar imatges o vídeo.
+- **Generació i manipulació d'imatges**: amb ComfyUI local (si la RAM ho permet) o via API en línia amb la teua clau.
+- **Orquestrador d'IAs externes legit**: descobriment d'instal·lacions locals (Ollama, LM Studio, llama.cpp…) i fallback en línia **només** amb tokens propis de l'usuari, etiquetant sempre l'origen de cada resposta.
+- **Proveïdors d'API robustos**: claus normalitzades (espais, barras, URLs amb `/v1`…), Venice amb el model correcte (`venice-uncensored`) i migració automàtica de la configuració vella, errors 401/404/429 explicats en català.
+
+---
+
 ## Instal·lació (usuari final)
 
 ### Descàrrega de binaris
@@ -48,19 +61,19 @@ Els instal·ladors publicats es troben a la secció **Releases** del repositori:
 
 **👉 <https://github.com/jpuigbert/noorbit/releases>**
 
-Cada release inclou, per a cada sistema, l'arxiu corresponent:
+Cada release inclou, per a cada sistema, l'arxiu corresponent (substitueix la versió per l'última publicada):
 
 | Sistema | Fitxer que has de descarregar |
 |---|---|
-| **macOS** (Apple Silicon) | `NoOrbit_0.5.0_aarch64.dmg` |
-| **macOS** (Intel) | `NoOrbit_0.5.0_x64.dmg` |
-| **macOS** (universal, recomanat) | `NoOrbit_0.5.0_universal.dmg` |
-| **Windows** (10 / 11) | `NoOrbit_0.5.0_x64-setup.exe` |
-| **Linux** (Debian / Ubuntu) | `no-orbit_0.5.0_amd64.deb` |
-| **Linux** (Fedora / RHEL) | `no-orbit-0.5.0-1.x86_64.rpm` |
-| **Linux** (universal) | `NoOrbit-0.5.0.AppImage` |
+| **macOS** (universal, recomanat: Intel + Apple Silicon) | `NoOrbit_0.6.0_universal.dmg` |
+| **macOS** (Intel) | `NoOrbit_0.6.0_x64.dmg` |
+| **macOS** (Apple Silicon) | `NoOrbit_0.6.0_aarch64.dmg` |
+| **Windows** (10 / 11) | `NoOrbit_0.6.0_x64-setup.exe` |
+| **Linux** (Debian / Ubuntu) | `NoOrbit_0.6.0_amd64.deb` |
+| **Linux** (Fedora / RHEL) | `NoOrbit-0.6.0-1.x86_64.rpm` |
+| **Linux** (universal) | `NoOrbit_0.6.0_amd64.AppImage` |
 
-> Encara no s'han penjat assets cap a GitHub Releases. Si vols, obre un issue o edita un tag perquè es publiquin — actualment cal compilar-ho des del codi font (secció següent).
+> **Versions anteriors**: cada tag és un release independent a GitHub i **no esborra mai** els de versions velles (p. ex. la 0.5.0 completa és a <https://github.com/jpuigbert/noorbit/releases/tag/v0.5.0>). L'índex automàtic de totes les versions i els seus enllaços és l'asset `versions.json` de l'últim release.
 
 ### Instruccions per sistema
 
@@ -72,27 +85,27 @@ Cada release inclou, per a cada sistema, l'arxiu corresponent:
    ```
 
 **Windows**
-1. Doble clic a `NoOrbit_0.5.0_x64-setup.exe`.
+1. Doble clic a `NoOrbit_0.6.0_x64-setup.exe`.
 2. S'instal·la **per a l'usuari actual**, sense necessitat de drets d'administrador.
 3. L'executable apareix al menú Inici.
 
 **Linux (Debian/Ubuntu)**
 ```bash
-sudo apt install ./no-orbit_0.5.0_amd64.deb
+sudo apt install ./NoOrbit_0.6.0_amd64.deb
 # si el paquet ja està descarregat i vols instal·lar-lo "a la vella":
-sudo dpkg -i no-orbit_0.5.0_amd64.deb && sudo apt -f install
+sudo dpkg -i NoOrbit_0.6.0_amd64.deb && sudo apt -f install
 ```
 Executa'l amb `no-orbit` o des del menú d'aplicacions.
 
 **Linux (Fedora/RHEL)**
 ```bash
-sudo dnf install ./no-orbit-0.5.0-1.x86_64.rpm
+sudo dnf install ./NoOrbit-0.6.0-1.x86_64.rpm
 ```
 
 **Linux (AppImage)**
 ```bash
-chmod +x NoOrbit-0.5.0.AppImage
-./NoOrbit-0.5.0.AppImage
+chmod +x NoOrbit_0.6.0_amd64.AppImage
+./NoOrbit_0.6.0_amd64.AppImage
 ```
 
 ---
@@ -156,7 +169,7 @@ Rutes completes segons sistema:
 
 ```
 apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/
-├── dmg/NoOrbit_0.5.0_universal.dmg      ← compartiu això
+├── dmg/NoOrbit_0.6.0_universal.dmg      ← compartiu això
 └── macos/NoOrbit.app                     ← app "nua" (provable directament)
 ```
 
@@ -166,17 +179,17 @@ Per a només Intel (`--target x86_64-apple-darwin`) o només Apple Silicon (`--t
 
 ```
 apps\desktop\src-tauri\target\release\bundle\
-├── nsis\NoOrbit_0.5.0_x64-setup.exe      ← instal·lador clàssic (recomanat)
-└── msi\NoOrbit_0.5.0_x64_en-US.msi        ← paquet per a desplegaments empresarials (GPO/SCCM)
+├── nsis\NoOrbit_0.6.0_x64-setup.exe      ← instal·lador clàssic (recomanat)
+└── msi\NoOrbit_0.6.0_x64_en-US.msi        ← paquet per a desplegaments empresarials (GPO/SCCM)
 ```
 
 ### Linux (des de Linux)
 
 ```
 apps/desktop/src-tauri/target/release/bundle/
-├── deb/no-orbit_0.5.0_amd64.deb           ← Debian / Ubuntu
-├── rpm/no-orbit-0.5.0-1.x86_64.rpm        ← Fedora / RHEL
-└── appimage/NoOrbit-0.5.0.AppImage        ← universal (tots els distros)
+├── deb/NoOrbit_0.6.0_amd64.deb            ← Debian / Ubuntu
+├── rpm/NoOrbit-0.6.0-1.x86_64.rpm         ← Fedora / RHEL
+└── appimage/NoOrbit_0.6.0_amd64.AppImage  ← universal (tots els distros)
 ```
 
 En una ARM Linux (p. ex. Raspberry Pi) afegeix `--target aarch64-unknown-linux-gnu` i ajusta el nom del paquet.
@@ -236,4 +249,4 @@ Part del disseny i alguns fragments deriven o estan inspirats en **Visual Studio
 
 ## Estat del projecte
 
-Versió actual: **0.5.0**. El projecte està en desenvolupament actiu. Si trobes un bug o vols una funcionalitat, obre un [issue](https://github.com/jpuigbert/noorbit/issues).
+Versió actual: **0.6.0**. El projecte està en desenvolupament actiu. Si trobes un bug o vols una funcionalitat, obre un [issue](https://github.com/jpuigbert/noorbit/issues).

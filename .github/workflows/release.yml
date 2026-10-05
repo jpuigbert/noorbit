@@ -21,9 +21,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag a construir (p. ex. v0.5.0)"
+        description: "Tag a construir (p. ex. v0.6.0)"
         required: true
-        default: "v0.5.0"
+        default: "v0.6.0"
 
 permissions:
   contents: write
@@ -138,6 +138,29 @@ jobs:
       - name: List downloaded files
         run: ls -la artifacts/
 
+      # ── Sistema de releases nou: índex «versions.json» ───────────────────
+      # Genera un JSON amb TOTES les versions publicades (la nova i les
+      # velles, amb els seus URLs d'dmg/exe/deb…) i l'adjunta al release.
+      # Qualsevol (la app, la wiki o un script) pot consultar l'última
+      # versió descarregant només aquest fitxer. Les releases anteriors NO
+      # es toquen mai: a GitHub cada tag és un release independent i els
+      # de versions velles queden disponibles per a qui se les vulgui
+      # descarregar.
+      - name: Build versions.json (index of ALL releases)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api repos/${{ github.repository }}/releases \
+            --paginate \
+            --jq 'map(select(.draft==false) | {
+              tag: .tag_name,
+              name: .name,
+              date: .published_at,
+              latest: .latest,
+              assets: [.assets[] | {name: .name, url: .browser_download_url, size: .size}]
+            }) | sort_by(.tag) | {updated: now|todate, versions: .}' > artifacts/versions.json
+          cat artifacts/versions.json | head -c 600; echo
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -150,8 +173,26 @@ jobs:
             artifacts/**/*.rpm
             artifacts/**/*.AppImage
             artifacts/**/*.AppImage.tar.gz
+            artifacts/versions.json
           generate_release_notes: true
+          # Cos del release: capçalera de novetats + on són les versions
+          # velles. generate_release_notes hi afegeix sota la llista de
+          # commits/PR des de l'últim tag.
+          body: |
+            ## NoOrbit 0.6.0 — novetats
+
+            - **Totes les IAs naveguen soles**: directrius `NB|OBRIR|`, `NB|LLEGIR|`, `NB|PREGUNTA_IA|`… al xat, executades per NoOrbit al navegador intern — sense cap botó i demanant permís a l'usuari abans de preguntar a una IA web.
+            - **Codi aprofitable**: si una IA web o una pàgina retorna codi, s'extreu en blocs (amb el llenguatge) i la IA local l'integra al projecte com a fitxers reals (`@file:` + automaterialització).
+            - **Imatges al xat**: es mostren, es poden copiar al porta-retalls i adjuntar/enganxar (⌘V) com a entrada dels models amb visió.
+            - **Catàleg d'IAs** (menú IA): mida aproximada de cada model abans de descarregar, censura, visió, generació d'imatges i de vídeo.
+            - **Venice i proveïdors robustos**: claus normalitzades (espais/barres/URL), model `venice-uncensored`, errors 401/404/429 explicats i migració automàtica de la configuració vella.
+            - **Generació i manipulació d'imatges** (ComfyUI local o API en línia amb la teua clau) segons la RAM disponible.
+
+            Les **versions anteriors** segueixen disponibles per descarregar a https://github.com/jpuigbert/noorbit/releases — i l'índex complet de versions i assets és el fitxer adjunt `versions.json`.
           draft: false
           prerelease: false
+          # La versió nova passa a ser la «Latest» sense esborrar res: els
+          # tags vells conserven els seus releases i assets intactos.
+          make_latest: "true"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

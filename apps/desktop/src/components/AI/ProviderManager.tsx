@@ -38,12 +38,27 @@ const PRESETS: { key: string; label: string; data: Partial<ProviderInput> }[] = 
     data: { name: "Ollama Cloud", baseUrl: "https://ollama.com/v1", model: "gpt-oss:20b", kind: "openai", auth: "bearer" },
   },
   {
-    // Venice AI: API compatible amb OpenAI, inferència «sense filtres» i
-    // zero retenció. NO queda configurada fins que l'usuari hi enganxa el
-    // seu propi token i desa — només és una opció d'un sol clic.
+    // Venice AI: API compatible amb OpenAI (documentació oficial:
+    // https://api.venice.ai/api/v1), inferència «sense filtres» i zero
+    // retenció. La clau es crea al compte (Setup › API Keys) i comença per
+    // «ven-». NO queda configurada fins que l'usuari hi enganxa el token.
     key: "venice",
     label: "Venice AI",
-    data: { name: "Venice AI", baseUrl: "https://api.venice.ai/api/v1", model: "qwen3-coder", kind: "openai", auth: "bearer" },
+    data: { name: "Venice AI", baseUrl: "https://api.venice.ai/api/v1", model: "venice-uncensored", kind: "openai", auth: "bearer" },
+  },
+  {
+    // DeepSeek: API compatible amb OpenAI. No queda configurada fins que
+    // l'usuari hi enganxe el seu token (creat al seu compte de DeepSeek).
+    key: "deepseek",
+    label: "DeepSeek",
+    data: { name: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-chat", kind: "openai", auth: "bearer" },
+  },
+  {
+    // Perplexity: API oficial (compatible amb OpenAI) de cerca web amb
+    // citacions. Només funciona si l'usuari registra el seu propi token.
+    key: "perplexity",
+    label: "Perplexity",
+    data: { name: "Perplexity", baseUrl: "https://api.perplexity.ai", model: "sonar", kind: "openai", auth: "bearer" },
   },
 ];
 

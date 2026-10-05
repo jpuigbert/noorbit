@@ -33,6 +33,19 @@ export interface ChatMessage {
   elapsedMs?: number | null;
   at: number;
   error?: boolean;
+  /// Rutes absolutes d'imatges adjuntes o generades (es mostren al xat i
+  /// es poden copiar; els models amb visió d'Ollama les reben com a entrada).
+  images?: string[];
+}
+
+/// Extreu les rutes absolutes d'imatge (png/jpg/webp/gif/bmp) que apareixen
+/// en un text: serveix perquè la IA (i l'usuari) vega les imatges que el
+/// backend genera i desa a disc sense haver d'afegir cap format nou.
+export function extractChatImagePaths(text: string): string[] {
+  const re =
+    /(\/[^\s"'`()<>]+?\.(?:png|jpe?g|webp|gif|bmp))|(?:[A-Za-z]:\\E[^\s"'`<>]+?\.(?:png|jpe?g|webp|gif|bmp))/gi;
+  const found = text.match(re) ?? [];
+  return Array.from(new Set(found));
 }
 
 /// Torn de conversa que s'envia al backend perquè la IA (o un FORK) no perda
@@ -654,7 +667,7 @@ interface AgentState {
   quick: (prompt: string, id?: string) => Promise<string | null>;
   /// Acció principal del xat: enruta a l'expert actiu o a l'agent de text,
   /// i processa la cua de missatges pendents d'AQUELL xat al acabar.
-  send: (prompt: string, id?: string) => Promise<string | null>;
+  send: (prompt: string, id?: string, images?: string[]) => Promise<string | null>;
   enqueue: (prompt: string, id?: string) => void;
   dequeue: (index: number, id?: string) => void;
   apply: (target: ApplyTarget, prompt: string, id?: string) => Promise<string | null>;
@@ -667,8 +680,12 @@ interface AgentState {
   /// A més d'acumular-lo al xat, materialitza EN VIU els fitxers ja completes.
   appendStream: (sessionId: string, chunk: string) => void;
   buildContext: (id?: string, limit?: number) => Promise<string>;
-  beginTurn: (id: string, text: string) => void;
+  beginTurn: (id: string, text: string, images?: string[]) => void;
   finalizeTurn: (id: string) => void;
+  /// Afegeix al xat un missatge sense preguntar a cap model: notes del propi
+  /// NoOrbit i respostes obtingudes del xat web d'una altra IA (consulta
+  /// manual amb el compte de l'usuari — l'origen sempre queda etiquetat).
+  addNote: (text: string, opts?: { role?: "user" | "assistant"; images?: string[]; id?: string }) => void;
   clearChat: (id?: string) => void;
   /// Atura la generació d'un xat (o de tots, si no se n'indica cap).
   stop: (id?: string) => Promise<void>;
@@ -1547,7 +1564,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
     // resol ell (rol + model propis); si no, l'agent de text. Cada xat porta
     // la seva IA (proveïdor/model propis) i el seu fil (history): així dos
     // xats poden treballar en paral·lel i un fork continua la feina.
-    send: async (prompt, id) => {
+    send: async (prompt, id, images) => {
       const sid = target(id);
       const sess = sessOf(sid);
       const text = prompt.trim();
@@ -1555,7 +1572,10 @@ export const useAgentStore = create<AgentState>((set, get) => {
       // El fil precedent viatja amb cada missatge: el model sap què s'ha dit
       // (essencial per als forks i per continuar el treball).
       const history = toHistory(sess.messages);
-      get().beginTurn(sid, text);
+      // Imatges adjuntes: les passades per la UI + les rutes que aparegin al
+      // text (una ruta .png al prompt és tractada com a imatge per llegir).
+      const imgs = Array.from(new Set([...(images ?? []), ...extractChatImagePaths(text)]));
+      get().beginTurn(sid, text, imgs);
 
       let msg = text;
       let sys: string | null = null;
@@ -1688,6 +1708,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
               provider: sess.provider,
               model: sess.model,
               history: built.h,
+              images: imgs.length > 0 ? imgs : undefined,
             });
           });
           const thinking = await fetchThinking(sid);
@@ -1734,7 +1755,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
       return sessOf(sid)?.lastResult ?? null;
     },
 
-    beginTurn: (id, text) => {
+    beginTurn: (id, text, images) => {
       // Torn nou: llença l'estat de la materialització en viu (mapa de
       // fitxers ja escrits i reprogramacions pendents del torn anterior).
       resetLiveMaterialize();
@@ -1743,7 +1764,15 @@ export const useAgentStore = create<AgentState>((set, get) => {
           x.id === id
             ? {
                 ...x,
-                messages: [...x.messages, { role: "user" as const, text, at: Date.now() }],
+                messages: [
+                  ...x.messages,
+                  {
+                    role: "user" as const,
+                    text,
+                    at: Date.now(),
+                    ...(images && images.length > 0 ? { images } : {}),
+                  },
+                ],
                 // El primer missatge dona nom al xat (per a la barra de xats).
                 title: x.title || text.slice(0, 48),
                 timeline: [],
@@ -1785,6 +1814,31 @@ export const useAgentStore = create<AgentState>((set, get) => {
             : x
         ),
       }));
+    },
+
+    addNote: (text, opts) => {
+      const sid = target(opts?.id);
+      const role = opts?.role ?? "assistant";
+      set((s) => ({
+        sessions: s.sessions.map((x) =>
+          x.id === sid
+            ? {
+                ...x,
+                messages: [
+                  ...x.messages,
+                  {
+                    role,
+                    text,
+                    at: Date.now(),
+                    ...(opts?.images && opts.images.length > 0 ? { images: opts.images } : {}),
+                  },
+                ],
+                title: x.title || text.slice(0, 48),
+              }
+            : x
+        ),
+      }));
+      get().persistChats();
     },
 
     clearChat: (id) => {

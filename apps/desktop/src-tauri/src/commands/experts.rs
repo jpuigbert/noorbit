@@ -99,6 +99,7 @@ pub async fn expert_run(
         provider: None,
         model: expert.model.clone(),
         history: history.unwrap_or_default(),
+        images: Vec::new(),
     };
     let sid = session.unwrap_or_else(|| crate::ai::DEFAULT_SESSION.to_string());
     crate::ai::in_session(

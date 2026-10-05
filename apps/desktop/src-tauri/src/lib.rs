@@ -5,10 +5,13 @@ pub mod ai;
 pub mod api;
 pub mod autonomous;
 pub mod blender;
+pub mod browser;
 pub mod commands;
 pub mod computer;
 pub mod config;
 pub mod experts;
+pub mod external_orchestrator;
+pub mod imgen;
 pub mod lsp;
 pub mod mobile;
 pub mod plugins;
@@ -158,6 +161,34 @@ pub fn run() {
             commands::ai::ollama_set_model,
             commands::ai::ollama_active_model,
             commands::ai::ai_last_thinking,
+            // Catàleg d'IAs: censura, visió, generació d'imatges/vídeo i mida
+            // aproximada, ABANS de descarregar res
+            commands::ai::ia_catalog,
+            commands::image::image_preview_base64,
+            // Orquestració d'IAs externes (rescat amb origen etiquetat)
+            commands::ai::external_ias_discover,
+            commands::ai::delegate_external_ia,
+            // Generació i manipulació d'imatges (local si hi ha recursos,
+            // online només amb els proveïdors i tokens registrats per l'usuari)
+            commands::image::image_generate,
+            commands::image::image_edit,
+            commands::image::image_transform,
+            commands::image::image_import,
+            // Navegador web intern (quan la IA ho necessiti: llegir pàgines
+            // renderitzades; les accions humanes es mostren, mai se supla ningú)
+            commands::browser::browser_open,
+            commands::browser::browser_navigate,
+            commands::browser::browser_status,
+            commands::browser::browser_set_visible,
+            commands::browser::browser_close,
+            commands::browser::browser_extract,
+            commands::browser::browser_eval,
+            // Consulta MANUAL a IAs web (sense token: l'usuari logueja el seu
+            // compte al navegador intern i la IA llegeix el que hi ha en pantalla)
+            commands::browser::web_ia_list,
+            commands::browser::web_ia_open,
+            commands::browser::web_ia_status,
+            commands::browser::web_ia_ask,
             // Proveïdors d'IA en línia (tokens)
             commands::api::ai_provider_list,
             commands::api::ai_provider_add,

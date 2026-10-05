@@ -87,6 +87,7 @@ export const actions: Record<string, () => void | Promise<void>> = {
 
   // IA (pròpi de NoOrbit, com el xat de Qoder)
   "ai.models": () => useUIStore.getState().setShowModelManager(true),
+  "ai.catalog": () => useUIStore.getState().setShowIaCatalog(true),
   "ai.plugins": () => useUIStore.getState().setShowPlugins(true),
   "ai.agent": () => usePreviewStore.getState().setRightTab("agent"),
   "ai.computer": () => usePreviewStore.getState().setRightTab("computer"),
@@ -155,6 +156,7 @@ export const commandList: CommandDef[] = [
   { id: "terminal.toggle", labelKey: "menu.toggleTerminal", kbd: "⌘J" },
   { id: "git.open", labelKey: "menu.gitPanel" },
   { id: "ai.models", labelKey: "ai.manager" },
+  { id: "ai.catalog", labelKey: "ai.catalog" },
   { id: "ai.plugins", labelKey: "plugins.title" },
   { id: "ai.agent", labelKey: "rightPanel.agent" },
   { id: "ai.computer", labelKey: "rightPanel.computer" },

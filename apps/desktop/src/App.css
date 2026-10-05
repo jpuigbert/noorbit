@@ -2418,3 +2418,127 @@
 .settings-msg.err {
   color: #f87171;
 }
+
+/* ── Imatges al xat: previsualització, còpia i adjunts ─────────────── */
+.chat-imgs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0;
+}
+.chat-img {
+  margin: 0;
+  max-width: 320px;
+  border: 1px solid var(--border, #2a2a35);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-1, #14141a);
+}
+.chat-img img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 260px;
+  object-fit: contain;
+  cursor: zoom-in;
+}
+.chat-img-broken {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  color: var(--text-2, #8a8a99);
+  font-size: 11px;
+}
+.chat-img-actions {
+  display: flex;
+  gap: 4px;
+  padding: 4px 6px;
+  border-top: 1px solid var(--border, #2a2a35);
+}
+/* Miniatures d'adjunts pendents, sobre l'entrada de text. */
+.ap-attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 0;
+}
+.ap-thumb {
+  position: relative;
+  display: inline-block;
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--border, #2a2a35);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-1, #14141a);
+}
+.ap-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.ap-thumb-x {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  cursor: pointer;
+}
+.ap-attach-err {
+  font-size: 11px;
+  color: var(--error, #f87171);
+}
+
+/* ── Catàleg d'IAs (mida, censura, visió, imatges, vídeo) ──────────── */
+.ic-modal {
+  width: min(880px, 92vw);
+}
+.ic-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+.ic-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.ic-table th,
+.ic-table td {
+  padding: 5px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border, #2a2a35);
+  white-space: nowrap;
+}
+.ic-table th {
+  color: var(--text-2, #8a8a99);
+  font-weight: 500;
+  position: sticky;
+  top: 0;
+  background: var(--bg-1, #14141a);
+}
+.ic-table td.ic-name {
+  white-space: normal;
+  font-weight: 600;
+}
+.ic-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.ic-yes {
+  color: var(--success, #4ade80);
+  font-weight: 700;
+}
+.ic-no {
+  color: var(--text-3, #5a5a68);
+}

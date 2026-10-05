@@ -55,6 +55,29 @@ fn default_true() -> bool {
     true
 }
 
+/// Normalitza una URL base d'API compatible amb OpenAI. L'usuari sol copiar
+/// la URL de la documentació del servei, i aquí és on moren les claus que
+/// «no funcionen»: barra final, la ruta «/chat/completions» ja inclosa, o
+/// el prefix de versió oblidat. Amb Venice: «https://api.venice.ai» (sense
+/// «/api/v1») donaria 404 i pareceria que la clau és dolenta.
+pub fn normalize_base(url: &str) -> String {
+    let mut b = url.trim().trim_end_matches('/').to_string();
+    // Si l'usuari ha enganxat l'endpoint sencer, en quedem la base.
+    for suffix in ["/chat/completions", "/completions", "/responses"] {
+        if b.to_lowercase().ends_with(suffix) {
+            b.truncate(b.len() - suffix.len());
+            b = b.trim_end_matches('/').to_string();
+        }
+    }
+    let low = b.to_lowercase();
+    if low.contains("api.venice.ai") && !low.contains("/api/v1") {
+        b.push_str("/api/v1");
+    } else if low.contains("api.openai.com") && !b.split("//").nth(1).map(|r| r.contains('/')).unwrap_or(true) {
+        b.push_str("/v1");
+    }
+    b
+}
+
 /// Versió sense el secret, per enviar a la UI (token emmascarat).
 #[derive(Debug, Clone, Serialize)]
 pub struct AiProviderPublic {
@@ -80,22 +103,40 @@ impl AiProvider {
             kind: self.kind.clone(),
             auth: self.auth,
             header_name: self.header_name.clone(),
-            has_token: !self.token.is_empty(),
+            has_token: self.has_token(),
             token_masked: mask(&self.token),
             enabled: self.enabled,
         }
     }
 
-    fn apply_auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    /// Base normalitzada per a qualsevol endpoint d'aquest proveïdor.
+    pub fn base(&self) -> String {
+        normalize_base(&self.base_url)
+    }
+
+    /// Clau neta d'espais (els quals solen vindre d'un copiat de la web).
+    pub fn token_clean(&self) -> &str {
+        self.token.trim()
+    }
+
+    /// Té una credencial utilitzable? (amb espais en blanc NO compta).
+    pub fn has_token(&self) -> bool {
+        matches!(self.auth, AuthScheme::None) || !self.token_clean().is_empty()
+    }
+
+    /// Aplica l'esquema d'autenticació del proveïdor a una petició. Públic
+    /// perquè el mòdul `imgen` pugui usar la mateixa credencial per a l'API
+    /// d'imatges (OpenAI-compatible) sense reimplementar l'autenticació.
+    pub fn apply_auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         match self.auth {
-            AuthScheme::Bearer => req.header("Authorization", format!("Bearer {}", self.token)),
+            AuthScheme::Bearer => req.header("Authorization", format!("Bearer {}", self.token_clean())),
             AuthScheme::ApiKeyHeader => {
                 let name = if self.header_name.is_empty() {
                     "x-api-key".to_string()
                 } else {
                     self.header_name.clone()
                 };
-                req.header(name, self.token.clone())
+                req.header(name, self.token_clean().to_string())
             }
             AuthScheme::None => req,
         }
@@ -146,7 +187,10 @@ impl ApiManager {
                 id: "venice".into(),
                 name: "Venice AI".into(),
                 base_url: "https://api.venice.ai/api/v1".into(),
-                model: "qwen3-coder".into(),
+                // Model oficial de la documentació de Venice («venice-
+                // uncensored»): abans posàvem «qwen3-coder» i, si el servei
+                // l'ha reanomenat, l'error 400 semblava «la clau no funciona».
+                model: "venice-uncensored".into(),
                 kind: "openai".into(),
                 auth: AuthScheme::Bearer,
                 header_name: String::new(),
@@ -154,6 +198,27 @@ impl ApiManager {
                 enabled: true,
             });
             seeded = true;
+        }
+        // Migració suau del que ja estava desenat: URLs normals (espais,
+        // barres, /api/v1 que faltava) i el model Venice per defecte antic.
+        // Així una configuració creationada amb la versió prèvia torna a
+        // funcionar sense que l'usuari haja de tocar res.
+        let mut migrated = false;
+        for p in providers.iter_mut() {
+            let nb = normalize_base(&p.base_url);
+            if nb != p.base_url {
+                p.base_url = nb;
+                migrated = true;
+            }
+            if p.id == "venice" && p.model.trim() == "qwen3-coder" {
+                p.model = "venice-uncensored".into();
+                migrated = true;
+            }
+            let tk = p.token.trim().to_string();
+            if tk != p.token {
+                p.token = tk;
+                migrated = true;
+            }
         }
         let mgr = Self {
             path,
@@ -163,8 +228,9 @@ impl ApiManager {
                 .build()
                 .unwrap_or_default(),
         };
-        // només desem al disc si acabem de crear el lloc per a Venice.
-        if seeded {
+        // només desem al disc si hem canviat alguna cosa (lloc nou per a
+        // Venice o migració d'entrades existents).
+        if seeded || migrated {
             let _ = mgr.save();
         }
         mgr
@@ -191,6 +257,12 @@ impl ApiManager {
         if item.id.is_empty() {
             item.id = format!("prov_{}", std::time::UNIX_EPOCH.elapsed()?.as_millis());
         }
+        // Neteja la configuració abans de desenar-la: una URL o una clau
+        // copiades de la documentació porten espais i barres de sobra.
+        item.name = item.name.trim().to_string();
+        item.base_url = normalize_base(&item.base_url);
+        item.model = item.model.trim().to_string();
+        item.token = item.token.trim().to_string();
         if item.kind.trim().is_empty() {
             item.kind = "openai".into();
         }
@@ -220,13 +292,13 @@ impl ApiManager {
     ) -> Result<AiProviderPublic> {
         let item = self.find(id)?;
         if let Some(v) = name {
-            item.name = v;
+            item.name = v.trim().to_string();
         }
         if let Some(v) = base_url {
-            item.base_url = v;
+            item.base_url = normalize_base(&v);
         }
         if let Some(v) = model {
-            item.model = v;
+            item.model = v.trim().to_string();
         }
         if let Some(v) = kind {
             item.kind = v;
@@ -235,10 +307,10 @@ impl ApiManager {
             item.auth = v;
         }
         if let Some(v) = header_name {
-            item.header_name = v;
+            item.header_name = v.trim().to_string();
         }
         if let Some(v) = token {
-            item.token = v;
+            item.token = v.trim().to_string();
         }
         if let Some(v) = enabled {
             item.enabled = v;
@@ -266,8 +338,47 @@ impl ApiManager {
         if !item.enabled {
             return Err(anyhow!("El proveïdor està desactivat"));
         }
+        // Millor un missatge clar ací que un 401 incomprensible del servei:
+        // «Bearer » amb la clau buida és precisament el que fa que sembla
+        // que «les claus no funcionen». Els servidors LOCALS (LM Studio,
+        // llama.cpp…) no demanen cap clau, així que ells sí que passen.
+        if !item.has_token() {
+            let low = item.base().to_lowercase();
+            let local = low.contains("localhost")
+                || low.contains("127.0.0.1")
+                || low.contains("0.0.0.0")
+                || low.contains("::1");
+            if !local {
+                return Err(anyhow!(
+                    "Aquest proveïdor no té cap clau API guardada. Obre el menú \
+                     «Proveïdors d'IA», fes clic a llapis (edita) sobre \"{}\" i \
+                     enganxa la clau que t'ha donat el servei (a Venice comença \
+                     per «ven-»). La clau no surt mai del teu ordinador.",
+                    item.name
+                ));
+            }
+        }
         Ok((item, self.http.clone()))
     }
+}
+
+/// Tradueix un error HTTP del servei a una explicació accions: la majoria de
+/// «la meua clau no funciona» són en realitat un 401 (clau mal enganxada o
+/// sense crèdit) o un 404 (URL base / model incorrectes).
+fn http_error(status: reqwest::StatusCode, body: &str) -> anyhow::Error {
+    let hint = match status.as_u16() {
+        401 | 403 => " La clau no s'ha acceptat (401/403): comprova que l'has \
+             enganxada SENCERA i sense espais (les de Venice comencen per \
+             «ven-»), que és del mateix servei i que el compte té crèdit o \
+             pla actiu.".to_string(),
+        404 => " No s'ha trobat res a eixa URL (404): la URL base ha d'incloure \
+             la versió (a Venice, https://api.venice.ai/api/v1) i el model \
+             ha d'existir al servei (p. ex. «venice-uncensored»).".to_string(),
+        429 => " El servei respon 429: massa peticions seguides o saldo \
+             esgotat.".to_string(),
+        _ => String::new(),
+    };
+    anyhow!("Error {}: {}{}", status, body, hint)
 }
 
 /// Xat contra un proveïdor remot. Suporta dos formats:
@@ -378,7 +489,7 @@ async fn stream_sse(
         .map(|(role, content)| serde_json::json!({ "role": role, "content": content }))
         .collect();
 
-    let base = provider.base_url.trim_end_matches('/');
+    let base = provider.base();
     let (_url, req) = if provider.is_anthropic() {
         let url = if base.ends_with("/v1") {
             format!("{}/messages", base)
@@ -395,7 +506,7 @@ async fn stream_sse(
         });
         let req = http
             .post(&url)
-            .header("x-api-key", provider.token.clone())
+            .header("x-api-key", provider.token_clean())
             .header("anthropic-version", "2023-06-01")
             .header("Accept", "text/event-stream")
             .json(&body);
@@ -426,7 +537,7 @@ async fn stream_sse(
     let status = resp.status();
     if !status.is_success() {
         let text = resp.text().await.unwrap_or_default();
-        return Err(anyhow!("Error {}: {}", status, text));
+        return Err(http_error(status, &text));
     }
 
     use futures::StreamExt;
@@ -507,7 +618,7 @@ async fn chat_openai(
     conversation: &[(String, String)],
     system: Option<&str>,
 ) -> Result<(String, Option<String>)> {
-    let base = provider.base_url.trim_end_matches('/');
+    let base = provider.base();
     let url = format!("{}/chat/completions", base);
 
     let mut messages = Vec::new();
@@ -539,7 +650,7 @@ async fn chat_openai(
     let status = resp.status();
     if !status.is_success() {
         let text = resp.text().await.unwrap_or_default();
-        return Err(anyhow!("Error {}: {}", status, text));
+        return Err(http_error(status, &text));
     }
     let parsed: serde_json::Value = resp.json().await?;
     let message = parsed
@@ -573,7 +684,7 @@ async fn chat_anthropic(
     conversation: &[(String, String)],
     system: Option<&str>,
 ) -> Result<(String, Option<String>)> {
-    let base = provider.base_url.trim_end_matches('/');
+    let base = provider.base();
     // Accepta tant la URL base (`https://api.anthropic.com`) com la versió
     // ja amb `/v1`; si no porta `/v1`, l'afegim.
     let url = if base.ends_with("/v1") {
@@ -597,7 +708,7 @@ async fn chat_anthropic(
 
     let req = http
         .post(&url)
-        .header("x-api-key", provider.token.clone())
+        .header("x-api-key", provider.token_clean())
         .header("anthropic-version", "2023-06-01")
         .header("Accept", "application/json")
         .json(&body);
@@ -609,7 +720,7 @@ async fn chat_anthropic(
     let status = resp.status();
     if !status.is_success() {
         let text = resp.text().await.unwrap_or_default();
-        return Err(anyhow!("Error {}: {}", status, text));
+        return Err(http_error(status, &text));
     }
     let parsed: serde_json::Value = resp.json().await?;
     let blocks = parsed.get("content").and_then(|c| c.as_array());

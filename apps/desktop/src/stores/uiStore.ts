@@ -30,6 +30,7 @@ interface UIState {
   rightPanelOpen: boolean;
   chatOpen: boolean;
   showModelManager: boolean;
+  showIaCatalog: boolean;
   showSettings: boolean;
   showHelp: boolean;
   showPlugins: boolean;
@@ -56,6 +57,7 @@ interface UIState {
   toggleChat: () => void;
   setChatOpen: (open: boolean) => void;
   setShowModelManager: (v: boolean) => void;
+  setShowIaCatalog: (v: boolean) => void;
   setShowSettings: (v: boolean) => void;
   setShowPlugins: (v: boolean) => void;
   setShowHelp: (v: boolean) => void;
@@ -98,6 +100,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   rightPanelOpen: true,
   chatOpen: true,
   showModelManager: false,
+  showIaCatalog: false,
   showSettings: false,
   showPlugins: false,
   showHelp: false,
@@ -119,6 +122,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   toggleChat: () => set({ chatOpen: !get().chatOpen }),
   setChatOpen: (open) => set({ chatOpen: open }),
   setShowModelManager: (v) => set({ showModelManager: v }),
+  setShowIaCatalog: (v) => set({ showIaCatalog: v }),
   setShowSettings: (v) => set({ showSettings: v }),
   setShowPlugins: (v) => set({ showPlugins: v }),
   setShowHelp: (v) => set({ showHelp: v }),

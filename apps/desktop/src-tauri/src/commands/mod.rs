@@ -1,11 +1,13 @@
 pub mod agent;
 pub mod ai;
 pub mod api;
+pub mod browser;
 pub mod computer;
 pub mod config;
 pub mod experts;
 pub mod fs;
 pub mod git;
+pub mod image;
 pub mod plugins;
 pub mod preview;
 pub mod skills;

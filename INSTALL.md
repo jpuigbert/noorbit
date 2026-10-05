@@ -49,7 +49,7 @@ pnpm app:build:mac:arm     # només aarch64 (Apple Silicon)
 
 ```
 apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/
-├── dmg/NoOrbit_0.5.0_universal.dmg   ← comparteix això
+├── dmg/NoOrbit_0.6.0_universal.dmg   ← comparteix això
 └── macos/NoOrbit.app
 ```
 
@@ -91,15 +91,15 @@ pnpm app:build:deb          # només .deb
 ### Resultat
 
 ```
-apps/desktop/src-tauri/target/release/bundle/deb/no-orbit_0.5.0_amd64.deb
+apps/desktop/src-tauri/target/release/bundle/deb/NoOrbit_0.6.0_amd64.deb
 ```
 
 ### Instal·lar (usuari final)
 
 ```bash
-sudo apt install ./no-orbit_0.5.0_amd64.deb
+sudo apt install ./NoOrbit_0.6.0_amd64.deb
 # o bé, després d'haver-lo descarregat:
-sudo dpkg -i no-orbit_0.5.0_amd64.deb && sudo apt -f install
+sudo dpkg -i NoOrbit_0.6.0_amd64.deb && sudo apt -f install
 ```
 
 Executa'l amb `no-orbit` o des del menú d'aplicacions.
@@ -131,8 +131,8 @@ pnpm app:build:win
 
 ```
 apps\desktop\src-tauri\target\release\bundle\
-├── nsis\NoOrbit_0.5.0_x64-setup.exe   ← instal·lador clàssic (recomanat)
-└── msi\NoOrbit_0.5.0_x64_en-US.msi     ← paquet per a desplegaments empresarials
+├── nsis\NoOrbit_0.6.0_x64-setup.exe   ← instal·lador clàssic (recomanat)
+└── msi\NoOrbit_0.6.0_x64_en-US.msi     ← paquet per a desplegaments empresarials
 ```
 
 ### Instal·lar (usuari final)

@@ -110,6 +110,7 @@ export default function MenuBar() {
     ],
     ai: [
       { label: t("ai.manager"), action: act("ai.models") },
+      { label: t("ai.catalog"), action: act("ai.catalog") },
       { label: t("plugins.title"), action: act("ai.plugins") },
       { sep: true, label: "" },
       { label: t("rightPanel.agent"), action: act("ai.agent") },

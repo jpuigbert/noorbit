@@ -317,6 +317,7 @@
     "model": "Model",
     "models": "Models",
     "manager": "Gestor de models",
+    "catalog": "Catàleg d'IAs",
     "pull": "Baixa",
     "pulling": "Baixant…",
     "delete": "Elimina",

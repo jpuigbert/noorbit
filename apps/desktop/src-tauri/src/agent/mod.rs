@@ -304,6 +304,40 @@ impl AgentOrchestrator {
         Some(text.chars().take(4000).collect())
     }
 
+    /// Llegeix una pàgina amb el NAVEGADOR INTERN: l'obre amagada, l'espera
+    /// i en torna el text ja renderitzat (JavaScript inclòs). Si la pàgina
+    /// demana una acció humana —iniciar sessió, captcha— la finestra es fa
+    /// visible perquè la faça l'usuari amb el SEU compte: la IA no supla
+    /// identitats ni esquiva proteccions.
+    async fn browser_read(&self, app: &tauri::AppHandle, url: &str) -> Result<String> {
+        crate::browser::open(app, url, true)?;
+        let mut last = String::new();
+        for _ in 0..3 {
+            match crate::browser::extract_text(app, std::time::Duration::from_secs(8)).await {
+                Ok(ex) => {
+                    if crate::browser::needs_human_action(&ex.text) {
+                        crate::browser::set_visible(app, true).ok();
+                        return Ok(format!(
+                            "(La pàgina {} sembla demanar una acció humana —sessió o \
+                             captcha— i ja la tens en pantalla perquè la completes. \
+                             Entre temps, aquest és el text visible:)\n{}",
+                            url, ex.text
+                        ));
+                    }
+                    if ex.text.chars().count() > 80 {
+                        return Ok(ex.text);
+                    }
+                    last = ex.text;
+                }
+                Err(e) => last = e.to_string(),
+            }
+        }
+        Err(anyhow!(
+            "El navegador intern no n'ha extret text: {}",
+            last
+        ))
+    }
+
     /// Mode «pensament profund»: busca informació fresca a internet, consulta
     /// altres IAs en línia i demana al model (local o actiu) que sintetitzi
     /// una resposta final fonamentada. Cada fase s'emet com a progrés.
@@ -355,10 +389,37 @@ impl AgentOrchestrator {
                 }
                 ctx.push('\n');
             }
-            // 2) Llegir la primera pàgina rellevant
+            // 2) Llegir la primera pàgina rellevant. Si el text pla (HTTP) no
+            //    bastona —pàgina amb JavaScript, buida o blocada—, la IA obre
+            //    el NAVEGADOR INTERN i en llegeix el contingut renderitzat; si
+            //    la pàgina demana una acció humana (sessió, captcha), la
+            //    finestra es fa visible perquè la faça l'usuari.
             if let Some((_, first_url, _)) = results.iter().find(|(_, u, _)| !u.is_empty()) {
                 progress(app, "Llegint pàgina", &format!("Obrint {}", first_url), true);
-                if let Some(page) = self.web_fetch(first_url).await {
+                let page = match self.web_fetch(first_url).await {
+                    Some(p) if p.chars().count() > 200 => Some(p),
+                    partial => {
+                        progress(
+                            app,
+                            "Navegador intern",
+                            "La pàgina necessita JavaScript; l'obro al navegador intern per llegir-la renderitzada.",
+                            true,
+                        );
+                        match self.browser_read(app, first_url).await {
+                            Ok(tx) => Some(tx),
+                            Err(e) => {
+                                progress(
+                                    app,
+                                    "Navegador intern",
+                                    &format!("No he pogut llegir-la: {}", e),
+                                    false,
+                                );
+                                partial
+                            }
+                        }
+                    }
+                };
+                if let Some(page) = page {
                     ctx.push_str("\nCONTINGUT DE LA PÀGINA PRINCIPAL:\n");
                     ctx.push_str(&page.chars().take(2500).collect::<String>());
                     ctx.push('\n');
@@ -375,11 +436,29 @@ impl AgentOrchestrator {
         );
         let peers = ai.ask_peers(prompt, 3).await;
         if peers.is_empty() {
-            ctx.push_str("\n(Sense altres IAs en línia configurades amb clau.)\n");
+            // Sense cap token d'API existeix la via MANUAL i legal: el xat web
+            // de la IA triada, obert al navegador intern, on l'usuari entra amb
+            // el SEU compte. Cap botó: la mateixa IA escriu la directriu
+            // «NB|PREGUNTA_IA|…» i NoOrbit l'executa (menys automàtic en
+            // l'accedir al servei, del tot legítim en les credencials).
+            ctx.push_str(
+                "\n(Sense proveïdors en línia amb clau: consulta manual possible. \
+                 PREGUNTA a l'usuari quina IA web vols usar — DeepSeek, ChatGPT, \
+                 Claude, Gemini, Perplexity o Grok. Després, directament al xat, \
+                 escriu una línia «NB|PREGUNTA_IA|nom|la pregunta»: NoOrbit obrirà \
+                 el navegador intern, l'usuari hi posarà les seues credencials, i \
+                 la pregunta s'escriurà al xat web per a llegir-ne la resposta \
+                 visible en pantalla. Etiqueta sempre eixes respostes com a \
+                 «obtingudes del xat web de X amb el compte de l'usuari».)\n",
+            );
             progress(
                 app,
                 "Altres IAs",
-                "No hi ha proveïdors en línia actius; responc amb la cerca web i el meu coneixement.",
+                "No hi ha tokens configurats: via MANUAL disponible — digu'm quina \
+                 IA web vols usar (DeepSeek, ChatGPT, Claude, Gemini, Perplexity o \
+                 Grok) i escriuré la directriu «NB|PREGUNTA_IA|…» al xat: sense \
+                 cap botó, NoOrbit obrirà el navegador i preguntarà amb el teu \
+                 propi compte (les credencials les poses tu).",
                 false,
             );
         } else {
@@ -542,23 +621,27 @@ impl AgentOrchestrator {
                 Ok(AgentResult { text, files: vec![], steps })
             }
             Modality::Image => {
-                let backends = self.check_backends().await;
-                let comfy = backends.iter().any(|b| b.id == "comfyui" && b.available);
-                if !comfy {
-                    return Err(anyhow!(
-                        "Cal ComfyUI actiu a localhost:8188 per generar imatges."
-                    ));
+                // Generació real: primer ComfyUI local si la màquina té prou
+                // RAM; si no, els proveïdors en línia que l'usuari haja
+                // registrat amb token. Sense cap dels dos, l'error explica
+                // com activar-los (no fingim un èxit «pendent de cua»).
+                let mut opts = crate::imgen::GenOpts::default();
+                opts.prompt = request.prompt.clone();
+                match crate::imgen::generate(ai.remote_manager(), &opts).await {
+                    Ok(img) => {
+                        steps.push(AgentStep {
+                            label: img.backend.clone(),
+                            detail: format!("Imatge generada amb {}", img.model),
+                            ok: true,
+                        });
+                        let text = format!(
+                            "🖼️ Imatge generada (backend: {}, model: {}) i desada a {}",
+                            img.backend, img.model, img.path
+                        );
+                        Ok(AgentResult { text, files: vec![img.path], steps })
+                    }
+                    Err(e) => Err(e),
                 }
-                let text = format!(
-                    "🖼️ Petició d'imatge enviada a ComfyUI: {}",
-                    request.prompt
-                );
-                steps.push(AgentStep {
-                    label: "comfyui".into(),
-                    detail: "Generació d'imatge (pendent de cua)".into(),
-                    ok: true,
-                });
-                Ok(AgentResult { text, files: vec![], steps })
             }
             Modality::ThreeD => {
                 let system = "ETS L'AGENT 3D DE NOORBIT. Genera UN sol script Python \

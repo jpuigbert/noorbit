@@ -2,7 +2,9 @@
 
 use crate::api::{self, ApiManager};
 use crate::config::AppConfig;
+use crate::external_orchestrator::OrchestratorAgent;
 use anyhow::{anyhow, Result};
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -98,6 +100,11 @@ pub struct ChatOpts {
     pub model: Option<String>,
     #[serde(default)]
     pub history: Vec<HistoryTurn>,
+    /// Rutes d'imatges adjuntes al missatge (enganxades al xat). Només les
+    /// reben els models d'Ollama amb visió; els proveïdors remots continuen
+    /// veient el text (i la ruta, per si la IA vol descriure-la després).
+    #[serde(default)]
+    pub images: Vec<String>,
 }
 
 /// Estat propi de cada xat que pot treballar en paral·lel: bandera d'aturada,
@@ -267,6 +274,31 @@ struct ChatMessage {
     /// Raonament que alguns models (deepseek-r1, qwen3…) retornen a part.
     #[serde(default)]
     thinking: Option<String>,
+    /// Imatges en base64 (format Ollama) per a models amb visió.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    images: Option<Vec<String>>,
+}
+
+/// Ajusta les imatges adjuntades (rutes de fitxer) a l'últim missatge d'usuari,
+/// codificades en base64 —el format que Ollama fa servir per als models amb
+/// visió (llava, llama3.2-vision, gemma3, minicpm-v…). Si el model triat no
+/// té visió, Ollama ho retorna com a error i la UI el mostra tal qual.
+fn attach_images(messages: &mut Vec<ChatMessage>, paths: &[String]) {
+    if paths.is_empty() {
+        return;
+    }
+    let mut b64s: Vec<String> = Vec::new();
+    for p in paths {
+        if let Ok(bytes) = std::fs::read(p) {
+            b64s.push(base64::engine::general_purpose::STANDARD.encode(&bytes));
+        }
+    }
+    if b64s.is_empty() {
+        return;
+    }
+    if let Some(msg) = messages.iter_mut().rev().find(|m| m.role == "user") {
+        msg.images = Some(b64s);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -303,6 +335,11 @@ pub struct AiManager {
     /// fils i una finestra de context més xicoteta per no saturar la màquina
     /// mentre la tasca s'ha degradat a segon pla.
     background: Arc<AtomicBool>,
+    /// Orquestrador d'IAs externes: si la IA principal no resol la
+    /// tasca, s'intenta amb una altra IA local i, si no n'hi ha cap de
+    /// disponible, amb els proveïdors en línia oficials de l'usuari.
+    /// L'origen real de cada resposta delegada va etiquetat.
+    pub external: Arc<OrchestratorAgent>,
 }
 
 /// Enrotlla una futura de xat amb la cancel·lació del seu xat: si l'usuari
@@ -783,14 +820,25 @@ impl AiManager {
             remote: None,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             background: Arc::new(AtomicBool::new(false)),
+            external: Arc::new(OrchestratorAgent::new()),
         }
     }
 
     /// Crea un gestor amb accés als proveïdors remots registrats.
     pub fn with_remote(config: &AppConfig, remote: Arc<Mutex<ApiManager>>) -> Self {
         let mut mgr = Self::new(config);
-        mgr.remote = Some(remote);
+        mgr.remote = Some(remote.clone());
+        // L'orquestrador extern també els rep: si cap IA local resol, el bot
+        // de rescat en línia consulta els proveïdors oficials amb token.
+        mgr.external = Arc::new(OrchestratorAgent::with_remote(remote));
         mgr
+    }
+
+    /// Accés als proveïdors remots registrats (token de l'usuari). El mòdul
+    /// `imgen` els consulta per generar imatges online quan la màquina no té
+    /// prou recursos o ComfyUI no està disponible.
+    pub fn remote_manager(&self) -> Option<Arc<Mutex<ApiManager>>> {
+        self.remote.clone()
     }
 
     fn url(&self, path: &str) -> String {
@@ -1071,6 +1119,7 @@ impl AiManager {
             provider: None,
             model: model_override.map(|m| m.to_string()),
             history: Vec::new(),
+            images: Vec::new(),
         };
         self.chat_opts(prompt, system, &opts).await
     }
@@ -1106,7 +1155,16 @@ impl AiManager {
         match result {
             // Els errors ja cancel·lats es retornen nets; la resta es tradueixen.
             Err(e) if e.to_string() == CANCELLED_MSG => Err(e),
-            Err(e) => Err(anyhow!(friendly_error(&e.to_string()))),
+            Err(e) => {
+                // La IA principal no ha pogut: s'intenta amb una IA local
+                // externa o amb els proveïdors oficials de l'usuari. La
+                // resposta delegada conserva el seu origen (provider/model)
+                // en el tipus; ací el xat sense streaming només retorna text.
+                if let Ok(resp) = self.external.delegate(prompt, system).await {
+                    return Ok(resp.text);
+                }
+                Err(anyhow!(friendly_error(&e.to_string())))
+            }
             ok => ok,
         }
     }
@@ -1177,7 +1235,16 @@ impl AiManager {
                         return Ok(content);
                     }
                     Err(e) if e.to_string() == CANCELLED_MSG => return Err(e),
-                    Err(e) => return Err(anyhow!(friendly_error(&e.to_string()))),
+                    Err(e) => {
+                        // Fallida del proveïdor remot: última oportunitat abans
+                        // de mostrar l'error — delegar a una IA local externa.
+                        if let Some(resp) =
+                            self.external_fallback_stream(app, prompt, system, &ctl, &start).await
+                        {
+                            return Ok(resp);
+                        }
+                        return Err(anyhow!(friendly_error(&e.to_string())));
+                    }
                 }
             }
         }
@@ -1210,9 +1277,73 @@ impl AiManager {
         }
         match res {
             Err(e) if e.to_string() == CANCELLED_MSG => Err(e),
-            Err(e) => Err(anyhow!(friendly_error(&e.to_string()))),
+            Err(e) => {
+                // Ni remot ni local principal han resolt: es delega a una IA
+                // externa i la seua resposta arriba etiquetada amb el seu
+                // origen real.
+                if let Some(resp) =
+                    self.external_fallback_stream(app, prompt, system, &ctl, &start).await
+                {
+                    return Ok(resp);
+                }
+                Err(anyhow!(friendly_error(&e.to_string())))
+            }
             ok => ok,
         }
+    }
+
+    /// Bot de rescat extern: delega un torn fallit a una IA local externa o
+    /// a un proveïdor oficial amb token, i reemet la resposta amb els mateixos
+    /// events «ai://chunk» i «ai://process» que qualsevol generació, però
+    /// etiquetant-ne l'ORIGEN REAL (proveïdor i model que han respost):
+    /// la interfície mai indica que siga una generació interna de NoOrbit.
+    async fn external_fallback_stream(
+        &self,
+        app: &tauri::AppHandle,
+        prompt: &str,
+        system: Option<&str>,
+        ctl: &Arc<SessionCtl>,
+        start: &std::time::Instant,
+    ) -> Option<String> {
+        if ctl.is_cancelled() {
+            return None;
+        }
+        let resp = self.external.delegate(prompt, system).await.ok()?;
+        if resp.text.trim().is_empty() {
+            return None;
+        }
+        // Emet el text a trossets, amb el provider/model reals de l'origen.
+        let mut rest: &str = &resp.text;
+        while !rest.is_empty() {
+            let mut n = 96usize.min(rest.len());
+            while n > 0 && !rest.is_char_boundary(n) {
+                n -= 1;
+            }
+            let (head, tail) = rest.split_at(n.max(1));
+            ctl.chunk(app, head);
+            ctl.process(
+                app,
+                &resp.provider,
+                &resp.model,
+                "streaming",
+                head,
+                start.elapsed().as_millis() as u64,
+            );
+            rest = tail;
+            tokio::time::sleep(std::time::Duration::from_millis(8)).await;
+            if ctl.is_cancelled() {
+                break;
+            }
+        }
+        ctl.process(
+            app,
+            &resp.provider,
+            &resp.model,
+            "done",
+            "",
+            start.elapsed().as_millis() as u64,
+        );
+        Some(resp.text)
     }
 
     /// Streaming NDJSON contra Ollama (cos de `chat_stream`, sense la capa de
@@ -1234,14 +1365,16 @@ impl AiManager {
         let model = self.resolve_usable_model(model).await;
         // Conversa del xat: primer els torns ja digitats (si el missatge ve
         // d'un fork o d'una conversa llarga) i després el prompt actual.
-        let messages: Vec<ChatMessage> = conversation(&opts.history, prompt)
+        let mut messages: Vec<ChatMessage> = conversation(&opts.history, prompt)
             .into_iter()
             .map(|(role, content)| ChatMessage {
                 role,
                 content,
                 thinking: None,
+                images: None,
             })
             .collect();
+        attach_images(&mut messages, &opts.images);
         // El context que realment veu el model és tota la conversa, no només
         // l'últim missatge: la finestra de context s'ha de dimensionar per això.
         let prompt_chars = messages.iter().map(|m| m.content.chars().count()).sum();
@@ -1420,14 +1553,16 @@ impl AiManager {
         let model = self.resolve_usable_model(model).await;
         // Conversa del xat: primer els torns ja digitats (fork o conversa
         // llarga) i després el prompt actual.
-        let messages: Vec<ChatMessage> = conversation(&opts.history, prompt)
+        let mut messages: Vec<ChatMessage> = conversation(&opts.history, prompt)
             .into_iter()
             .map(|(role, content)| ChatMessage {
                 role,
                 content,
                 thinking: None,
+                images: None,
             })
             .collect();
+        attach_images(&mut messages, &opts.images);
         // El context que veu el model és tota la conversa, no només l'últim
         // missatge: la finestra de context s'ha de dimensionar per això.
         let prompt_chars = messages.iter().map(|m| m.content.chars().count()).sum();
@@ -1603,7 +1738,7 @@ impl AiManager {
                     name: format!("{} · {}", p.name, p.model),
                     kind: "text".into(),
                     active: active == p.id,
-                    available: p.enabled && !p.token.is_empty(),
+                    available: p.enabled && !p.token.trim().is_empty(),
                 })
                 .collect();
             out.extend(infos);
@@ -1623,7 +1758,7 @@ impl AiManager {
             guard
                 .providers
                 .iter()
-                .filter(|p| p.enabled && !p.token.is_empty())
+                .filter(|p| p.enabled && !p.token.trim().is_empty())
                 .take(max)
                 .map(|p| (p.id.clone(), p.name.clone(), p.model.clone()))
                 .collect()

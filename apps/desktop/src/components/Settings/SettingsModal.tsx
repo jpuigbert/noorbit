@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X, Globe, Info, SlidersHorizontal, Plug } from "lucide-react";
+import { getVersion } from "@tauri-apps/api/app";
 import { useT } from "../../i18n";
 import { useUIStore } from "../../stores/uiStore";
 import LanguagePanel from "../Language/LanguagePanel";
@@ -22,6 +23,11 @@ export default function SettingsModal() {
   const setTheme = useUIStore((s) => s.setTheme);
   const { t } = useT();
   const [tab, setTab] = useState<Tab>("general");
+  // Versió real de l'app (tauri.conf.json): ja no cal tocar-la en cada bump.
+  const [appVersion, setAppVersion] = useState("");
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => undefined);
+  }, []);
 
   const THEMES: { key: Parameters<typeof setTheme>[0]; label: string; swatch: string }[] = [
     { key: "dark", label: t("settings.themeDark"), swatch: "#121218" },
@@ -143,7 +149,7 @@ export default function SettingsModal() {
 
           {tab === "about" && (
             <div className="about-block">
-              <h3>{t("app.name")} v0.5.0</h3>
+              <h3>{t("app.name")} v{appVersion || "?"}</h3>
               <p>{t("app.tagline")}</p>
               <p className="lp-hint">
                 Editor creatiu amb IA local (Ollama), connectors, Blender i Unreal Engine 5.
