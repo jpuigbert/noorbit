@@ -437,7 +437,7 @@ async fn stream_sse(
     let label = provider.name.clone();
     let model = provider.model.clone();
 
-    loop {
+    'stream: loop {
         if ctl.is_cancelled() {
             return Err(anyhow!(crate::ai::CANCELLED_MSG));
         }
@@ -476,6 +476,18 @@ async fn stream_sse(
                 full.push_str(&tok);
                 ctl.chunk(app, &tok);
                 ctl.process(app, &label, &model, "streaming", &tok, ms);
+                // Bucle desbocat (model petit repetint la mateixa frase): tallar.
+                if crate::ai::runaway_repetition(&full) {
+                    ctl.process(
+                        app,
+                        &label,
+                        &model,
+                        "thinking",
+                        "S'ha detectat un bucle de repetició: la generació s'atura per a no bloquejar-se.",
+                        ms,
+                    );
+                    break 'stream;
+                }
             }
         }
     }

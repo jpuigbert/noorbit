@@ -7,6 +7,7 @@ import { useAIStore } from "../../stores/aiStore";
 import { useExpertStore } from "../../stores/expertStore";
 import { useProviderStore } from "../../stores/providerStore";
 import { usePreviewStore } from "../../stores/previewStore";
+import { useSystemStatsStore, memPercent, formatBytes } from "../../stores/systemStatsStore";
 import { CopyButton, SaveButton } from "../CopyButton";
 
 export default function AgentPanel() {
@@ -83,6 +84,13 @@ export default function AgentPanel() {
   const providers = useProviderStore((s) => s.providers);
   const loadProviders = useProviderStore((s) => s.load);
 
+  // RAM en temps real: es mostra junt al cronòmetre «Treballant…» perquè
+  // l'usuari veja si el model està omplint la memòria (causa de bucles/lentitud).
+  const mem = useSystemStatsStore((s) => s.mem);
+  useEffect(() => {
+    useSystemStatsStore.getState().start();
+  }, []);
+
   // No hi ha especialistes: anem al panell «Especialistes» i obrim directament
   // el formulari de creació en muntar-se.
   const goCreateExpert = () => {
@@ -134,6 +142,15 @@ export default function AgentPanel() {
     return () => clearInterval(id);
   }, [running]);
   const liveSeconds = startedAt ? Math.floor((Date.now() - startedAt) / 1000) : null;
+
+  // RAM en temps real per al cronòmetre: percentatge + detall «usada/total».
+  const ramPct = memPercent(mem);
+  const ramChip =
+    ramPct === null || !mem ? null : (
+      <span className="ap-ram" title={`RAM usada ${formatBytes(mem.used)} de ${formatBytes(mem.total)}`}>
+        · RAM {ramPct}%
+      </span>
+    );
 
   // El xat s'autodesplaça al final quan arriben missatges o passos nous.
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -320,29 +337,8 @@ export default function AgentPanel() {
             ))}
           </select>
         )}
-      </div>
-
-      {/* Selector de model GLOBAL d'Ollama: l'usen els xats que no el tenen
-          sobreescrit al seu barri d'IA. */}
-      <div className="ap-model-bar">
-        <Cpu size={13} className="ap-model-icon" />
-        <select
-          className="ap-model-select"
-          value={selectedModel ?? ""}
-          disabled={models.length === 0}
-          onChange={(e) => selectModel(e.target.value || null)}
-        >
-          {models.length === 0 && (
-            <option value="">
-              {ollamaRunning ? t("agent.noModels") : t("agent.ollamaOffline")}
-            </option>
-          )}
-          {models.map((m) => (
-            <option key={m.name} value={m.name}>
-              {m.name}
-            </option>
-          ))}
-        </select>
+        {/* Botons de gestió de models d'Ollama: recarregar la llista i baixar
+            un model nou. Formen part d'AQUEST ÚNIC selector d'IA del xat. */}
         <button
           className="icon-btn"
           title={t("common.refresh")}
@@ -697,12 +693,14 @@ export default function AgentPanel() {
                   <div className="stream-meta">
                     <RefreshCw size={11} className="spin" /> {t("agent.running")}
                     {liveSeconds !== null && ` · ${liveSeconds} s`}
+                    {ramChip}
                   </div>
                 </div>
               ) : (
                 <div className="chat-bubble assistant pending">
                   <RefreshCw size={12} className="spin" /> {t("agent.running")}
                   {liveSeconds !== null && ` · ${liveSeconds} s`}
+                  {ramChip}
                 </div>
               )}
             {timeline.length > 0 && (

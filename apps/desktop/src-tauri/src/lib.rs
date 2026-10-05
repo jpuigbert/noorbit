@@ -132,6 +132,7 @@ pub fn run() {
             commands::system::open_terminal,
             commands::system::reveal_in_finder,
             commands::system::system_total_memory,
+            commands::system::system_memory_status,
             // IA
             commands::ai::send_prompt,
             commands::ai::send_prompt_stream,

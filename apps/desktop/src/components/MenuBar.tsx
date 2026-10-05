@@ -116,6 +116,7 @@ export default function MenuBar() {
       { label: t("rightPanel.computer"), action: act("ai.computer") },
       { label: t("rightPanel.experts"), action: act("ai.experts") },
       { label: t("menu.unreal"), action: act("ai.unreal") },
+      { label: t("menu.blender"), action: act("ai.blender") },
     ],
     help: [
       { label: t("menu.manual"), action: act("help.manual") },

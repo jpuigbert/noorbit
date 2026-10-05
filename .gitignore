@@ -6,5 +6,12 @@ target/
 .env
 apps/desktop/src-tauri/gen/
 
+# Carpeta de paquets d'instal·lació finals (binaris: DMG/app/etc.), feta per a
+# fer doble clic i instal·lar; es genera amb `pnpm installers`.
+/NoOrbit-Instalador/
+
 # Clon local de la wiki (repo git separat, no forma part del codi)
 /.wiki-staging/
+
+# descarregats temporals dels artefactes de CI per a penjar-los al Release
+/.release-dl/

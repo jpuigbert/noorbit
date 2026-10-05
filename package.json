@@ -10,6 +10,7 @@
     "typecheck": "pnpm --filter desktop exec tsc --noEmit",
     "app:build": "pnpm --filter desktop tauri build",
     "app:build:mac": "pnpm --filter desktop tauri build --bundles app,dmg",
+    "installers": "node scripts/collect-installers.mjs",
     "app:build:mac:intel": "pnpm --filter desktop tauri build --target x86_64-apple-darwin --bundles app,dmg",
     "app:build:mac:arm": "pnpm --filter desktop tauri build --target aarch64-apple-darwin --bundles app,dmg",
     "app:build:mac:universal": "pnpm --filter desktop tauri build --target universal-apple-darwin --bundles app,dmg",

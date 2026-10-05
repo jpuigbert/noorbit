@@ -6,6 +6,7 @@ import { useBlenderLiveStore } from "../stores/blenderLiveStore";
 import { useUnrealStore } from "../stores/unrealStore";
 import { useAIStore } from "../stores/aiStore";
 import { useAIActivity } from "../stores/activityStore";
+import { useSystemStatsStore, memPercent, formatBytes } from "../stores/systemStatsStore";
 import BackgroundTaskBadge from "./BackgroundTaskBadge";
 
 function Dot({ on }: { on: boolean }) {
@@ -19,6 +20,13 @@ export default function StatusBar() {
   const unreal = useUnrealStore((s) => s.connected);
   const ollama = useAIStore((s) => s.ollamaRunning);
   const activity = useAIActivity();
+
+  // RAM en temps real: arrenca el mostreig global (idempotent) i llig.
+  const mem = useSystemStatsStore((s) => s.mem);
+  useEffect(() => {
+    useSystemStatsStore.getState().start();
+  }, []);
+  const ramPct = memPercent(mem);
 
   useEffect(() => {
     useAIStore.getState().checkOllama();
@@ -43,6 +51,14 @@ export default function StatusBar() {
       </span>
       <div className="spacer" />
       <BackgroundTaskBadge />
+      {ramPct !== null && (
+        <span
+          className="status-item"
+          title={`RAM usada ${mem ? formatBytes(mem.used) : ""} de ${mem ? formatBytes(mem.total) : ""}`}
+        >
+          {t("status.ram")}: {ramPct}%
+        </span>
+      )}
       <span className="status-item">
         <Dot on={ollama} /> {t("status.ai")}
       </span>

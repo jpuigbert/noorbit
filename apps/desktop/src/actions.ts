@@ -92,6 +92,7 @@ export const actions: Record<string, () => void | Promise<void>> = {
   "ai.computer": () => usePreviewStore.getState().setRightTab("computer"),
   "ai.experts": () => usePreviewStore.getState().setRightTab("experts"),
   "ai.unreal": () => usePreviewStore.getState().setRightTab("unreal"),
+  "ai.blender": () => usePreviewStore.getState().setRightTab("blender"),
 
   // Temes de colors (tota la pantalla + editor)
   "view.themeDark": () => useUIStore.getState().setTheme("dark"),
@@ -159,6 +160,7 @@ export const commandList: CommandDef[] = [
   { id: "ai.computer", labelKey: "rightPanel.computer" },
   { id: "ai.experts", labelKey: "rightPanel.experts" },
   { id: "ai.unreal", labelKey: "menu.unreal" },
+  { id: "ai.blender", labelKey: "menu.blender" },
   { id: "view.themeDark", labelKey: "settings.themeDark" },
   { id: "view.themeLight", labelKey: "settings.themeLight" },
   { id: "view.themeGray", labelKey: "settings.themeGray" },

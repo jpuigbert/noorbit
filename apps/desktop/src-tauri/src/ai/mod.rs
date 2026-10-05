@@ -14,6 +14,42 @@ use std::os::windows::process::CommandExt;
 /// Error compartit: la generació s'ha aturat a petició de l'usuari.
 pub const CANCELLED_MSG: &str = "NoOrbit: cancel·lat";
 
+/// Detecta un **bucle desbocat**: un model petit (o sense suficient RAM) pot
+/// entrar a repetir la mateixa frase una i una altra sense acabar mai —la UI
+/// queda a «Treballant…» indefinidament. Comprova si el tram final del text
+/// generat és la repetició consecutiva d'un mateix bloc. Si és així, el
+/// streaming es talla i es conserva el text obtingut fins al moment.
+pub fn runaway_repetition(full: &str) -> bool {
+    const MIN: usize = 24; // bloc mínim que considerem un «cicle» possible
+    const MAX: usize = 240; // bloc màxim
+    const REPEATS: usize = 4; // repeticions seguides que disparen el tall
+
+    let b = full.as_bytes();
+    if b.len() < MIN * REPEATS {
+        return false;
+    }
+    // Provem mides de cicle de gran a petit; si els últims `len` bytes es
+    // repeteixen `REPEATS` vegades seguides cap arrere, és un bucle.
+    let max = MAX.min(b.len() / REPEATS);
+    let mut len = max;
+    while len >= MIN {
+        if b.len() >= len * REPEATS {
+            let tail = &b[b.len() - len..];
+            let mut reps = 1usize;
+            let mut i = b.len() - len;
+            while i >= len && &b[i - len..i] == tail {
+                reps += 1;
+                if reps >= REPEATS {
+                    return true;
+                }
+                i -= len;
+            }
+        }
+        len = len.saturating_sub(1);
+    }
+    false
+}
+
 /// Xat per defecte: el que fan servir l'agent, les tasques autònomes i
 /// qualsevol crida que no s'haja iniciat dins d'un xat múltiple.
 pub const DEFAULT_SESSION: &str = "main";
@@ -1245,7 +1281,7 @@ impl AiManager {
         let mut buf: Vec<u8> = Vec::new();
         let mut full = String::new();
         let mut thinking_acc = String::new();
-        loop {
+        'stream: loop {
             // Aturada immediata entre chunks: es mira la bandera del PROPI xat
             // i el botó «Atura» respon tot seguit, sense esperar dades noves.
             if ctl.is_cancelled() {
@@ -1307,6 +1343,17 @@ impl AiManager {
                                     c,
                                     ms,
                                 );
+                                if runaway_repetition(&full) {
+                                    ctl.process(
+                                        app,
+                                        "ollama",
+                                        &model_label,
+                                        "thinking",
+                                        "S'ha detectat un bucle de repetició: la generació s'atura per a no bloquejar-se.",
+                                        ms,
+                                    );
+                                    break 'stream;
+                                }
                             }
                         }
                         if let Some(th) = msg.get("thinking").and_then(|c| c.as_str()) {

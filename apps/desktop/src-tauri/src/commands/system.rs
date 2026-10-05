@@ -2,6 +2,62 @@
 
 use tauri::command;
 
+/// Estat de la RAM en un instant: total i usada, en bytes. Per a mostrar el
+/// consum de memòria en TEMPS REAL (barra d'estat i panell de l'agent), de
+/// manera que l'usuari veja si un model gran està omplint la RAM.
+#[derive(serde::Serialize)]
+pub struct MemoryStatus {
+    pub total: u64,
+    pub used: u64,
+}
+
+#[command]
+pub async fn system_memory_status() -> Result<MemoryStatus, String> {
+    let total = system_total_memory().await?;
+    let used = if cfg!(target_os = "macos") {
+        // `vm_stat` dona el nombre de pàgines per categoria; la mida de la
+        // pàgina ve a la capçalera. Memòria «usada» (aprox. a l'Monitor
+        // d'Activitat) = actives + vinculades (wired) + comprimides.
+        let out = std::process::Command::new("vm_stat")
+            .output()
+            .map_err(|e| format!("vm_stat: {}", e))?;
+        let s = String::from_utf8_lossy(&out.stdout);
+        let page = s
+            .lines()
+            .find_map(|l| l.split("page size of ").nth(1))
+            .and_then(|r| {
+                r.split_whitespace()
+                    .next()
+                    .and_then(|n| n.trim_end_matches(|c: char| !c.is_ascii_digit()).parse::<u64>().ok())
+            })
+            .unwrap_or(4096);
+        let pages_of = |key: &str| -> u64 {
+            s.lines()
+                .find(|l| l.starts_with(key))
+                .and_then(|l| l.split(':').nth(1))
+                .and_then(|v| v.trim().trim_end_matches('.').parse::<u64>().ok())
+                .unwrap_or(0)
+        };
+        let used_pages =
+            pages_of("Pages active") + pages_of("Pages wired down") + pages_of("Pages occupied by compressor");
+        (used_pages * page).min(total)
+    } else if cfg!(target_os = "linux") {
+        // /proc/meminfo: MemTotal i MemAvailable → usada = total - disponible.
+        let f = std::fs::read_to_string("/proc/meminfo").map_err(|e| e.to_string())?;
+        let kb_of = |key: &str| -> Option<u64> {
+            f.lines()
+                .find(|l| l.starts_with(key))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|v| v.parse::<u64>().ok())
+        };
+        let avail = kb_of("MemAvailable:").unwrap_or(0) * 1024;
+        total.saturating_sub(avail)
+    } else {
+        0
+    };
+    Ok(MemoryStatus { total, used })
+}
+
 /// Memòria RAM total del sistema, en bytes. Serveix per triar automàticament
 /// el millor model local que hi càpiga còmodament.
 #[command]
