@@ -326,29 +326,32 @@ pub async fn ollama_set_models_dir(path: Option<String>) -> Result<(), String> {
 }
 
 /// Llista els volums muntats (USB/discos externs) per suggerir-los a la UI.
+/// A Windows no s'exposa res: l'usuari tria la unitat des del diàleg natiu.
 #[command]
 pub async fn list_external_volumes() -> Result<Vec<String>, String> {
-    #[cfg(target_os = "macos")]
-    let base = "/Volumes";
-    #[cfg(target_os = "linux")]
-    let base = "/media";
     #[cfg(windows)]
     {
-        // Windows: l'usuari tria la unitat des del diàleg de carpeta.
-        return Ok(vec![]);
+        Ok(vec![])
     }
-    let mut out = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(base) {
-        for e in entries.flatten() {
-            let name = e.file_name().to_string_lossy().to_string();
-            if name.starts_with('.') {
-                continue;
-            }
-            let p = e.path().to_string_lossy().to_string();
-            if std::fs::metadata(&p).map(|m| m.is_dir()).unwrap_or(false) {
-                out.push(p);
+    #[cfg(not(windows))]
+    {
+        #[cfg(target_os = "macos")]
+        let base = "/Volumes";
+        #[cfg(target_os = "linux")]
+        let base = "/media";
+        let mut out = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(base) {
+            for e in entries.flatten() {
+                let name = e.file_name().to_string_lossy().to_string();
+                if name.starts_with('.') {
+                    continue;
+                }
+                let p = e.path().to_string_lossy().to_string();
+                if std::fs::metadata(&p).map(|m| m.is_dir()).unwrap_or(false) {
+                    out.push(p);
+                }
             }
         }
+        Ok(out)
     }
-    Ok(out)
 }
