@@ -1,0 +1,2420 @@
+/* 🖥️ Disseny general de la finestra NoOrbit */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg-0);
+  color: var(--text-0);
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.app-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- Barra de menú ---- */
+.menubar {
+  display: flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 8px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  gap: 2px;
+  user-select: none;
+  flex-shrink: 0;
+}
+.menubar .brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  padding: 0 10px 0 4px;
+  color: var(--text-0);
+}
+.menubar .brand .logo {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+}
+.menu-item {
+  position: relative;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
+  font-size: 12.5px;
+}
+.menu-item:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+.menu-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 220px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  padding: 4px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  z-index: 50;
+}
+.menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
+  font-size: 12.5px;
+  width: 100%;
+  text-align: left;
+}
+.menu-row:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+.menu-row .kbd {
+  color: var(--text-3);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.menu-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 6px;
+}
+.menubar .spacer {
+  flex: 1;
+}
+
+/* ---- Barra lateral ---- */
+.sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: var(--bg-1);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.panel-body {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+.tree-node {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  font-size: 12.5px;
+  color: var(--text-1);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tree-node:hover {
+  background: var(--bg-2);
+  color: var(--text-0);
+}
+.tree-node.active {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+/* Nom que ocupa l'ample disponible; accions només en hover. */
+.tree-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-actions {
+  display: none;
+  gap: 2px;
+  margin-left: 4px;
+}
+.tree-node:hover .tree-actions {
+  display: inline-flex;
+}
+.icon-btn.tiny {
+  padding: 1px;
+}
+.icon-btn.tiny.danger:hover {
+  color: var(--error);
+}
+.empty-hint {
+  padding: 16px 12px;
+  color: var(--text-3);
+  font-size: 12px;
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* ---- Editor ---- */
+.editor-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-0);
+}
+.editor-tabs {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  padding: 0 6px;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.editor-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-1);
+  background: var(--bg-2);
+}
+.editor-tab .dirty-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-2);
+}
+.editor-content {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ---- Panell dret ---- */
+.rightpanel {
+  width: 380px;
+  flex-shrink: 0;
+  background: var(--bg-1);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.rp-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.rp-tab {
+  flex: 1;
+  padding: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+  border-bottom: 2px solid transparent;
+}
+.rp-tab.active {
+  color: var(--text-0);
+  border-bottom-color: var(--accent);
+}
+.rp-body {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+.preview-frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #fff;
+}
+
+/* ---- Barra d'estat ---- */
+.statusbar {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-2);
+  gap: 14px;
+  flex-shrink: 0;
+}
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.status-dot.on {
+  background: var(--success);
+}
+.status-dot.off {
+  background: var(--text-3);
+}
+.statusbar .spacer {
+  flex: 1;
+}
+
+/* ---- Botons i controls compartits ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  color: var(--text-0);
+  font-size: 12.5px;
+  border: 1px solid var(--border-2);
+  transition: all 0.12s;
+}
+.btn:hover {
+  background: var(--bg-4);
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+}
+.btn.primary:hover {
+  background: var(--accent-hover);
+}
+.btn.danger {
+  background: transparent;
+  border-color: var(--error);
+  color: var(--error);
+}
+.btn.sm {
+  padding: 4px 8px;
+  font-size: 11.5px;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.field {
+  margin-bottom: 10px;
+}
+.field label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-2);
+  margin-bottom: 4px;
+}
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-size: 12.5px;
+  outline: none;
+}
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  border-color: var(--accent);
+}
+
+/* ---- Modals ---- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal {
+  width: 560px;
+  max-width: 92vw;
+  max-height: 84vh;
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+.modal-body {
+  padding: 16px;
+  overflow: auto;
+}
+/* Diàleg petit per a operacions de l'arbre (crear/reanomenar). */
+.modal.small {
+  width: 360px;
+}
+.tree-input {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 13px;
+  background: var(--bg-2);
+  color: var(--text-0);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm, 6px);
+}
+.tree-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+/* ---- Panell d'idioma ---- */
+.language-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.lp-section h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.lp-hint {
+  font-size: 11.5px;
+  color: var(--text-2);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+.lp-select,
+.lp-input {
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-size: 12.5px;
+  margin-bottom: 8px;
+}
+.lp-import {
+  display: flex;
+  gap: 8px;
+}
+.lp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  color: var(--text-0);
+  font-size: 12.5px;
+}
+.lp-btn:hover {
+  background: var(--bg-4);
+}
+.lp-btn.danger {
+  background: transparent;
+  border-color: var(--error);
+  color: var(--error);
+}
+.lp-msg {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--success);
+}
+
+/* ---- Agent ---- */
+.agent-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.agent-prompt {
+  padding: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* Xat com un client real: la conversa ocupa el panell i l'entrada de text
+   queda A BAIX (els barres de model/expert es queden a dalt, ordre 0). */
+.agent-panel > .agent-body { order: 1; }
+.agent-panel > .ap-queue { order: 2; }
+.agent-panel > .ap-apply-bar { order: 3; }
+.agent-panel > .agent-prompt { order: 4; }
+.agent-prompt textarea {
+  width: 100%;
+  min-height: 60px;
+  resize: vertical;
+  padding: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-size: 12.5px;
+}
+.agent-mods {
+  display: flex;
+  gap: 6px;
+}
+.mod-chip {
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11.5px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  color: var(--text-1);
+}
+.mod-chip.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: transparent;
+}
+.agent-actions {
+  display: flex;
+  gap: 8px;
+}
+.agent-body {
+  flex: 1;
+  overflow: auto;
+  padding: 10px;
+}
+.timeline-step {
+  display: flex;
+  gap: 8px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--border-2);
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.timeline-step.ok {
+  border-left-color: var(--success);
+}
+.timeline-step.fail {
+  border-left-color: var(--error);
+}
+.agent-result {
+  white-space: pre-wrap;
+  font-size: 12.5px;
+  color: var(--text-1);
+  line-height: 1.5;
+}
+.backend-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+}
+.backend-row:hover {
+  background: var(--bg-2);
+}
+.agent-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+
+/* ---- Vista prèvia ---- */
+.preview-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.preview-url {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Gestor de models ---- */
+.mm-warn {
+  background: rgba(251, 191, 36, 0.12);
+  color: var(--warning);
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+}
+.mm-custom {
+  display: flex;
+  gap: 8px;
+}
+.mm-custom input {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-size: 12.5px;
+}
+.mm-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.mm-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.mm-row:last-child {
+  border-bottom: none;
+}
+.mm-name {
+  flex: 1;
+  text-align: left;
+  color: var(--text-0);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.mm-name-static {
+  color: var(--text-0);
+}
+.mm-desc {
+  color: var(--text-2);
+  font-size: 11px;
+}
+.mm-size {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.mm-prog {
+  color: var(--accent-2);
+  font-size: 11px;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mm-installed {
+  color: var(--success);
+  font-size: 11px;
+}
+.mm-ollama-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.mm-cloud-info {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- Proveïdors IA en línia ---- */
+.prov-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+.prov-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+}
+.prov-row.active {
+  border-color: var(--accent);
+}
+.prov-main {
+  min-width: 0;
+}
+.prov-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-0);
+  font-weight: 500;
+}
+.prov-model {
+  font-size: 11px;
+  color: var(--text-2);
+  background: var(--bg-3);
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+.prov-url {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-2);
+  margin-top: 3px;
+  word-break: break-all;
+}
+.prov-token {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+.prov-test {
+  font-size: 11px;
+  margin-top: 4px;
+}
+.prov-test.ok {
+  color: var(--success);
+}
+.prov-test.fail {
+  color: var(--error);
+}
+.prov-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.prov-form {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.prov-form h4 {
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.prov-form-2 {
+  display: flex;
+  gap: 10px;
+}
+.prov-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---- Skills ---- */
+.si-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.si-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  color: var(--text-1);
+}
+.si-tab.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: transparent;
+}
+.si-pick {
+  display: flex;
+  gap: 6px;
+}
+.si-pick input,
+.si-pick select {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-size: 12.5px;
+}
+.si-error {
+  margin-top: 8px;
+  color: var(--error);
+  font-size: 12px;
+}
+.si-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 16px 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-2);
+}
+.si-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.si-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.si-row:last-child {
+  border-bottom: none;
+}
+.si-name {
+  font-size: 12.5px;
+  color: var(--text-0);
+}
+.si-desc {
+  font-size: 11px;
+  color: var(--text-2);
+}
+.si-info {
+  margin-top: 8px;
+  color: var(--success, var(--accent));
+  font-size: 12px;
+}
+.si-builtin {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+}
+.si-builtin-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-0);
+}
+.si-export {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+  color: var(--text-2);
+  font-size: 11.5px;
+}
+.si-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  color: var(--text-2);
+}
+
+/* ---- Tabs de modal ---- */
+.pm-modal {
+  width: 640px;
+}
+.pm-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+.pm-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  border-bottom: 2px solid transparent;
+}
+.pm-tab.active {
+  color: var(--text-0);
+  border-bottom-color: var(--accent);
+}
+
+/* ---- Manual d'ús ---- */
+.help-modal {
+  width: 680px;
+}
+.help-intro {
+  color: var(--text-1);
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+.help-section {
+  margin-bottom: 18px;
+}
+.help-section h3 {
+  font-size: 14px;
+  color: var(--text-0);
+  margin-bottom: 6px;
+  border-left: 3px solid var(--accent);
+  padding-left: 8px;
+}
+.help-sec-intro {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+.help-section ul {
+  padding-left: 18px;
+}
+.help-section li {
+  font-size: 12.5px;
+  color: var(--text-1);
+  line-height: 1.6;
+  margin-bottom: 4px;
+}
+.help-foot {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-3);
+}
+.about-block h3 {
+  margin-bottom: 6px;
+}
+.about-block p {
+  color: var(--text-1);
+  margin-bottom: 6px;
+}
+
+/* ---- Peu de modal ---- */
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---- Control de l'ordinador ---- */
+.computer-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 2px;
+}
+.cp-intro {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 11.5px;
+  color: var(--text-2);
+  background: var(--bg-0);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+.cp-intro svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--accent);
+}
+.cp-perms {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cp-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-1);
+  cursor: pointer;
+}
+.cp-switch input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+}
+.cp-warn {
+  font-size: 11.5px;
+  color: var(--warning);
+  background: rgba(250, 204, 21, 0.1);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  margin-bottom: 8px;
+}
+.cp-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  padding: 2px 4px 2px 10px;
+  font-size: 11.5px;
+}
+.cp-chip code {
+  font-family: var(--font-mono);
+  color: var(--text-1);
+}
+.cp-run {
+  display: flex;
+  gap: 6px;
+}
+.cp-run input {
+  flex: 1;
+}
+.cp-steps {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cp-step {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11.5px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-0);
+  border: 1px solid var(--border-2);
+}
+.cp-step.run {
+  border-left: 3px solid var(--accent);
+}
+.cp-step.done {
+  border-left: 3px solid var(--success);
+}
+.cp-step code {
+  font-family: var(--font-mono);
+  color: var(--text-0);
+}
+.cp-step-reason {
+  color: var(--text-2);
+}
+.cp-step-ans {
+  color: var(--text-1);
+}
+.cp-out {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-2);
+  background: var(--bg-0);
+  padding: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
+.cp-out.ok {
+  border-left: 3px solid var(--success);
+}
+.cp-out.fail {
+  border-left: 3px solid var(--error);
+}
+.cp-out-meta {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-bottom: 4px;
+}
+.cp-out pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-1);
+}
+.cp-hist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 200px;
+  overflow: auto;
+}
+.cp-hist-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+}
+.cp-hist-row:hover {
+  background: var(--bg-2);
+}
+.cp-hist-row.ok .cp-hist-play {
+  color: var(--success);
+}
+.cp-hist-row.fail .cp-hist-play {
+  color: var(--error);
+}
+.cp-hist-time {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+.cp-hist-play {
+  flex: none;
+}
+.cp-hist-cmd {
+  font-family: var(--font-mono);
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cp-confirm {
+  width: 460px;
+}
+.cp-confirm-cmd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-0);
+  border: 1px solid var(--border-2);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.cp-confirm-cmd svg {
+  color: var(--accent);
+  flex: none;
+}
+.cp-confirm-cmd code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-0);
+  word-break: break-all;
+}
+
+/* ---- Rotació "treballant" ---- */
+@keyframes cp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin {
+  animation: cp-spin 0.9s linear infinite;
+}
+.status-item.working {
+  color: var(--accent);
+  font-weight: 600;
+}
+.working-detail {
+  color: var(--text-2);
+  font-weight: 400;
+}
+.menubar-activity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 6px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--bg-3);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+/* ---- Paleta de comandes i obertura ràpida ---- */
+.cp-palette {
+  width: 560px;
+  max-width: 90vw;
+  padding: 0;
+  overflow: hidden;
+}
+.cp-palette-input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--border-2);
+  background: var(--bg-1);
+  color: var(--text-0);
+  font-size: 14px;
+  padding: 12px 14px;
+  outline: none;
+}
+.cp-palette-list {
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.cp-palette-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
+  font-size: 13px;
+}
+.cp-palette-row.selected {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+.cp-palette-row .kbd {
+  color: var(--text-3);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.cp-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+/* ---- Configuració general ---- */
+.settings-general {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--text-1);
+  font-size: 13px;
+}
+.setting-row .lp-hint {
+  flex-basis: 100%;
+  margin-top: -6px;
+}
+.setting-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--text-0);
+}
+.setting-select {
+  background: var(--bg-2);
+  color: var(--text-0);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 12.5px;
+}
+.setting-value {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  min-width: 42px;
+}
+
+/* ---- Barra de model dins el xat de l'agent ---- */
+/* Barra de xats oberts: pestanyes amb indicador de generació en curs i
+   botó «+» per treballar en paral·lel amb diverses IA alhora. */
+.ap-chats-bar {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 6px 8px 0 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ap-chats-bar::-webkit-scrollbar {
+  display: none;
+}
+.ap-chat-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 160px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: var(--bg-2);
+  color: var(--text-2);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.ap-chat-tab.active {
+  background: var(--bg-0);
+  color: var(--text-0);
+  border-color: var(--accent);
+}
+.ap-chat-tab.running {
+  color: var(--accent);
+}
+.ap-chat-tab.fork svg {
+  color: var(--accent);
+}
+.ap-chat-tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ap-chat-tab-close {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 1px;
+  border-radius: 3px;
+  opacity: 0.6;
+}
+.ap-chat-tab-close:hover {
+  opacity: 1;
+  background: var(--bg-3);
+}
+.ap-chat-add {
+  flex: none;
+  align-self: center;
+}
+
+/* Fila d'IA PER XAT: proveïdor (local o remot) i model propi d'aquest xat. */
+.ap-ia-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+}
+.ap-model-perchat {
+  max-width: 160px;
+}
+
+/* Botó de fork damunt i sota les bombolles del xat. */
+.chat-fork-btn {
+  font-size: 10px;
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+.chat-row:hover .chat-fork-btn {
+  opacity: 1;
+}
+.chat-fork-origin {
+  color: var(--text-3);
+  font-size: 10px;
+}
+
+.ap-model-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+}
+.ap-model-icon {
+  color: var(--accent);
+  flex: none;
+}
+.ap-model-select {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-2);
+  color: var(--text-0);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.ap-download {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+}
+.ap-download-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-2);
+  color: var(--text-0);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  font-size: 12px;
+  outline: none;
+}
+.ap-download-input:focus {
+  border-color: var(--accent);
+}
+.ap-pull-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 11.5px;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+}
+
+/* ---- Barra de mode expert (dins del xat de l'agent) ---- */
+.ap-expert-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+}
+.ap-expert-hint {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.ap-expert-count {
+  font-size: 11px;
+  color: var(--text-3);
+  flex: none;
+}
+
+/* ---- Barra «Aplica a» (Blender / Unreal) dins del xat ---- */
+.ap-apply-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+}
+.ap-apply-label {
+  font-size: 11.5px;
+  color: var(--text-2);
+  margin-right: 2px;
+}
+
+/* ---- Cua de missatges (afegits mentre la IA treballa) ---- */
+.ap-queue {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+}
+.ap-queue-title {
+  display: block;
+  font-size: 11px;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+.ap-queue-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  margin-bottom: 3px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+}
+.ap-queue-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Panell d'especialistes ---- */
+.ex-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  overflow-y: auto;
+  height: 100%;
+}
+.ex-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-1);
+}
+.ex-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+}
+.ex-form-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+.ex-input {
+  background: var(--bg-0);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  padding: 6px 8px;
+  font-size: 12px;
+  outline: none;
+}
+.ex-input:focus {
+  border-color: var(--accent);
+}
+.ex-textarea {
+  background: var(--bg-0);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  padding: 6px 8px;
+  font-size: 12px;
+  min-height: 56px;
+  resize: vertical;
+  outline: none;
+  font-family: var(--font-ui);
+}
+.ex-textarea:focus {
+  border-color: var(--accent);
+}
+.ex-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ex-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.ex-card-main {
+  flex: 1;
+  min-width: 0;
+}
+.ex-card-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+.ex-card-role {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.ex-model-chip {
+  background: var(--bg-4);
+  color: var(--text-1);
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 10.5px;
+}
+.ex-pick input {
+  accent-color: var(--accent);
+}
+.ex-team {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  margin-top: 4px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.ex-team-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+.ex-team-hint {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.ex-team-picked {
+  font-size: 11px;
+  color: var(--accent);
+}
+.ex-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  padding: 6px 8px;
+  background: var(--bg-2);
+  border-radius: var(--radius-sm);
+  max-height: 140px;
+  overflow-y: auto;
+}
+.ex-progress-row {
+  font-size: 11px;
+  color: var(--text-1);
+}
+.ex-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.ex-sub {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+}
+.ex-sub summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--text-1);
+}
+.ex-sub summary.ok {
+  color: var(--success);
+}
+.ex-sub summary.fail {
+  color: var(--error);
+}
+.ex-sub-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-1);
+  margin-top: 6px;
+  padding: 6px;
+  background: var(--bg-0);
+  border-radius: var(--radius-sm);
+  max-height: 240px;
+  overflow-y: auto;
+}
+.ex-answer {
+  background: var(--bg-2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+}
+.ex-answer-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+/* ---- Selector de tema (Configuració ▸ General) ---- */
+.setting-row-col {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.theme-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.theme-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-size: 12px;
+}
+.theme-swatch:hover {
+  border-color: var(--accent);
+}
+.theme-swatch.active {
+  border-color: var(--accent);
+  color: var(--text-0);
+  background: var(--bg-3);
+}
+.theme-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--border-2);
+}
+
+
+/* Pantalla d'inici / projectes recents */
+.startup-modal {
+  min-width: 420px;
+  max-width: 560px;
+}
+
+.startup-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.startup-recents-head {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-2, #8a8a95);
+  margin-bottom: 6px;
+}
+
+.startup-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.startup-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.startup-open {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.startup-open:hover {
+  background: var(--bg-3, #1e1e26);
+}
+
+.startup-name {
+  font-size: 13px;
+  color: var(--text-0, #e6e6ea);
+  white-space: nowrap;
+}
+
+.startup-path {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-3, #6a6a75);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  margin-right: 6px;
+}
+
+
+/* Selector de volums externs (USB) per als models */
+.mm-volumes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* Llista de models gratuïts del núvol d'Ollama (dins del gestor de models). */
+.mm-cloud-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* Preconfiguracions d'un clic del formulari de proveïdors. */
+.prov-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+/* Bloc col·lapsable amb el procés de pensament (raonament) de la IA. */
+.agent-thinking {
+  margin-top: 14px;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  background: var(--bg-1, rgba(255, 255, 255, 0.03));
+}
+.agent-thinking > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 6px 8px;
+  color: var(--text-2, #999);
+  font-size: 12px;
+  user-select: none;
+}
+.agent-thinking > summary::-webkit-details-marker {
+  display: none;
+}
+.agent-thinking-body {
+  margin: 0;
+  padding: 8px;
+  border-top: 1px solid var(--border, #333);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2, #999);
+  max-height: 260px;
+  overflow: auto;
+}
+
+/* Xat de l'Agent: historial de bombolles usuari / IA, amb el raonament
+   plegable i la durada de cada resposta (estil clients d'IA moderns). */
+.chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.chat-head-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-3, #777);
+}
+.chat-row {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 10px;
+}
+.chat-row.user {
+  align-items: flex-end;
+}
+.chat-row.assistant {
+  align-items: flex-start;
+}
+.chat-bubble {
+  max-width: 92%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.chat-bubble.user {
+  background: var(--accent, #4c6ef5);
+  color: #fff;
+  border-bottom-right-radius: 3px;
+}
+.chat-bubble.assistant {
+  background: var(--bg-2, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--border, #333);
+  border-bottom-left-radius: 3px;
+  color: var(--text-0, #ddd);
+}
+.chat-bubble.assistant.err {
+  border-color: var(--error, #e5484d);
+  color: var(--error, #e5484d);
+}
+/* Botó «Crear fitxers d'aquest missatge» sota la bombolla de la IA. */
+.chat-materialize {
+  margin-top: 6px;
+  align-self: flex-start;
+}
+/* Diàleg de creació manual d'estructura (llista de rutes editable). */
+.ap-struct-help {
+  font-size: 11.5px;
+  color: var(--text-2, #999);
+  margin: 0 0 8px;
+  line-height: 1.4;
+}
+.ap-struct-list {
+  width: 100%;
+  min-height: 200px;
+  resize: vertical;
+  box-sizing: border-box;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #333);
+  background: var(--bg-1, #111);
+  color: var(--text-0, #ddd);
+}
+/* Interruptor «inclou el codi del projecte» al panell de l'agent. */
+.ap-ctx {
+  margin-top: 4px;
+  margin-bottom: 2px;
+}
+.ap-ctx.active {
+  background: var(--accent, #4c6ef5);
+  color: #fff;
+  border-color: var(--accent, #4c6ef5);
+}
+.ap-ctx-info {
+  font-size: 11px;
+  color: var(--text-2, #999);
+  align-self: center;
+}
+/* Previsualització de línia a la cerca del projecte (⇧⌘F). */
+.search-preview {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--text-1, #bbb);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-bubble.pending {
+  color: var(--text-2, #999);
+  font-style: italic;
+}
+/* Bombolla de streaming: text que arriba en directe mentre la IA escriu. */
+.chat-bubble.assistant.streaming {
+  font-style: normal;
+  color: var(--text-0, #ddd);
+  white-space: pre-wrap;
+}
+.stream-caret {
+  display: inline-block;
+  margin-left: 1px;
+  color: var(--accent, #4c6ef5);
+  animation: stream-blink 1s steps(2, start) infinite;
+}
+@keyframes stream-blink {
+  to {
+    visibility: hidden;
+  }
+}
+.stream-meta {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-3, #777);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.chat-thought {
+  width: 92%;
+  margin-bottom: 4px;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  background: var(--bg-1, rgba(255, 255, 255, 0.03));
+}
+.chat-thought > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 5px 8px;
+  color: var(--text-2, #999);
+  font-size: 12px;
+  user-select: none;
+}
+.chat-thought > summary::-webkit-details-marker {
+  display: none;
+}
+.chat-steps {
+  padding: 6px 8px 0;
+  border-top: 1px solid var(--border, #333);
+}
+
+/* Peu de la pantalla d'inici: autoria i llicencia de programari lliure. */
+.startup-footer {
+  margin-top: 18px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border, #333);
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-1, #ccc);
+}
+.startup-footer-sub {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-2, #999);
+}
+
+/* ---- Terminal integrat (panell inferior, estil VS Code) ---- */
+.terminal-panel {
+  display: flex;
+  flex-direction: column;
+  height: 220px;
+  min-height: 120px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-1);
+}
+.terminal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.terminal-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-1);
+}
+.terminal-running {
+  color: var(--accent-2);
+  font-size: 11px;
+}
+.terminal-tools {
+  display: flex;
+  gap: 4px;
+}
+.terminal-output {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 10px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.terminal-empty {
+  color: var(--text-2);
+  font-style: italic;
+}
+.term-line {
+  color: var(--text-1);
+}
+.term-cmd {
+  color: var(--accent-2);
+}
+.term-err {
+  color: #f07178;
+}
+.term-exit {
+  color: var(--text-2);
+}
+.term-caret {
+  opacity: 0.6;
+}
+.terminal-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-top: 1px solid var(--border);
+}
+.terminal-prompt {
+  color: var(--accent-2);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+}
+.terminal-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-0);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+}
+
+/* ---- Panell de Git (pestanya del panell dret) ---- */
+.git-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.git-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.git-branch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-0);
+}
+.git-tools {
+  display: flex;
+  gap: 4px;
+}
+.git-changes {
+  flex: 1;
+  overflow-y: auto;
+}
+.git-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-1);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.git-row:hover {
+  background: var(--bg-2);
+}
+.git-badge {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--text-2);
+}
+.git-M { background: #d19a66; }
+.git-A, .git-U { background: #98c379; }
+.git-D { background: #e06c75; }
+.git-R { background: #61afef; }
+.git-C { background: #e5c07b; }
+.git-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-diff {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.git-diff-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.git-diff-path {
+  font-size: 11px;
+  color: var(--text-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-diff-editor {
+  flex: 1;
+  min-height: 0;
+  border-bottom: 1px solid var(--border);
+}
+.git-patch {
+  max-height: 38%;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-1);
+  white-space: pre;
+}
+.git-graph {
+  max-height: 45%;
+  overflow: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-0);
+}
+.git-graph-pre {
+  margin: 0;
+  padding: 8px 10px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-1);
+  white-space: pre;
+}
+.git-stashes {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.git-stashes-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.git-stash-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.git-stash-msg {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.git-commit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+.git-msg {
+  width: 100%;
+  resize: vertical;
+  background: var(--bg-0);
+  border: 1px solid var(--border-2);
+  border-radius: 4px;
+  color: var(--text-0);
+  font-size: 12px;
+  padding: 6px;
+}
+.git-feedback {
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--text-2);
+  border-top: 1px solid var(--border);
+  white-space: pre-wrap;
+}
+
+/* ---- Ressaltat de coincidències de la cerca (F3) ---- */
+.noorbit-match {
+  background: rgba(139, 92, 246, 0.28);
+  border-radius: 2px;
+}
+.noorbit-match-active {
+  background: rgba(248, 81, 73, 0.45);
+  border: 1px solid rgba(248, 81, 73, 0.8);
+  border-radius: 2px;
+}
+
+/* ---- Visor del procés de la IA (Objectiu 2) ---- */
+.proc-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-size: 12px;
+}
+.proc-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.proc-title {
+  font-weight: 600;
+  color: var(--text-0);
+  margin-right: 4px;
+}
+.proc-sub {
+  padding: 3px 8px;
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border);
+}
+.proc-phase {
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.proc-live {
+  background: rgba(34, 197, 94, 0.18);
+  color: #4ade80;
+}
+.proc-think {
+  background: rgba(234, 179, 8, 0.18);
+  color: #facc15;
+}
+.proc-done {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-1);
+}
+.proc-err {
+  background: rgba(248, 81, 73, 0.2);
+  color: #f87171;
+}
+.proc-idle {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-2);
+}
+.proc-meta {
+  font-family: monospace;
+  color: var(--text-2);
+  margin-left: auto;
+}
+.proc-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+.proc-text,
+.proc-thinking {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.proc-text {
+  color: var(--text-0);
+}
+.proc-thinking {
+  color: var(--text-2);
+  font-style: italic;
+  border-left: 2px solid var(--border);
+  padding-left: 8px;
+  margin-bottom: 8px;
+  max-height: 30%;
+  overflow-y: auto;
+}
+
+/* ---- Botons de còpia/desa (Objectiu 3) ---- */
+.chat-copy-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+.chat-row:hover .chat-copy-row {
+  opacity: 1;
+}
+.chat-copy {
+  font-size: 11px;
+}
+
+/* ---- Indicador de tasques en segon pla (Objectiu 4) ---- */
+.bg-task-badge {
+  gap: 6px;
+}
+.bg-task-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #facc15;
+  animation: bg-task-pulse 1.4s ease-in-out infinite;
+}
+@keyframes bg-task-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ---- Panell d'integracions (Settings) ---- */
+.settings-section-title {
+  font-weight: 600;
+  color: var(--text-0);
+}
+.setting-num {
+  width: 90px;
+  padding: 4px 6px;
+  background: var(--bg-1, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-0);
+  font-size: 12px;
+}
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+.settings-msg {
+  font-size: 11px;
+}
+.settings-msg.ok {
+  color: #4ade80;
+}
+.settings-msg.err {
+  color: #f87171;
+}

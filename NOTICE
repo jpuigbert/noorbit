@@ -1,0 +1,74 @@
+NoOrbit — Avisos de tercers / Atribucions
+=========================================
+
+Aquest projecte NO és una bifurcació (fork) de Visual Studio Code. No s'ha
+copiat cap codi font del repositori `microsoft/vscode`. El que prenem de
+VS Code és:
+
+  1. El Monaco Editor (una dependència genuïna i directa)
+  2. Dissenys de funcionalitats que hem reimplementat nosaltres mateixos,
+     inspirats en VS Code
+
+--------------------------------------------------------------------------------
+1. Monaco Editor — el veritable motor d'edició de VS Code
+--------------------------------------------------------------------------------
+Producte: Monaco Editor (paquets `monaco-editor`, `@monaco-editor/react`)
+Copyright (c) Microsoft Corporation
+Llicència: MIT
+Font:     https://github.com/microsoft/monaco-editor
+On:       apps/desktop — el panell de l'editor de codi i el diff costat a
+          costat del Git.
+
+El Monaco és exactament el mateix component d'editor amb què està construït
+Visual Studio Code, extret per Microsoft en una biblioteca autònoma. Utilitzant
+el Monaco, NoOrbit fa servir el motor d'edició real de VS Code (tokens de
+sintaxi, model, cursor, cerca/substitució, decisions de diff, decoracions), i
+no pas una còpia de VS Code.
+
+--------------------------------------------------------------------------------
+2. Funcionalitats el DISSENY de les quals està inspirat en Visual Studio Code
+--------------------------------------------------------------------------------
+Els comportaments següents de NoOrbit reprodueixen la funcionalitat equivalent
+i documentada de Visual Studio Code. S'han implementat des de zero per a
+Tauri + React, perquè la implementació de VS Code està escrita per a Electron
+i no es pot reutilitzar aquí. Es llisten per transparència, no com a codi
+copiat:
+
+  - ⇧⌘F  Cerca al projecte          (VS Code "Search: Find in Files")
+         apps/desktop/src-tauri/src/commands/fs.rs        :: search_files
+         apps/desktop/src/components/SearchPalette.tsx
+
+  - F3 / ⇧F3 coincidència següent/anterior amb ressaltats
+                                     (VS Code "Find Next/Previous")
+         apps/desktop/src/editor/editorApi.ts             :: setSearchMatches,
+                                                             goNextMatch, goPrevMatch
+
+  - F12 Anar a la definició          (VS Code "Go to Definition")
+         apps/desktop/src-tauri/src/commands/fs.rs        :: find_definition
+         apps/desktop/src/editor/editorApi.ts             :: findDefinitionHere
+
+  - Terminal integrat (⌘J)           (VS Code "Integrated Terminal")
+         apps/desktop/src-tauri/src/commands/term.rs      :: run_command
+         apps/desktop/src/components/Terminal/TerminalPanel.tsx
+
+  - Vista de Control de codi font    (VS Code "Source Control" / panell de Git)
+         apps/desktop/src-tauri/src/commands/git.rs       :: git_status, git_diff_file,
+                                                             git_commit, git_push, git_pull
+         apps/desktop/src/components/Git/GitPanel.tsx     (usa el DiffEditor del Monaco)
+
+  - Paleta d'ordres (⇧⌘P), Obertura ràpida (⌘P), dreceres de teclat i
+    l'arquitectura informativa general de la interfície segueixen el model de
+    VS Code.
+
+--------------------------------------------------------------------------------
+3. Altres dependències principals (totes amb llicències permissives)
+--------------------------------------------------------------------------------
+  Tauri 2                 MIT / Apache-2.0   https://github.com/tauri-apps/tauri
+  React / React DOM       MIT                https://github.com/facebook/react
+  Zustand                 MIT                https://github.com/pmndrs/zustand
+  lucide-react            ISC                https://github.com/lucide-icons/lucide
+  Vite                    MIT                https://github.com/vitejs/vite
+  Crates de Rust (serde, tokio, reqwest, …)
+                          MIT / Apache-2.0   vegeu apps/desktop/src-tauri/Cargo.lock
+
+Text de la Llicència MIT: vegeu ./LICENSE.

@@ -1,0 +1,62 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "NoOrbit",
+  "version": "0.5.0",
+  "identifier": "com.noorbit.app",
+  "build": {
+    "beforeBuildCommand": "pnpm --filter desktop build",
+    "beforeDevCommand": "pnpm --filter desktop dev",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "NoOrbit — IDE amb IA local, Blender i Unreal Engine 5",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 960,
+        "minHeight": 640,
+        "theme": "Dark",
+        "backgroundColor": "#0d0d12"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "NoOrbit IDE",
+    "longDescription": "NoOrbit — IDE amb agent IA local multimodal, Blender i Unreal Engine 5",
+    "resources": {
+      "../../../unreal-scripts/bootstrap.py": "unreal-scripts/bootstrap.py",
+      "../../../blender-scripts/noorbit_bridge.py": "blender-scripts/noorbit_bridge.py"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+      }
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

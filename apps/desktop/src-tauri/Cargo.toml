@@ -1,0 +1,56 @@
+[package]
+name = "no-orbit"
+version = "0.5.0"
+description = "NoOrbit — IDE amb agent IA local, Blender i Unreal Engine 5"
+authors = ["NoOrbit"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "no_orbit_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0", features = [] }
+tauri-plugin-shell = "2.0"
+tauri-plugin-fs = "2.0"
+tauri-plugin-dialog = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.40", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "stream", "multipart", "blocking"] }
+anyhow = "1.0"
+thiserror = "1.0"
+toml = "0.8"
+dirs = "5.0"
+futures = "0.3"
+regex = "1"
+walkdir = "2.5"
+tiny_http = "0.12"
+notify = "6.1"
+mime_guess = "2.0"
+which = "6.0"
+uuid = { version = "1.10", features = ["v4", "serde"] }
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+chrono = { version = "0.4", features = ["serde"] }
+zip = "2.2"
+urlencoding = "2.1"
+once_cell = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

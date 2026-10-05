@@ -1,0 +1,20 @@
+{
+  "name": "noorbit",
+  "version": "0.5.0",
+  "private": true,
+  "description": "NoOrbit — IDE amb agent IA local, Blender i Unreal Engine 5",
+  "scripts": {
+    "dev": "pnpm --filter desktop dev",
+    "app:dev": "pnpm --filter desktop tauri dev",
+    "build": "pnpm --filter desktop build",
+    "typecheck": "pnpm --filter desktop exec tsc --noEmit",
+    "app:build": "pnpm --filter desktop tauri build",
+    "app:build:mac": "pnpm --filter desktop tauri build --bundles app,dmg",
+    "app:build:mac:intel": "pnpm --filter desktop tauri build --target x86_64-apple-darwin --bundles app,dmg",
+    "app:build:mac:arm": "pnpm --filter desktop tauri build --target aarch64-apple-darwin --bundles app,dmg",
+    "app:build:mac:universal": "pnpm --filter desktop tauri build --target universal-apple-darwin --bundles app,dmg",
+    "app:build:deb": "pnpm --filter desktop tauri build --bundles deb",
+    "app:build:linux": "pnpm --filter desktop tauri build --bundles deb,rpm,appimage",
+    "app:build:win": "pnpm --filter desktop tauri build --bundles nsis,msi"
+  }
+}

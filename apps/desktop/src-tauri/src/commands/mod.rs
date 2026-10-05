@@ -1,0 +1,15 @@
+pub mod agent;
+pub mod ai;
+pub mod api;
+pub mod computer;
+pub mod config;
+pub mod experts;
+pub mod fs;
+pub mod git;
+pub mod plugins;
+pub mod preview;
+pub mod skills;
+pub mod skills_store;
+pub mod system;
+pub mod term;
+pub mod workspace;

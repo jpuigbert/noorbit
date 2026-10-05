@@ -1,0 +1,36 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capacitats per defecte de NoOrbit",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-title",
+    "shell:allow-open",
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file",
+    "fs:allow-read-dir",
+    "fs:allow-exists",
+    "fs:allow-mkdir",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "dialog:allow-message",
+    "dialog:allow-confirm",
+    { "identifier": "fs:scope", "allow": [{ "path": "**" }] },
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        { "name": "git", "cmd": "git", "args": true },
+        { "name": "blender", "cmd": "blender", "args": true },
+        { "name": "python3", "cmd": "python3", "args": true },
+        { "name": "RunUAT.sh", "cmd": "RunUAT.sh", "args": true },
+        { "name": "RunUAT.bat", "cmd": "RunUAT.bat", "args": true },
+        { "name": "UnrealEditor", "cmd": "UnrealEditor", "args": true }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,215 @@
+/* 🎨 Tema fosc de NoOrbit — variables usades per tots els components */
+:root {
+  --bg-0: #0d0d12;
+  --bg-1: #121218;
+  --bg-2: #17171f;
+  --bg-3: #1e1e28;
+  --bg-4: #262633;
+
+  --border: #23232e;
+  --border-2: #2e2e3d;
+
+  --text-0: #e8e8f0;
+  --text-1: #b4b4c4;
+  --text-2: #8282a0;
+  --text-3: #5c5c76;
+
+  --accent: #7c5cff;
+  --accent-hover: #9880ff;
+  --accent-2: #22d3ee;
+
+  --success: #4ade80;
+  --error: #f87171;
+  --warning: #fbbf24;
+
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-md: 8px;
+
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "SF Mono", Menlo, Monaco, "Cascadia Code", monospace;
+}
+
+/* Fons del document: si l'arbre de React no es pinta (error de renderitzat o
+   mòdul que no s'executa), la finestra no es veu blanc pura, que és el senyal
+   més ambigu possible per entendre què ha fallat. */
+html,
+body {
+  background: var(--bg-0);
+  color: var(--text-0);
+}
+
+/* ---- Tema BLANC ---- */
+:root[data-theme="light"] {
+  --bg-0: #ffffff;
+  --bg-1: #f6f7f9;
+  --bg-2: #eef0f3;
+  --bg-3: #e4e7ec;
+  --bg-4: #d6dae1;
+
+  --border: #e2e5ea;
+  --border-2: #cdd2da;
+
+  --text-0: #1a1a22;
+  --text-1: #44464f;
+  --text-2: #6b6e78;
+  --text-3: #9a9daa;
+
+  --accent: #6d4aff;
+  --accent-hover: #5b3ae0;
+  --accent-2: #0891b2;
+
+  --success: #16a34a;
+  --error: #dc2626;
+  --warning: #d97706;
+}
+
+/* ---- Tema GRIS ---- */
+:root[data-theme="gray"] {
+  --bg-0: #2b2d31;
+  --bg-1: #33363b;
+  --bg-2: #3b3f45;
+  --bg-3: #454951;
+  --bg-4: #52565f;
+
+  --border: #3a3e44;
+  --border-2: #4c5158;
+
+  --text-0: #eef0f2;
+  --text-1: #c2c6cc;
+  --text-2: #9aa0a8;
+  --text-3: #6f757d;
+
+  --accent: #8b9dff;
+  --accent-hover: #a3b1ff;
+  --accent-2: #4dd0e1;
+
+  --success: #5cd08a;
+  --error: #f08080;
+  --warning: #f5c26b;
+}
+
+/* ---- Tema VERD ---- */
+:root[data-theme="green"] {
+  --bg-0: #0c1a12;
+  --bg-1: #10231a;
+  --bg-2: #143022;
+  --bg-3: #1b3d2b;
+  --bg-4: #245038;
+
+  --border: #1c3527;
+  --border-2: #2b4d3a;
+
+  --text-0: #e4f3e9;
+  --text-1: #b2d3be;
+  --text-2: #7fb392;
+  --text-3: #557a63;
+
+  --accent: #34d399;
+  --accent-hover: #5eead4;
+  --accent-2: #a3e635;
+
+  --success: #4ade80;
+  --error: #f87171;
+  --warning: #fbbf24;
+}
+
+/* ---- Tema GROC ---- */
+:root[data-theme="yellow"] {
+  --bg-0: #1a1606;
+  --bg-1: #241f0a;
+  --bg-2: #302810;
+  --bg-3: #3d3316;
+  --bg-4: #4d4020;
+
+  --border: #3a3012;
+  --border-2: #57471c;
+
+  --text-0: #f7f0d8;
+  --text-1: #ddd0a4;
+  --text-2: #b3a468;
+  --text-3: #857840;
+
+  --accent: #facc15;
+  --accent-hover: #fde047;
+  --accent-2: #fb923c;
+
+  --success: #a3e635;
+  --error: #f87171;
+  --warning: #fbbf24;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--text-0);
+  background: var(--bg-0);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg-4);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-2);
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  transition: all 0.12s;
+}
+.icon-btn:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
