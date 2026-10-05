@@ -142,14 +142,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/*.dmg
-            artifacts/*.app.zip
-            artifacts/*.exe
-            artifacts/*.msi
-            artifacts/*.deb
-            artifacts/*.rpm
-            artifacts/*.AppImage
-            artifacts/*.AppImage.tar.gz
+            artifacts/**/*.dmg
+            artifacts/**/*.app.zip
+            artifacts/**/*-setup.exe
+            artifacts/**/*.msi
+            artifacts/**/*.deb
+            artifacts/**/*.rpm
+            artifacts/**/*.AppImage
+            artifacts/**/*.AppImage.tar.gz
           generate_release_notes: true
           draft: false
           prerelease: false
