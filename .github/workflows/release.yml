@@ -196,3 +196,25 @@ jobs:
           make_latest: "true"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Un cop publicat, regenerem el versions.json perquè inclogui TAMBE
+      # el release que acabem de crear (abans de publicar-ho, l'índex només
+      # podia contenir les versions anteriors) i el substituïm com a asset.
+      - name: Refresh versions.json (now including this release)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh api "repos/${{ github.repository }}/releases/tags/$TAG" \
+            --jq '.assets[] | select(.name=="versions.json") | .id' \
+            | xargs -r -I{} gh api -X DELETE "repos/${{ github.repository }}/releases/assets/{}" || true
+          gh api repos/${{ github.repository }}/releases \
+            --paginate \
+            --jq 'map(select(.draft==false) | {
+              tag: .tag_name,
+              name: .name,
+              date: .published_at,
+              latest: .latest,
+              assets: [.assets[] | {name: .name, url: .browser_download_url, size: .size}]
+            }) | sort_by(.tag) | {updated: now|todate, versions: .}' > versions.json
+          gh release upload "$TAG" versions.json --clobber
