@@ -53,6 +53,11 @@ export function monacoThemeFor(ui: string): string {
 
 export const hasEditor = () => _editor !== null;
 
+/// Accés de baix nivell a la instància Monaco (per al mòdul de diagnòstics:
+/// registra marcadors, escolta «onDidChangeMarkers», etc.).
+export const getMonaco = () => _monaco;
+export const getEditor = () => _editor;
+
 function runAction(id: string) {
   const a = _editor?.getAction(id);
   if (a) a.run();

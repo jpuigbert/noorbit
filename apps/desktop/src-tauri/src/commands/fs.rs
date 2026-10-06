@@ -232,23 +232,23 @@ fn looks_like_text(name: &str, ext: &str) -> bool {
 pub async fn collect_project_files(limit: usize) -> Result<Vec<ProjectFile>, String> {
     let root = super::workspace::current_root()
         .ok_or_else(|| "No hi ha cap projecte obert.".to_string())?;
-    let limit = limit.max(1000);
+    // Pressupost de CARÀCTERS de contingut. Encara que el contingut no hi
+    // capiga, la RUTA de cada fitxer del projecte s'emet SEMPRE: així la IA
+    // veu TOTA l'estructura (no només els pocs fitxers que cabien abans) i pot
+    // referenciar o modificar qualsevol fitxer, encara que no en lisca el cos.
+    let limit = limit.max(2000);
     tauri::async_runtime::spawn_blocking(move || {
-        let mut out: Vec<ProjectFile> = Vec::new();
-        let mut total = 0usize;
+        // 1) Recull TOT el projecte: cada fitxer de text amb el seu cos
+        //    (retallat per fitxer) i la seua ruta relativa. Ací NO tallem la
+        //    caminada per pressupost: els NOMS importen tots, no només uns quants.
+        let mut cand: Vec<(String, String)> = Vec::new();
         let mut stack: Vec<PathBuf> = vec![root.clone()];
         while let Some(dir) = stack.pop() {
-            if total >= limit {
-                break;
-            }
             let entries = match std::fs::read_dir(&dir) {
                 Ok(e) => e,
                 Err(_) => continue,
             };
             for e in entries.flatten() {
-                if total >= limit {
-                    break;
-                }
                 let name = e.file_name().to_string_lossy().to_string();
                 if IGNORED.contains(&name.as_str()) {
                     continue;
@@ -278,15 +278,25 @@ pub async fn collect_project_files(limit: usize) -> Result<Vec<ProjectFile>, Str
                     } else {
                         content
                     };
-                    total += clipped.chars().count();
-                    out.push(ProjectFile {
-                        path: rel,
-                        content: clipped,
-                    });
+                    cand.push((rel, clipped));
                 }
             }
         }
-        out.sort_by(|a, b| a.path.cmp(&b.path));
+        cand.sort_by(|a, b| a.0.cmp(&b.0));
+        // 2) Assigna contingut fins a esgotar el pressupost; la resta de
+        //    fitxers eixen amb el camí i el cos BUIT (només «existeixen» a
+        //    l'arbre). Així la IA veu el projecte complet, no tres fitxers.
+        let mut out: Vec<ProjectFile> = Vec::new();
+        let mut total = 0usize;
+        for (path, clipped) in cand {
+            let n = clipped.chars().count();
+            if total + n > limit {
+                out.push(ProjectFile { path, content: String::new() });
+                continue;
+            }
+            total += n;
+            out.push(ProjectFile { path, content: clipped });
+        }
         Ok(out)
     })
     .await

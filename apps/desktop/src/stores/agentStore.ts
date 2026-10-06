@@ -3,6 +3,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { DEFAULT_UNREAL_CONFIG } from "../core/unreal/client";
 import { useExpertStore } from "./expertStore";
 import { useWorkspaceStore } from "./workspaceStore";
+import { lintOffline } from "../editor/diagnostics";
+import {
+  armAllMarks,
+  captureOriginal,
+  dropMark,
+  noteFileEdited,
+  noteLiveWriteContent,
+  noteLiveWriteStart,
+} from "./editReviewStore";
 
 export type Modality = "image" | "code" | "text" | "3d";
 /// Destí exterior on aplicar una ordre escrita al xat.
@@ -143,12 +152,16 @@ function blankSession(id: string, over: Partial<ChatSession> = {}): ChatSession 
 
 /// La conversa precedent que acompanya cada missatge nou (per CONTINUAR el
 /// treball i perquè un FORK herete el fil). S'acota per no desbordar la
-/// memòria dels models: els últims torns, cadascun retallat.
+/// memòria dels models: els últims torns, cadascun retallat. Finestra àmplia
+/// (16 torns) perquè el xat RECORDERA les consultes anteriors i responga en
+/// conseqüència; cada torn conserva 12.000 caràcters —abans 6.000— perquè un
+/// fitxer llegit en un torn anterior no arribe MEITAT tallat al següent; el
+/// backend encara compacta més si la RAM del model no abasta.
 function toHistory(messages: ChatMessage[]): HistoryTurn[] {
   return messages
     .filter((m) => m.text.trim() && !m.error)
-    .slice(-10)
-    .map((m) => ({ role: m.role, content: m.text.slice(0, 6000) }));
+    .slice(-16)
+    .map((m) => ({ role: m.role, content: m.text.slice(0, 12000) }));
 }
 
 /// Persistència dels xats oberts (conversa inclosa) a localStorage.
@@ -277,9 +290,43 @@ const PLATFORM_IOS =
   "  • No generes .ipa, .xcarchive ni binaris. NOMÉS .swift/.plist/.json/.md.\n" +
   "  • No usis Flutter, React Native, Capacitor, Ionic ni cap altre embolcall.";
 
+/// Nota que ensenya a la IA la directriu «@agent:» — el mateix mecanisme que
+/// «@file:» però per CREAR agents especialistes (com els subagents de Qoder).
+/// S'inclou en tots els system prompts de xat perquè el model sàpigua que pot
+/// fer-ho i com ha de formatar la línia.
+const AGENT_CREATION_SYSTEM =
+  "AGENTS ESPECIALISTES QUE POTS CREAR: si la tasca és prou complexa o barreja " +
+  "dominis (p. ex. frontend + base de dades + proves), pots DEMANAR que es cree " +
+  "un agent especialista per a cada part, com un expert real. Emet una línia " +
+  "per agent amb aquest format exacte:\n" +
+  "@agent: Nom | Rol curt | Instruccions de sistema (què ha de fer, com, i en " +
+  "quin llenguatge/format)\n" +
+  "NoOrbit el crearà automaticament com un especialista persistent (panell " +
+  "«Especialistes») que l'usuari podrà triar, llançar en solitari o posar en " +
+  "equip. Crea'n NOMÉS si apporta valor real; reutilitza els que ja existeixen " +
+  "(NoOrbit no en duplica cap pel nom). Pots omplir les 3 parts o només el " +
+  "nom: «@agent: Revisor de seguretat».\n\n";
+
+/// Sistema base MÍNIM que s'aplica SEMPRE, encara que «Inclou el codi» estiga
+/// tancat: dos regles que l'usuari ha demanat expressament —
+/// 1) MEMÒRIA: si el missatge continua el treball anterior, usa la conversa;
+///    si és una consulta nova sense relació, respon-ne només la nova.
+/// 2) FITXERS REALS: el codi generat s'ha d'emetre amb «@file:» perquè
+///    NoOrbit l'escriga al projecte (i sobreesciga la versió modificada).
+const MEMORY_SYSTEM =
+  AGENT_CREATION_SYSTEM +
+  "Tens el historial complet d'aquest xat. Si el missatge actual CONTINUA " +
+  "una tasca o consulta anterior, respon en conseqüència servant-la com a " +
+  "base. Si és una consulta NOVA sense cap relació, respon NOMÉS a la nova. " +
+  "Quan generes o modifiquis codi d'un projecte, emet cada fitxer amb una " +
+  "línia «@file: ruta/real» seguida del contingut COMPLET: NoOrbit el crea o " +
+  "sobreescriu SOL al projecte obert. Per modificar un fitxer existent usa " +
+  "la seua ruta EXACTA. Respon sempre en català.";
+
 /// Nota curta que acompanya el context del projecte: demana al model que
 /// s'hi basi i responga en català. S'usa només quan «Inclou el codi» és actiu.
 const CONTEXT_SYSTEM =
+  AGENT_CREATION_SYSTEM +
   "T'hem passat els fitxers reals del projecte obert com a context. Respon " +
   "en català i BASANT-TE EN AQUEST CODI (no inventes estructures ni fitxers " +
   "que no hi apareixen). QUAN GENERIS O MODIFIQUIS CODI, emet cada fitxer en " +
@@ -287,7 +334,17 @@ const CONTEXT_SYSTEM =
   "(p. ex. @file: src/components/Boto.tsx), perquè NoOrbit creï les carpetes " +
   "i apliqui el fitxer AUTOMÀTICAMENT. Si cal una carpeta sense fitxer, " +
   "afegeix una línia «@dir: <ruta>». Si no pots generar un fitxer sencer, " +
-  "marca-ho amb una línia «TODO: …».";
+  "marca-ho amb una línia «TODO: …».\n\n" +
+  "PER MODIFICAR UN FITXER QUE JA EXISTEIX: primer LOCALITZAL al context " +
+  "(rutes i contingut que t'hem donat), llegeix-ne el contingut actual i " +
+  "reemet el MATEIX camí amb «@file:» i el codi COMPLET ja amb els canvis " +
+  "aplicats (NoOrbit el sobreescriurà). No inventes un nom nou per a una " +
+  "versió modificada: usa la ruta exacta del fitxer existent.\n\n" +
+  "MEMÒRIA DE LA CONVERSA: tens el historial de les consultes anteriors " +
+  "d'aquest xat. Si el missatge actual CONTINUA una tasca prèvia (p. ex. " +
+  "«ara afegeix…», «millora-ho», «nova versió»), usa'l com a base. Si en " +
+  "canvi és una consulta NOVA sense relació, respon NOMÉS a la nova consulta " +
+  "sense arrossegar el tema anterior.";
 
 /// Converteix una llista de rutes (del pla de reserva) en camins nets.
 function parseManifest(raw: string): string[] {
@@ -311,29 +368,68 @@ function parseManifest(raw: string): string[] {
 
 /// Converteix la resposta en una llista de (ruta, contingut). Tolera tanques
 /// de codi (` ``` `) i l'optional `@`. Si no troba cap `@file:`, torna buit.
+/// HEURÍSTICA NOVA (important): si el bloc usa tanques ``` , el contingut és
+/// NOMÉS el que hi ha DINS DE LES TANQUES. Així la prosa posterior, les
+/// directrius «RUN|» i els altres anuncis NO s'arreneguen dins del fitxer
+/// (abans «python3 x.py» fallava amb SyntaxError per culpa d'eixa brossa).
 function parseFileBlocks(raw: string): { path: string; content: string }[] {
   const lines = raw.split(/\r?\n/);
-  const acc: { path: string; lines: string[] }[] = [];
-  let cur: { path: string; lines: string[] } | null = null;
+  type Cur = { path: string; fenced: string[]; bare: string[]; inFence: boolean; hadFence: boolean };
+  const acc: Cur[] = [];
+  let cur: Cur | null = null;
+  const flush = () => {
+    if (cur) {
+      acc.push(cur);
+      cur = null;
+    }
+  };
   for (const line of lines) {
-    const m = line.match(/^\s*@?file:\s*(.+?)\s*$/i);
+    const m = line.match(/^[ \t>*-]*@?file:\s*(.+?)\s*$/i);
     if (m) {
-      if (cur) acc.push(cur);
-      cur = { path: m[1].replace(/^[`'"]+|[`'"]+$/g, "").trim(), lines: [] };
+      flush();
+      cur = {
+        path: m[1].replace(/^[`'"*«]+|[`'"*»;:.,\s]+$/g, "").trim(),
+        fenced: [],
+        bare: [],
+        inFence: false,
+        hadFence: false,
+      };
       continue;
     }
-    if (cur) {
-      if (/^\s*```/.test(line)) continue; // ignora les tanques de codi
-      cur.lines.push(line);
+    if (!cur) continue;
+    if (/^\s*```/.test(line)) {
+      // Obri/tanca la tanca: el que passa DINS és codi real.
+      cur.inFence = !cur.inFence;
+      if (cur.inFence) cur.hadFence = true;
+      continue;
     }
+    // Una directriu d'execució o d'estructura INTERROMP el bloc: tot el que
+    // ve després ja no és contingut d'aquest fitxer.
+    if (
+      /^[ \t>*-]*@?(dir|directori|carpeta|folder|delete|esborra|borra|elimina|remove|rm)\w*:/i.test(line) ||
+      /^[ \t>*-]*(RUN|IMG|NB)\|/i.test(line)
+    ) {
+      flush();
+      continue;
+    }
+    if (cur.inFence) cur.fenced.push(line);
+    else cur.bare.push(line);
   }
-  if (cur) acc.push(cur);
+  flush();
   return acc
     .filter((f) => f.path.length > 0)
-    .map((f) => ({
-      path: f.path,
-      content: f.lines.join("\n").replace(/^\s*\n+/, "").replace(/\s+$/, "") + "\n",
-    }));
+    .map((f) => {
+      // Amb tanques: només el codi de dins. Sense tanques: les línies nues
+      // (com abans), però tallades a la primera directriu.
+      const body = f.hadFence && f.fenced.length > 0 ? f.fenced : f.bare;
+      return {
+        path: f.path,
+        content: body.join("\n").replace(/^\s*\n+/, "").replace(/\s+$/, "") + "\n",
+      };
+    })
+    // Un bloc sense contingut útil s'ignora: FILE_NUDGE ja encarrega de
+    // recordar al model que el reemeta complet.
+    .filter((f) => f.content.trim().length > 0);
 }
 
 /// Extreu les directrius de CARPETA que la IA emet per crear estructura buida
@@ -463,10 +559,135 @@ export function extractRecommendedPaths(raw: string): string[] {
   return out.slice(0, 60);
 }
 
+/// Directrius d'ESBORRAT que la IA emet per treure fitxers o carpetes del
+/// projecte. Formes tolerades: «@delete: ruta», «@esborra: ruta»,
+/// «@borra: ruta», «@elimina: ruta», «@remove: ruta». Abans d'això, dir-li
+/// a la IA «esborra X» era impossible: un @file: buit CREAVA el fitxer buit
+/// en lloc d'esborrar-lo. Les rutes són sempre relatives al projecte.
+function parseDeleteDirectives(raw: string): string[] {
+  const out: string[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const m = line.match(/^\s*@?\s*(?:delete|esborra|borra|elimina|remove|rm)\w*:\s*(.+?)\s*$/i);
+    if (!m) continue;
+    let d = m[1]
+      .replace(/^[`'"]+|[`'"]+$/g, "")
+      .trim()
+      .replace(/^\/+/, "")
+      .replace(/\\/g, "/");
+    if (!d || d.split("/").includes("..")) continue;
+    if (!out.includes(d)) out.push(d);
+  }
+  return out;
+}
+
 interface AgentResult {
   text: string;
   files: string[];
   steps: { label: string; detail: string; ok: boolean }[];
+}
+
+// ── AGENTS ESPECIALISTES CREATS PER LA IA ───────────────────────────────────
+// Mateix mecanisme que «@file:» o «@delete:»: la IA emet una directriu en una
+// línia i NoOrbit l'executa de veritat. Ací la IA pot CREAR agents
+// especialitzats (com subagents de Qoder) quan la tasca ho demane. Els agents
+// es guarden com a «Especialistes» persistents (panell Especialistes), amb el
+// seu rol i les seues instruccions, i l'usuari ja els podrà triar o posar en
+// equip. Format tolerat (separador «|», també s'accepta «·»):
+//   @agent: Nom | Rol curt | Instruccions de sistema (què ha de fer i com)
+function parseAgentDirectives(raw: string): { name: string; role: string; systemPrompt: string }[] {
+  const out: { name: string; role: string; systemPrompt: string }[] = [];
+  const seen = new Set<string>();
+  for (const line of raw.split(/\r?\n/)) {
+    const m = line.match(
+      /^\s*@\s*(?:agent|subagent|expert|especialista)s?\s*:\s*(.+?)\s*$/i
+    );
+    if (!m) continue;
+    const v = m[1].replace(/^[`'"\s[]+/, "").trim();
+    if (!v) continue;
+    // Separadors tolerats: un o dos pipes, «·», o tabulador.
+    const parts = v
+      .split(/\s*(?:\|{1,2}|·|\t)\s*/)
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
+    let name = "";
+    let role = "";
+    let systemPrompt = "";
+    if (parts.length >= 3) {
+      name = parts[0];
+      role = parts[1];
+      systemPrompt = parts.slice(2).join(" · ");
+    } else if (parts.length === 2) {
+      name = parts[0];
+      role = parts[1];
+      systemPrompt =
+        `Ets un agent especialitzat («${name}»: ${role}). Quan rebs una tasca, ` +
+        `treballa NOMÉS dins de la teva especialitat, resol-la amb codi real i ` +
+        `complete (format «@file:») i explica els passos en català.`;
+    } else {
+      name = v.slice(0, 48);
+      systemPrompt =
+        `Ets un agent especialitzat anomenat «${v}». Ajuda l'usuari en aquesta ` +
+        `tasca concreta amb codi real, verificable, i respostes en català.`;
+    }
+    name = name.slice(0, 60).trim();
+    if (!name || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    out.push({
+      name,
+      role: role.slice(0, 120),
+      systemPrompt: systemPrompt.trim() || `Agent especialitzat: ${name}.`,
+    });
+  }
+  return out;
+}
+
+/// L'acció «Materialitzar» del xat reenvia el text del missatge als parsers de
+/// directrius; si no treiem primer les línies «@agent:», prémer el botó tornaria
+/// a crear els mateixos agents (el nom els deduplica, però mostraria un avís
+/// «ja existien» innecessari). Aquest filtre els deixa fora sense tocar res més.
+function stripAgentDirectiveLines(raw: string): string {
+  return raw
+    .split(/\r?\n/)
+    .filter((l) => !/^\s*@\s*(?:agent|subagent|expert|especialista)s?\s*:/i.test(l))
+    .join("\n");
+}
+
+/// Crea (o detecta com a existents) els agents que la IA ha demanat amb
+/// «@agent:». Retorna un resum llegible per al xat o null si no n'ha emés cap.
+async function applyAgentDirectives(raw: string): Promise<string | null> {
+  const reqs = parseAgentDirectives(raw);
+  if (reqs.length === 0) return null;
+  const store = useExpertStore.getState();
+  // El panell d'Especialistes pot no haver-se muntat mai: carreguem la llista
+  // des del disc abans de deduplicar, si no podria crear duplicats.
+  if (store.experts.length === 0) await store.load();
+  const created: string[] = [];
+  const existed: string[] = [];
+  for (const r of reqs) {
+    const norm = r.name.trim().toLowerCase();
+    // Deduplica pel nom: la IA no hauria de crear dos agents iguals. Si ja
+    // existeix, es respecta (l'usuari el pot editar al panell).
+    if (useExpertStore.getState().experts.some((e) => e.name.trim().toLowerCase() === norm)) {
+      existed.push(r.name);
+      continue;
+    }
+    await store.create({ name: r.name, role: r.role, systemPrompt: r.systemPrompt, model: null });
+    // «create» no llença: confirma que ara és a la llista (després del «load»).
+    if (useExpertStore.getState().experts.some((e) => e.name.trim().toLowerCase() === norm)) {
+      created.push(`${r.name}${r.role ? ` (${r.role})` : ""}`);
+    }
+  }
+  if (created.length === 0 && existed.length === 0) return null;
+  const lines: string[] = [];
+  if (created.length > 0)
+    lines.push(
+      `🤖 Creats ${created.length} agent(s) especialista(s) — els trobaràs al panell «Especialistes» (i a la llista d'IA del xat):
+` +
+        created.map((n) => `• ${n}`).join("\n")
+    );
+  if (existed.length > 0)
+    lines.push(`↩️ Ja existien, no s'han duplicat (${existed.length}): ` + existed.join(", "));
+  return lines.join("\n\n");
 }
 
 /// Automaterialització: si la resposta de la IA conté codi amb NOMS de fitxers
@@ -486,12 +707,15 @@ async function autoMaterialize(raw: string): Promise<string | null> {
   }
   // Carpetes que la IA ha demanat explícitament (estructura buida, sense fitxer).
   const dirReqs = parseDirDirectives(raw);
-  if (files.length === 0 && dirReqs.length === 0) return null;
+  // Fitxers/carpetes que la IA ha demanat ESBORRAR (l'opció contraria a @file:).
+  const delReqs = parseDeleteDirectives(raw);
+  if (files.length === 0 && dirReqs.length === 0 && delReqs.length === 0) return null;
 
   const base = root.replace(/\/+$/, "");
   const written: string[] = [];
   const createdDirs: string[] = [];
   const pending: string[] = [];
+  let lintErrors = 0; //errors detectats en el codi escrit per la IA
 
   // 1) Crea primer les carpetes declarades (fins i tot si van buides).
   for (const d of dirReqs) {
@@ -511,7 +735,15 @@ async function autoMaterialize(raw: string): Promise<string | null> {
     const rel = f.path.replace(/^\/+/, "").replace(/\\/g, "/");
     if (rel.split("/").some((s) => s === "..")) continue;
     try {
-      await invoke("write_file", { path: `${base}/${rel}`, content: f.content });
+      const abs = `${base}/${rel}`;
+      // El codi VELL es llegeix ABANS d'aixafar-lo: és el que es mostrarà en
+      // roig al diff de revisió (verd = nou). Vegeu «editReviewStore».
+      const prev = await captureOriginal(abs);
+      await invoke("write_file", { path: abs, content: f.content });
+      noteFileEdited(abs, f.content, prev.original, prev.existed);
+      // Revisió lleugera del codi escrit (encara que el fitxer NO estiga obert):
+      // balanceig de delimiters i JSON vàlid. Els problemes van al panell.
+      lintErrors += lintOffline(abs, rel, f.content);
       written.push(rel);
       const segs = rel.split("/");
       segs.pop(); // descarta el nom del fitxer: la resta són carpetes
@@ -521,8 +753,29 @@ async function autoMaterialize(raw: string): Promise<string | null> {
       /* si un fitxer falla, continua amb la resta */
     }
   }
-  if (written.length === 0 && createdDirs.length === 0) return null;
+  if (written.length === 0 && createdDirs.length === 0 && delReqs.length === 0) return null;
+
+  // 3) Esborra el que la IA ha demanat amb «@delete:/@esborra:». Va DESPRÉS
+  //    de les escriptures: si un fitxer s'ha reescrit i alhora s'ha demanat
+  //    d'esborrar-lo, mana l'esborrat (l'usuari vol netejar el projecte).
+  const deleted: string[] = [];
+  for (const d of delReqs) {
+    try {
+      await invoke("delete_path", { path: `${base}/${d}` });
+      dropMark(`${base}/${d}`);
+      deleted.push(d);
+      // Si era també un fitxer escrit aquest torn, ix de la llista: ja no hi és.
+      const i = written.indexOf(d);
+      if (i >= 0) written.splice(i, 1);
+    } catch {
+      /* si falla (p. ex. no existeix), continua */
+    }
+  }
   await ws.refreshTree();
+  // La materialització definitiva ha acabat: els fitxers escrits en directe
+  // deixen de ser una previsualització i passen a revisió pendent (compte
+  // enrere de 35 s fins a acceptar-se sols).
+  armAllMarks();
 
   // Tasques que la pròpia IA ha marcat com a pendents al text (TODO, etc.).
   const todos = raw
@@ -547,7 +800,23 @@ async function autoMaterialize(raw: string): Promise<string | null> {
         written.map((p) => `• ${p}`).join("\n")
     );
   }
-  const pend = Array.from(new Set([...pending, ...todos]));
+  // Si el motor lleuger ha detectat errors (claus sense tancar, JSON invàlid…),
+  // avisem: es veuran al panell «Problemes» i la IA els pot corregir si se li
+  // demana. És el mateix que fa Eclipse en marcar línies en vermell en escriure.
+  if (lintErrors > 0) {
+    parts.push(
+      `⚠️ Detectats ${lintErrors} error${lintErrors === 1 ? "" : "s"} de sintaxi en el codi escrit.` +
+        ` Revisa'l al panell «Problemes» o demana a la IA que el corregeix.`
+    );
+  }
+  if (deleted.length > 0) {
+    parts.push(
+      `🗑 Esborrats del projecte (${deleted.length}):\n` +
+        deleted.map((p) => `• ${p}`).join("\n")
+    );
+  }
+  // El que s'ha esborrat ja no és cap tasca pendent.
+  const pend = Array.from(new Set([...pending, ...todos])).filter((p) => !deleted.includes(p));
   if (pend.length > 0) {
     parts.push(`⏳ Tasques pendents:\n` + pend.map((p) => `• ${p}`).join("\n"));
   }
@@ -576,6 +845,8 @@ export function resetLiveMaterialize() {
   liveTimer = null;
   liveBusy = false;
   livePendingRaw = null;
+  // Les revisions pendents del torn anterior NO es netegen: poden ser encara
+  // dins dels 35 s de gràcia i s'han d'acabar d'acceptar/rebutjar normalment.
 }
 
 /// Escriu al disc + editor els blocs @file: JA tancats que hagin canviat.
@@ -607,8 +878,16 @@ async function runLiveMaterialize() {
       const rel = f.path.replace(/^\/+/, "").replace(/\\/g, "/");
       if (!rel || rel.split("/").some((s) => s === "..")) continue;
       if (liveWritten.get(rel) === f.content) continue; // sense canvis
+      const abs = `${base}/${rel}`;
       try {
-        await useWorkspaceStore.getState().writeLive(`${base}/${rel}`, f.content);
+        // Primer contacte: guardem el contingut VELL abans d'escriure (si
+        // ho féssim després, el disc ja tindria el nou i no tindríem amb
+        // què comparar-lo) i escrivim el nou: disc + editor en directe.
+        const first = !liveWritten.has(rel);
+        const prev = await captureOriginal(abs);
+        await useWorkspaceStore.getState().writeLive(abs, f.content);
+        if (first) noteLiveWriteStart(abs, f.content, prev.original, prev.existed);
+        else noteLiveWriteContent(abs, f.content);
         liveWritten.set(rel, f.content);
         anyNew = true;
       } catch {
@@ -755,7 +1034,13 @@ export const useAgentStore = create<AgentState>((set, get) => {
           : "(generació aturada)"
         : null,
     });
-    get().finalizeTurn(sid);
+    // El raonament que el model ja havia emès ABANS del faliment (o de premere
+    // «Atura») també es conserva a la bombolla del xat: demanar-lo al backend
+    // és instantani i després es tanca el torn.
+    void fetchThinking(sid).then((t) => {
+      if (t) patch(sid, { lastThinking: t });
+      get().finalizeTurn(sid);
+    });
   };
 
   /// Després de tancar un torn, engega el següent missatge en cua del xat.
@@ -930,11 +1215,14 @@ export const useAgentStore = create<AgentState>((set, get) => {
           platform: s.platform,
           includeContext: s.includeContext,
           // Només els últims missatges, cada un acotat: la conversa completa
-          // podria excedir la quota del magatzem local.
+          // podria excedir la quota del magatzem local. Els límits són generosos
+          // (16.000 / 10.000 caràcters) perquè una resposta llarga no isca
+          // TRENCADA en reiniciar l'app; si la quota no dóna, el catch evita
+          // perdre la sessió sencera.
           messages: s.messages.slice(-30).map((m) => ({
             role: m.role,
-            text: m.text.slice(0, 8000),
-            thinking: m.thinking ? String(m.thinking).slice(0, 2000) : null,
+            text: m.text.slice(0, 16000),
+            thinking: m.thinking ? String(m.thinking).slice(0, 10000) : null,
             steps: (m.steps ?? []).slice(0, 8),
             elapsedMs: m.elapsedMs ?? null,
             at: m.at,
@@ -1087,18 +1375,18 @@ export const useAgentStore = create<AgentState>((set, get) => {
         const text = await runWithOOMRetry(sid, async (level) => {
           let m = finalPrompt;
           let h = history;
-          let sy: string | null = ctx ? CONTEXT_SYSTEM : null;
+          let sy: string | null = ctx ? CONTEXT_SYSTEM : MEMORY_SYSTEM;
           if (level === 1) {
             const small = sessOf(sid)?.includeContext ? await get().buildContext(sid, 1500) : "";
             m = small ? `${small}\n\n---\nPREGUNTA / TASCA:\n${prompt}` : prompt;
-            sy = small ? CONTEXT_SYSTEM : null;
+            sy = small ? CONTEXT_SYSTEM : MEMORY_SYSTEM;
           } else if (level === 2) {
             m = prompt;
-            sy = null;
+            sy = MEMORY_SYSTEM;
           } else if (level === 3) {
             m = prompt;
             h = [];
-            sy = null;
+            sy = MEMORY_SYSTEM;
           }
           return await invoke<string>("send_prompt_stream", {
             prompt: m,
@@ -1117,13 +1405,19 @@ export const useAgentStore = create<AgentState>((set, get) => {
         });
         // Automaterialització: si la resposta conté fitxers amb nom, s'escriuen
         // sols al projecte i afegim el resum del que ha canviat + pendents.
+        // I si ha emés «@agent:», NoOrbit crea els especialistes demanats.
         resetLiveMaterialize();
         const extra = await autoMaterialize(text);
+        const agents = await applyAgentDirectives(text);
         patch(sid, {
           running: false,
           startedAt: null,
           lastElapsedMs: Date.now() - t0,
-          lastResult: extra ? text + "\n\n" + extra : text,
+          // Les línies «@agent:» ja s'han executat: no cal mostrar-les al xat
+          // (el resum d'agents creats informa de la mateixa feina).
+          lastResult:
+            [stripAgentDirectiveLines(text), extra, agents].filter(Boolean).join("\n\n") ||
+            stripAgentDirectiveLines(text),
           lastThinking: thinking,
         });
         get().finalizeTurn(sid);
@@ -1322,19 +1616,31 @@ export const useAgentStore = create<AgentState>((set, get) => {
           ok: true,
         });
         const created: string[] = [];
+        let lintErrors = 0;
         for (const f of files) {
           const rel = f.path.replace(/^\/+/, "").replace(/\\/g, "/");
           // Seguretat: mai eixir de l'arrel del projecte.
           if (rel.split("/").some((seg) => seg === "..")) continue;
           const abs = `${base}/${rel}`;
+          const prev = await captureOriginal(abs);
           await invoke("write_file", { path: abs, content: f.content });
+          noteFileEdited(abs, f.content, prev.original, prev.existed);
+          lintErrors += lintOffline(abs, rel, f.content);
           created.push(rel);
         }
         await ws.refreshTree();
+        armAllMarks();
         const head = skeleton
           ? `🗂️ Esquelet creat a «${folder}»: ${created.length} fitxers/carpetes (buits, per omplir — el model local és dèbil):\n`
           : `✅ Creats ${created.length} fitxers a «${folder}»:\n`;
-        const summary = head + created.map((c) => `• ${c}`).join("\n");
+        const summary =
+          head +
+          created.map((c) => `• ${c}`).join("\n") +
+          (lintErrors > 0
+            ? `\n\n⚠️ ${lintErrors} error${
+                lintErrors === 1 ? "" : "s"
+              } de sintaxi detectats. Mira'l al panell «Problemes».`
+            : "");
         const thinking = await fetchThinking(sid);
         patch(sid, {
           running: false,
@@ -1377,7 +1683,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
         // Primer intentem el format estricte @file:; si no, rescatem blocs de codi.
         let files = parseFileBlocks(raw);
         if (files.length === 0) files = extractFromProse(raw);
-        if (files.length === 0) {
+        // El missatge també pot portar peticions d'esborrat («@delete: …»).
+        const dels = parseDeleteDirectives(raw);
+        if (files.length === 0 && dels.length === 0) {
           throw new Error(
             "Aquest missatge no conté cap bloc de codi (```) ni fitxers «@file:» que es puguin crear."
           );
@@ -1388,17 +1696,43 @@ export const useAgentStore = create<AgentState>((set, get) => {
           ok: true,
         });
         const created: string[] = [];
+        let lintErrors = 0;
         for (const f of files) {
           const rel = f.path.replace(/^\/+/, "").replace(/\\/g, "/");
           if (rel.split("/").some((seg) => seg === "..")) continue;
           const abs = `${base}/${rel}`;
+          const prev = await captureOriginal(abs);
           await invoke("write_file", { path: abs, content: f.content });
+          noteFileEdited(abs, f.content, prev.original, prev.existed);
+          lintErrors += lintOffline(abs, rel, f.content);
           created.push(rel);
         }
+        // Esborras demanats: van després de les escriptures (mana l'esborrat).
+        const erased: string[] = [];
+        for (const d of dels) {
+          try {
+            await invoke("delete_path", { path: `${base}/${d}` });
+            dropMark(`${base}/${d}`);
+            erased.push(d);
+            const i = created.indexOf(d);
+            if (i >= 0) created.splice(i, 1);
+          } catch {
+            /* si falla (p. ex. no existeix), continua */
+          }
+        }
         await ws.refreshTree();
+        armAllMarks();
         const summary =
           `✅ Creats ${created.length} fitxers a «${folder}» des del missatge:\n` +
-          created.map((c) => `• ${c}`).join("\n");
+          created.map((c) => `• ${c}`).join("\n") +
+          (erased.length > 0
+            ? `\n\n🗑 Esborrats (${erased.length}):\n` + erased.map((d) => `• ${d}`).join("\n")
+            : "") +
+          (lintErrors > 0
+            ? `\n\n⚠️ ${lintErrors} error${
+                lintErrors === 1 ? "" : "s"
+              } de sintaxi detectats. Mira'l al panell «Problemes».`
+            : "");
         patch(sid, { lastResult: summary, error: null });
         get().finalizeTurn(sid);
         return summary;
@@ -1516,24 +1850,42 @@ export const useAgentStore = create<AgentState>((set, get) => {
         return "";
       }
       try {
-        // Límit ajustable: en equips lleugers (CPU, 8 GB) un prompt gran fa que
-        // la PRIMERA resposta trigue minuts. 4.500 caràcters ≈ 1.500 tokens.
+        // Pressupost de CONTINGUT. Abans només hi cabien ~3 fitxers (4500 ÷
+        // 1500/caràcters per fitxer); ara n'adjuntem molts més. L'ARBRE de
+        // rutes, però, és SEMPRE el projecte COMPLET (el backend ja emet cada
+        // fitxer, encara que el seu cos no hi capga). En un equip lent la
+        // primera resposta pot trigar més; «runWithOOMRetry» el redueix si cal.
         const files = await invoke<{ path: string; content: string }[]>(
           "collect_project_files",
-          { limit: limit ?? 4500 }
+          { limit: limit ?? 16000 }
         );
         if (!files || files.length === 0) {
           patch(sid, { contextInfo: "⚠️ No he trobat fitxers de codi a la carpeta oberta." });
           return "";
         }
-        const chars = files.reduce((n, f) => n + f.content.length, 0);
+        // Els fitxers «només-ruta» (content buit) igualment eixen a l'arbre,
+        // però no generen un bloc de CONTINGUT buit.
+        const withBody = files.filter((f) => f.content.trim().length > 0);
+        const chars = withBody.reduce((n, f) => n + f.content.length, 0);
         patch(sid, {
-          contextInfo: `📁 ${files.length} fitxers (${chars} caràcters) s'adjunten a cada missatge. En un equip lent, la primera resposta pot trigar 1–3 minuts.`,
+          contextInfo:
+            `📁 Projecte complet a l'abast: ${files.length} fitxers (tots a l'arbre). ` +
+            `${withBody.length} amb contingut adjunt (${chars} caràcters). Els altres ` +
+            `els veus pel nom i pots modificar-los reenviant la seua ruta amb «@file:».`,
         });
-        const tree = files.map((f) => f.path).join("\n");
-        const body = files.map((f) => `===== ${f.path} =====\n${f.content}`).join("\n\n");
+        // Arbre acotat (400 rutes) perquè un monorepo enorme no inflle el
+        // prompt; si en sobresurten, s'indica quants falten.
+        const MAX_TREE = 400;
+        const more = files.length - MAX_TREE;
+        const tree =
+          files.slice(0, MAX_TREE).map((f) => f.path).join("\n") +
+          (more > 0 ? `\n… i ${more} fitxers més.` : "");
+        const body = withBody.map((f) => `===== ${f.path} =====\n${f.content}`).join("\n\n");
         return (
-          `A continuació tens ELS FITXERS REALS del projecte obert (workspace).\n` +
+          `A continuació tens TOT EL PROJECTE obert (workspace). La llista de\n` +
+          `RUTES inclou CADA fitxer del projecte; el CONTINGUT adjunt cobreix els\n` +
+          `que hi capen (els altres els veus pel nom: per modificar-ne un, reemet\n` +
+          `la MATEIXA ruta amb «@file:» i el codi complet).\n` +
           `RUTES:\n${tree}\n\nCONTINGUT:\n${body}`
         );
       } catch (e) {
@@ -1610,14 +1962,16 @@ export const useAgentStore = create<AgentState>((set, get) => {
       }
 
       // Si no hi havia context adjunt, `sys` encara és null: apliquem almenys
-      // la pista de plataforma perquè el xat continue escrivint codi natiu.
+      // la pista de plataforma perquè el xat continue escrivint codi natiu;
+      // si tampoc n'hi ha, la base de memòria + fitxers (MEMORY_SYSTEM).
       if (!sys && platformPreamble) sys = platformPreamble + CONTEXT_SYSTEM;
+      if (!sys) sys = MEMORY_SYSTEM;
 
       // Reconstruïble: per cada nivell de reintent, munte el «prompt final»
       // amb MENYS context (o sense). S'usa dins «runWithOOMRetry».
       const rebuildForLevel = async (level: number): Promise<{ m: string; h: HistoryTurn[]; s: string | null }> => {
         if (level === 0) return { m: msg, h: history, s: sys };
-        const sysBase = platformPreamble ? platformPreamble + CONTEXT_SYSTEM : (sess.includeContext ? CONTEXT_SYSTEM : null);
+        const sysBase = platformPreamble ? platformPreamble + CONTEXT_SYSTEM : (sess.includeContext ? CONTEXT_SYSTEM : MEMORY_SYSTEM);
         if (level === 1) {
           // Context REDUÏT: limitem a ≈ 1.500 caràcters.
           const small = sess.includeContext ? await get().buildContext(sid, 1500) : "";
@@ -1626,10 +1980,10 @@ export const useAgentStore = create<AgentState>((set, get) => {
         }
         if (level === 2) {
           // Sense context adjunt: només el text de l'usuari.
-          return { m: text, h: history, s: platformPreamble ? platformPreamble + CONTEXT_SYSTEM : null };
+          return { m: text, h: history, s: platformPreamble ? platformPreamble + CONTEXT_SYSTEM : MEMORY_SYSTEM };
         }
         // Level 3: sense context I sense històrial.
-        return { m: text, h: [], s: platformPreamble ? platformPreamble + CONTEXT_SYSTEM : null };
+        return { m: text, h: [], s: platformPreamble ? platformPreamble + CONTEXT_SYSTEM : MEMORY_SYSTEM };
       };
 
       const expert = sess.expertId
@@ -1666,11 +2020,14 @@ export const useAgentStore = create<AgentState>((set, get) => {
             });
             resetLiveMaterialize();
             const extra = await autoMaterialize(out);
+            const agents = await applyAgentDirectives(out);
             patch(sid, {
               running: false,
               startedAt: null,
               lastElapsedMs: Date.now() - t0,
-              lastResult: extra ? out + "\n\n" + extra : out,
+              lastResult:
+                [stripAgentDirectiveLines(out), extra, agents].filter(Boolean).join("\n\n") ||
+                stripAgentDirectiveLines(out),
               lastThinking: thinking,
             });
           } else {
@@ -1719,11 +2076,14 @@ export const useAgentStore = create<AgentState>((set, get) => {
           });
           resetLiveMaterialize();
           const extra = await autoMaterialize(out);
+          const agents = await applyAgentDirectives(out);
           patch(sid, {
             running: false,
             startedAt: null,
             lastElapsedMs: Date.now() - t0,
-            lastResult: extra ? out + "\n\n" + extra : out,
+            lastResult:
+              [stripAgentDirectiveLines(out), extra, agents].filter(Boolean).join("\n\n") ||
+              stripAgentDirectiveLines(out),
             lastThinking: thinking,
           });
         }

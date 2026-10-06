@@ -37,8 +37,9 @@ respondràs a la pregunta original amb eixe contingut.\n\
   NB|PREGUNTA_IA|nom-de-la-ia|la pregunta completa en una linia\n\
   NB|ESTAT|\n\
   NB|TANCAR|\n\
-A «PREGUNTA_IA» només hi ha: deepseek, chatgpt, claude, gemini, perplexity, \
-grok. La directriu va SOLA en el seu torn (no la baralles amb la resposta). \
+A «PREGUNTA_IA» només hi ha: deepseek, dsh (DeepSeek Harness local, \
+port 3080), chatgpt, claude, gemini, perplexity, grok. La directriu va SOLA \
+en el seu torn (no la baralles amb la resposta). \
 ABANS de fer servir PREGUNTA_IA, demana PERMÍS a l'usuari en un torn a \
 part: digue-li a quina IA web vols preguntar i què li vols demanar; \
 executa la directriu NOMÉS quan l'usuari ho accepte (si ja t'ho ha demanat \
@@ -232,7 +233,8 @@ async fn ask_web_ia(app: &AppHandle, name: &str, question: &str) -> String {
     let Some(ia) = br::find_ia(name) else {
         return format!(
             "NB|RESULTAT|PREGUNTA_IA| error: no conec cap IA web anomenada «{}». \
-             Opcions: deepseek, chatgpt, claude, gemini, perplexity, grok.",
+             Opcions: deepseek, dsh (DeepSeek Harness local), chatgpt, claude, \
+             gemini, perplexity, grok.",
             name
         );
     };

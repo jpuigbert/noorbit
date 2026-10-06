@@ -96,12 +96,29 @@ jobs:
         run: pnpm "$NOORBIT_SCRIPT"
         shell: bash
 
-      # ── Comprimim la .app de macOS perquè és un directori ────────────────
-      - name: Zip .app bundle (macOS)
+      # ── macOS: firma ad-hoc (codesign --sign -) perquè l'app arrenchi amb
+      # doble clic a qualsevol Mac. Sense signatura, macOS 15+ rebutja
+      # l'obertura («l'aplicació està malmesa»). Es firma la .app JA
+      # empaquetada i es torna a generar el DMG amb la còpia signada, de
+      # manera que el que es publica als releases ja ve firmat.
+      - name: Ad-hoc codesign + rebuild DMG/zip (macOS)
         if: matrix.id == 'macos-universal'
         run: |
-          cd apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos
+          VER=$(node -p "JSON.parse(require('fs').readFileSync('apps/desktop/src-tauri/tauri.conf.json','utf8')).version")
+          BUNDLE=apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle
+          codesign --force --deep --sign - "$BUNDLE/macos/NoOrbit.app"
+          codesign --verify --deep --strict --verbose=2 "$BUNDLE/macos/NoOrbit.app"
+          # regenera el DMG amb la .app signada (substitueix l'unsigned)
+          STAGE=$(mktemp -d)
+          cp -R "$BUNDLE/macos/NoOrbit.app" "$STAGE/NoOrbit.app"
+          ln -s /Applications "$STAGE/Applications"
+          rm -f "$BUNDLE"/dmg/*.dmg
+          hdiutil create -volname NoOrbit -srcfolder "$STAGE" -ov -format UDZO "$BUNDLE/dmg/NoOrbit_${VER}_universal.dmg"
+          rm -rf "$STAGE"
+          # comprimit .app també amb la signatura inside
+          cd "$BUNDLE/macos"
           if [ -d NoOrbit.app ]; then
+            rm -f NoOrbit.app.zip
             zip -r -y NoOrbit.app.zip NoOrbit.app
           fi
 
@@ -179,14 +196,15 @@ jobs:
           # velles. generate_release_notes hi afegeix sota la llista de
           # commits/PR des de l'últim tag.
           body: |
-            ## NoOrbit 0.6.0 — novetats
+            ## NoOrbit 0.61.2-alpha — novetats
 
-            - **Totes les IAs naveguen soles**: directrius `NB|OBRIR|`, `NB|LLEGIR|`, `NB|PREGUNTA_IA|`… al xat, executades per NoOrbit al navegador intern — sense cap botó i demanant permís a l'usuari abans de preguntar a una IA web.
-            - **Codi aprofitable**: si una IA web o una pàgina retorna codi, s'extreu en blocs (amb el llenguatge) i la IA local l'integra al projecte com a fitxers reals (`@file:` + automaterialització).
-            - **Imatges al xat**: es mostren, es poden copiar al porta-retalls i adjuntar/enganxar (⌘V) com a entrada dels models amb visió.
-            - **Catàleg d'IAs** (menú IA): mida aproximada de cada model abans de descarregar, censura, visió, generació d'imatges i de vídeo.
-            - **Venice i proveïdors robustos**: claus normalitzades (espais/barres/URL), model `venice-uncensored`, errors 401/404/429 explicats i migració automàtica de la configuració vella.
-            - **Generació i manipulació d'imatges** (ComfyUI local o API en línia amb la teua clau) segons la RAM disponible.
+            - **Errors de sintaxi detectats fins i tot sense obrir el fitxer**: quan la IA escriu fitxers, NoOrbit els revisa offline (JSON real + balanceig de claudàtors per a TS/JS, Python, Rust, C…) i els errors apareixen al panell *Problemes* i com a ratlles vermelles en obrir-los.
+            - **Quick-fix estil Eclipse**: clica sobre l'error i prem **⌘+1** (Ctrl+1 a Windows/Linux) per aplicar la correcció suggerida (tanca claudàtors/cometes, esborra caràcters sobrers…); **⇧⌘+1** demana a la IA local que repari l'error.
+            - **Suggeriments en escriure**: autocomplete natiu de Monaco per a TS/JS/JSON/CSS/HTML, en línia i sense connexió.
+            - **DMG universal signat ad-hoc** (`codesign --force --deep --sign -`): instal·lable amb **doble clic** a qualsevol Mac (Intel i Apple Silicon). La primera vegada, si Gatekeeper es queixa: clic dret → *Obre*, o `xattr -dr com.apple.quarantine /Applications/NoOrbit.app`.
+            - **Windows**: el `-setup.exe` s'instal·la amb doble clic (usuari actual, sense admin). **Debian/Ubuntu**: `.deb` amb doble clic (GDebi/centre de programari) o `sudo apt install ./NoOrbit_…_amd64.deb`.
+
+            Instruccions completes d'instal·lació a qualsevol SO: fitxer `INSTALL.md` del repositori.
 
             Les **versions anteriors** segueixen disponibles per descarregar a https://github.com/jpuigbert/noorbit/releases — i l'índex complet de versions i assets és el fitxer adjunt `versions.json`.
           draft: false

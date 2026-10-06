@@ -20,6 +20,10 @@ pub struct AiConfig {
     /// Permet posar-los en un USB extern per estalviar espai al disc.
     #[serde(default)]
     pub models_dir: String,
+    /// Carpeta de models que el servidor Ollama en marxa fa servir REALMENT
+    /// (aplicada amb OLLAMA_MODELS). Serveix per saber si cal reiniciar-lo.
+    #[serde(default)]
+    pub models_dir_applied: String,
 }
 
 impl Default for AiConfig {
@@ -31,6 +35,7 @@ impl Default for AiConfig {
             image_model: "flux-schnell".into(),
             backend_3d: String::new(),
             models_dir: String::new(),
+            models_dir_applied: String::new(),
         }
     }
 }

@@ -14,6 +14,7 @@
 pub mod adapter;
 pub mod agent;
 pub mod discovery;
+pub mod dsh;
 pub mod online_adapter;
 
 pub use adapter::send_request;

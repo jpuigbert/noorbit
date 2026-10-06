@@ -19,6 +19,8 @@
   flex-direction: column;
   flex: 1;
   min-width: 0;
+  /* referència per a la pastilla de revisió d'edicions de la IA */
+  position: relative;
 }
 
 /* ---- Barra de menú ---- */
@@ -211,6 +213,141 @@
 .editor-content {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* L'editor viu i el diff de revisió ocupen el mateix espai; un d'amagats. */
+.editor-host {
+  flex: 1;
+  min-height: 0;
+}
+.editor-host.hidden {
+  visibility: hidden;
+  position: absolute;
+  inset: 0;
+}
+
+/* ---- Revisió d'edicions de la IA (estil Qoder / VS Code) ----------------
+   Barra que acompanya el diff en línia: codi NOU en verd, VELL en roig, i
+   els botons Accepta / Rebutja amb el compte enrere d'acceptació sola. ---- */
+.review-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  flex-shrink: 0;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-1);
+}
+.review-spark {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.review-file {
+  font-weight: 600;
+  color: var(--text-0, #fff);
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.review-hint {
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.review-count {
+  color: var(--accent-2);
+  font-variant-numeric: tabular-nums;
+}
+.review-accept {
+  border-color: rgba(74, 222, 128, 0.45);
+  color: var(--success);
+}
+.review-accept:hover {
+  background: rgba(74, 222, 128, 0.12);
+}
+.review-reject {
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #f87171;
+}
+.review-reject:hover {
+  background: rgba(248, 113, 113, 0.12);
+}
+.review-diff {
+  border-top: 1px solid var(--border);
+}
+
+/* Pastilla flotant: canvis pendents en fitxers que no són els oberts. */
+.review-pill {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 30;
+  width: 320px;
+  max-width: calc(100% - 28px);
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-1);
+}
+.review-pill.minimized {
+  width: auto;
+  padding: 4px 9px;
+  gap: 5px;
+  display: flex;
+  align-items: center;
+  color: var(--accent);
+  cursor: pointer;
+}
+.review-pill-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.review-pill-title {
+  font-weight: 600;
+}
+.review-pill-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 76px;
+  overflow: auto;
+}
+.review-pill-file {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-1);
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.review-pill-file:hover {
+  border-color: var(--accent);
+  color: #fff;
+}
+.review-pill-more {
+  color: var(--text-2);
+  font-size: 11px;
+  align-self: center;
+}
+.review-pill-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
 }
 
 /* ---- Panell dret ---- */
@@ -1876,6 +2013,11 @@
   border: 1px solid var(--border, #333);
   border-bottom-left-radius: 3px;
   color: var(--text-0, #ddd);
+  /* Respostes molt llargues (un fitxer sencer, un pla detallat): la bombolla
+     no creix sense fi —arriba fins al 60% de la pantalla i guanya barra de
+     desplaçament pròpia, així es llegeixen totes les línies. */
+  max-height: 60vh;
+  overflow: auto;
 }
 .chat-bubble.assistant.err {
   border-color: var(--error, #e5484d);
@@ -2332,7 +2474,8 @@
   padding: 8px;
 }
 .proc-text,
-.proc-thinking {
+.proc-thinking,
+.proc-block {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
@@ -2349,8 +2492,80 @@
   border-left: 2px solid var(--border);
   padding-left: 8px;
   margin-bottom: 8px;
-  max-height: 30%;
-  overflow-y: auto;
+}
+
+/* Seccions desplegables del visor: el raonament i la resposta es conserven
+   i l'usuari els pot obrir i tancar (abans l'alçada fixa els amagava). */
+.proc-sec {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.proc-sec > summary {
+  cursor: pointer;
+  padding: 5px 8px;
+  font-weight: 600;
+  color: var(--text-1);
+  user-select: none;
+}
+.proc-sec[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+.proc-sec-hint {
+  margin-left: 6px;
+  font-weight: 400;
+  font-family: monospace;
+  font-size: 10px;
+  color: var(--text-2);
+}
+.proc-sec .proc-block {
+  padding: 8px;
+}
+.sec-think .proc-block {
+  color: var(--text-2);
+  font-style: italic;
+}
+.sec-answer .proc-block {
+  color: var(--text-0);
+}
+.proc-turns {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+}
+.proc-turn {
+  border-left: 2px solid var(--border);
+  padding-left: 6px;
+}
+.proc-turn > summary {
+  cursor: pointer;
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.proc-turn .proc-block {
+  padding: 6px 0;
+}
+.proc-block-think {
+  color: var(--text-2);
+  font-style: italic;
+}
+.proc-block-err {
+  color: #f87171;
+}
+.proc-error {
+  border: 1px solid rgba(248, 81, 73, 0.45);
+  background: rgba(248, 81, 73, 0.1);
+  color: #fca5a5;
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+  font-size: 12px;
 }
 
 /* ---- Botons de còpia/desa (Objectiu 3) ---- */
@@ -2464,6 +2679,50 @@
   gap: 6px;
   padding: 6px 6px 0;
 }
+/* Xip d'un fitxer de context adjuntat (no imatge). */
+.ap-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 180px;
+  padding: 3px 6px;
+  border: 1px solid var(--border, #2a2a35);
+  border-radius: 6px;
+  background: var(--bg-1, #14141a);
+  color: var(--text-1, #c2c2cc);
+  font-size: 11px;
+}
+.ap-file-chip > span,
+.ap-file-chip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ap-file-chip .ap-thumb-x {
+  margin-left: 2px;
+}
+/* Resaltat quan s'arrossega alguna cosa sobre l'entrada del xat. */
+.agent-prompt {
+  position: relative;
+}
+.agent-prompt.drag-over {
+  outline: 2px dashed var(--accent, #8b5cf6);
+  outline-offset: -2px;
+}
+.ap-dropzone {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(139, 92, 246, 0.14);
+  color: var(--text-0, #e6e6ea);
+  font-size: 12.5px;
+  pointer-events: none;
+  border-radius: 6px;
+}
 .ap-thumb {
   position: relative;
   display: inline-block;
@@ -2541,4 +2800,205 @@
 }
 .ic-no {
   color: var(--text-3, #5a5a68);
+}
+
+/* ── Previsualització d'imatges a l'editor ───────────────────────────────── */
+.image-viewer {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  background:
+    repeating-conic-gradient(rgba(255, 255, 255, 0.03) 0% 25%, transparent 0% 50%) 0 0 /
+    22px 22px,
+    var(--bg-0, #101014);
+  padding: 16px;
+}
+.image-viewer img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.45);
+}
+.image-viewer-msg {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2, #8b8b96);
+  font-size: 13px;
+}
+
+/* ── Panell de Problemes ─────────────────────────────────────────────────── */
+.problems-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-size: 12px;
+}
+.problems-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border, #2a2a35);
+  color: var(--text-0, #e6e6ea);
+}
+.problems-head .icon-btn {
+  margin-left: auto;
+}
+.problems-body {
+  flex: 1;
+  overflow: auto;
+  padding: 6px 0;
+}
+.problems-file-name {
+  padding: 4px 10px;
+  font-weight: 700;
+  color: var(--text-1, #b6b6c0);
+  background: var(--bg-1, #14141a);
+  position: sticky;
+  top: 0;
+}
+.problems-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 4px 10px 4px 22px;
+  border: 0;
+  background: transparent;
+  color: var(--text-1, #c2c2cc);
+  cursor: pointer;
+}
+.problems-item:hover {
+  background: var(--bg-2, #1c1c24);
+}
+.problems-item svg {
+  flex: none;
+  align-self: center;
+}
+.problems-msg {
+  flex: 1;
+  min-width: 0;
+}
+.problems-loc {
+  color: var(--text-2, #8b8b96);
+  white-space: nowrap;
+}
+.problems-src {
+  color: var(--text-3, #6a6a74);
+  white-space: nowrap;
+}
+.problems-empty {
+  padding: 18px 16px;
+  color: var(--text-1, #b6b6c0);
+  line-height: 1.5;
+}
+.problems-empty-hint {
+  margin-top: 10px;
+  color: var(--text-2, #8b8b96);
+  font-size: 11px;
+}
+.status-problems {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text-1, #c2c2cc);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 6px;
+}
+.status-problems:hover {
+  background: var(--bg-2, #1c1c24);
+}
+
+/* Botó «Actualització» de la barra d'estat: només apareix quan GitHub té una
+   versió més nova que la que s'està executant. */
+.status-update {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: #e0b34c;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 6px;
+}
+.status-update:hover {
+  background: var(--bg-2, #1c1c24);
+  text-decoration: underline;
+}
+
+/* ── Consola de depuració ────────────────────────────────────────────────── */
+.debug-console {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.dc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border, #2a2a35);
+  color: var(--text-0, #e6e6ea);
+  font-size: 12px;
+}
+.dc-filter {
+  margin-left: auto;
+  max-width: 120px;
+}
+.dc-body {
+  flex: 1;
+  overflow: auto;
+  padding: 6px 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.dc-empty {
+  padding: 16px;
+  color: var(--text-2, #8b8b96);
+}
+.dc-line {
+  display: flex;
+  gap: 8px;
+  padding: 1px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.dc-line:hover {
+  background: var(--bg-1, #14141a);
+}
+.dc-time {
+  color: var(--text-3, #6a6a74);
+  flex: none;
+}
+.dc-src {
+  color: var(--text-2, #8b8b96);
+  flex: none;
+  min-width: 60px;
+}
+.dc-text {
+  flex: 1;
+  color: var(--text-0, #e6e6ea);
+}
+.c-error .dc-text {
+  color: #ff6b6b;
+}
+.c-warn .dc-text {
+  color: #e6b450;
+}
+.c-info .dc-text {
+  color: #7cc4ff;
+}
+.c-system .dc-text {
+  color: #b6b6c0;
+  font-style: italic;
 }

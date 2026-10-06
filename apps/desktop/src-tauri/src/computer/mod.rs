@@ -85,6 +85,179 @@ fn is_forbidden(command: &str) -> bool {
     .any(|p| lower.contains(p))
 }
 
+/// Resultat de normalitzar una «comanda» que pot haver arribat com a
+/// llenguatge natural (p. ex. un model local que reenvia «obre blender» tal
+/// qual, o l'usuari escrivint-ho al panell). Evita el `command not found`
+/// convertint ordres senzilles en comandes reals i rebutjant la resta.
+pub enum Norm {
+    /// Ja és una comanda de shell real: executa-la tal com és.
+    Kept,
+    /// S'ha traduït llenguatge natural a una comanda real.
+    Translated(String),
+    /// És llenguatge natural que no es pot traduir de forma segura.
+    Rejected(String),
+}
+
+/// Plegament simple: minúscules + sense accents (per reconèixer verbs en
+/// català/castellà/espanyol independentment de l'ortografia exacta).
+fn fold(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            'à' | 'á' | 'ä' | 'â' | 'ã' => 'a',
+            'è' | 'é' | 'ë' | 'ê' => 'e',
+            'ì' | 'í' | 'ï' | 'î' => 'i',
+            'ò' | 'ó' | 'ö' | 'ô' | 'õ' => 'o',
+            'ù' | 'ú' | 'ü' | 'û' => 'u',
+            'ç' => 'c',
+            'ñ' => 'n',
+            c => c,
+        })
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+/// Reconeix una aplicació coneguda dins el text i en retorna el nom real
+/// (per a `open -a "<Nom>"`). Cobreix els casos més freqüents a macOS.
+fn find_app(flat: &str) -> Option<&'static str> {
+    let mapa: &[(&[&str], &str)] = &[
+        (&["blender"], "Blender"),
+        (&["opera"], "Opera"),
+        (&["safari"], "Safari"),
+        (&["chrome", "google chrome", "chromium"], "Google Chrome"),
+        (&["firefox"], "Firefox"),
+        (&["notes", "apunts", "notas"], "Notes"),
+        (&["calculator", "calculadora"], "Calculator"),
+        (&["terminal", "consola"], "Terminal"),
+        (&["music", "musica", "itunes"], "Music"),
+        (&["messages", "missatgeria", "imessage"], "Messages"),
+        (&["mail", "correu"], "Mail"),
+        (&["photos", "fotos"], "Photos"),
+        (&["unity", "unity editor"], "Unity"),
+        (&["unreal", "ue5", "ue4", "unreal engine"], "UnrealEngine"),
+        (&["vscode", "visual studio code", "code"], "Visual Studio Code"),
+        (&["finder", "cercador"], "Finder"),
+    ];
+    for (keys, name) in mapa {
+        if keys.iter().any(|k| flat.contains(k)) {
+            return Some(name);
+        }
+    }
+    None
+}
+
+/// Intenta traduir una ordre en llenguatge natural a una comanda de shell
+/// real. Si no és una comanda ja real i no es pot traduir, la rebutja amb un
+/// missatge clar (en lloc de deixar que el shell done `command not found`).
+pub fn normalize_command(raw: &str) -> Norm {
+    let cmd = raw.trim();
+    if cmd.is_empty() {
+        return Norm::Kept;
+    }
+    let head = cmd.split_whitespace().next().unwrap_or("");
+    // 1) Sembla ja una comanda real? executable al PATH, un embolcall propi de
+    //    NoOrbit, un camí/URL, una assignació d'entorn o una sintaxi de shell.
+    let looks_real = head.contains('/')
+        || head.contains('.')
+        || head.contains('=')
+        || head.starts_with('~')
+        || head.starts_with('$')
+        || head.starts_with('(')
+        || head.starts_with('"')
+        || head.starts_with('\'')
+        || matches!(
+            head,
+            "cd" | "sudo" | "env" | "export" | "source" | "if" | "for" | "while" | "time" | "nohup" | "true" | "false"
+        )
+        || which::which(head).is_ok();
+    if looks_real {
+        return Norm::Kept;
+    }
+    // 2) Llenguatge natural: plegament i patrons senzills.
+    let flat = fold(cmd);
+    let verb_obrir = ["obre", "obri", "obrir", "obriu", "arrenca", "arrenque", "engega", "lanca", "llanca", "inicia", "executa", "obri la", "open", "launch", "start"]
+        .iter()
+        .any(|v| flat.starts_with(v));
+    if verb_obrir {
+        // «obre una URL» → open "<url>"
+        if flat.contains("http") || flat.contains("www.") || looks_like_domain(&flat) {
+            if let Some(tok) = cmd.split_whitespace().find(|t| {
+                let f = fold(t);
+                f.contains("http") || f.contains("www.") || f.contains('.')
+            }) {
+                return Norm::Translated(format!("open '{}'", tok.replace('\'', r"'\''")));
+            }
+        }
+        if let Some(app) = find_app(&flat) {
+            return Norm::Translated(format!("open -a '{}'", app));
+        }
+        // Només un o dos mots restants i purament alfabètics: podria ser el
+        // nom d'una app no catalogada. S'intenta «open -a» amb el candidat.
+        let words: Vec<&str> = flat.split_whitespace().collect();
+        if words.len() <= 3 {
+            if let Some(cand) = words.iter().rev().find(|w| {
+                w.chars().all(|c| c.is_alphabetic()) && !is_stopword(w)
+            }) {
+                let mut name = cand.to_string();
+                if let Some(first) = name.get_mut(0..1) {
+                    first.make_ascii_uppercase();
+                }
+                // Només si el nom no fa pinta de paraula comuna d'accio.
+                return Norm::Translated(format!("open -a '{}'", name));
+            }
+        }
+        return Norm::Rejected(reject_msg(cmd));
+    }
+    if ["llista", "ls", "ensenya", "mostra", "enseny", "quins", "que hi ha", "veur", "veure"]
+        .iter()
+        .any(|v| flat.starts_with(v))
+    {
+        return Norm::Translated("ls -la".into());
+    }
+    if ["crea", "crear", "fes", "fer", "mk", "nova carpeta", "nou directori"]
+        .iter()
+        .any(|v| flat.starts_with(v))
+        && (flat.contains("carpeta") || flat.contains("directori") || flat.contains("folder") || flat.contains("dir"))
+    {
+        if let Some(name) = cmd
+            .split_whitespace()
+            .rev()
+            .map(|t| t.trim_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '_'))
+            .find(|t| !t.is_empty() && fold(t) != "carpeta" && fold(t) != "directory")
+        {
+            return Norm::Translated(format!("mkdir -p '{}'", name.replace('\'', r"'\''")));
+        }
+    }
+    Norm::Rejected(reject_msg(cmd))
+}
+
+fn is_stopword(w: &str) -> bool {
+    [
+        "el", "la", "ls", "les", "un", "una", "uns", "unes", "de", "del", "al", "a", "en", "per",
+        "que", "i", "o", "the", "and", "for", "with", "coses", "ara", "si", "vull", "pot",
+    ]
+    .contains(&w)
+}
+
+/// Detecta un domini («obre noorbit.com») sense confondre'l amb frases.
+fn looks_like_domain(flat: &str) -> bool {
+    flat.split_whitespace().any(|t| {
+        let has_dot = t.contains('.');
+        let ends_known = [".com", ".cat", ".org", ".net", ".io", ".es"]
+            .iter()
+            .any(|e| t.ends_with(e));
+        has_dot && (ends_known || t.matches('.').count() == 1)
+    })
+}
+
+fn reject_msg(cmd: &str) -> String {
+    format!(
+        "«{}» és llenguatge natural, no una comanda del sistema. Escriu una \
+         comanda real (p. ex. «open -a Blender», «ls -la», «python3 main.py») o \
+         demana-ho al xat de la IA, que redacta la comanda i l'executa per a tu.",
+        cmd.chars().take(80).collect::<String>()
+    )
+}
+
 impl ComputerController {
     pub fn new(data_dir: PathBuf) -> Self {
         let path = data_dir.join("computer_permissions.json");
@@ -206,10 +379,24 @@ impl ComputerController {
             ));
         }
 
+        // Guarda lingüística: si ha arribat llenguatge natural («obre
+        // blender», «Crea un submarí») el traduïm a una comanda real quan és
+        // senzill i el rebutgem quan no, en lloc d'enviar-lo cru al shell i
+        // obtindre «command not found: Crea» (eixit 127).
+        let effective: String = match normalize_command(command) {
+            Norm::Kept => command.to_string(),
+            Norm::Translated(real) => real,
+            Norm::Rejected(msg) => return Err(anyhow!(msg)),
+        };
+        let command = effective.as_str();
+
         let perms = self.permissions();
         if !perms.enabled {
             return Err(anyhow!(
-                "El control de l'ordinador està desactivat. Activa'l a l'agent de l'IA."
+                "El control de l'ordinador està DESACTIVAT: la IA no pot tocar \
+                 el teu Mac. Activa'l al panell «Ordinador» de la dreta (icona \
+                 d'escut ▸ «Permet que la IA controli l'ordinador»); cada \
+                 comanda es confirmarà en pantalla abans d'executar-se."
             ));
         }
 

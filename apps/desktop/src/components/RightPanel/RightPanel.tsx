@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from "react";
-import { Eye, Bot, Gamepad2, Play, Square, Terminal, UserCog, Boxes, GitBranch, Radio, Smartphone } from "lucide-react";
+import { Eye, Bot, Gamepad2, Play, Square, Terminal, UserCog, Boxes, GitBranch, Radio, Smartphone, AlertTriangle } from "lucide-react";
 import { useT } from "../../i18n";
 import { usePreviewStore, type RightTab } from "../../stores/previewStore";
 import AgentPanel from "../Agent/AgentPanel";
@@ -10,6 +10,8 @@ import UnrealPanel from "../Unreal/UnrealPanel";
 import BlenderPanel from "../Blender/BlenderPanel";
 import MobilePanel from "../Mobile/MobilePanel";
 import GitPanel from "../Git/GitPanel";
+import ProblemsPanel from "../Problems/ProblemsPanel";
+import DebugConsole from "../Console/DebugConsole";
 
 export default function RightPanel() {
   const { t } = useT();
@@ -30,6 +32,8 @@ export default function RightPanel() {
     { key: "blender", label: t("menu.blender"), icon: <Boxes size={13} /> },
     { key: "mobile", label: t("menu.mobile"), icon: <Smartphone size={13} /> },
     { key: "git", label: t("rightPanel.git"), icon: <GitBranch size={13} /> },
+    { key: "problems", label: t("rightPanel.problems"), icon: <AlertTriangle size={13} /> },
+    { key: "console", label: t("rightPanel.console"), icon: <Terminal size={13} /> },
   ];
 
   return (
@@ -77,6 +81,8 @@ export default function RightPanel() {
         {rightTab === "blender" && <BlenderPanel />}
         {rightTab === "mobile" && <MobilePanel />}
         {rightTab === "git" && <GitPanel />}
+        {rightTab === "problems" && <ProblemsPanel />}
+        {rightTab === "console" && <DebugConsole />}
       </div>
     </div>
   );

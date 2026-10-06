@@ -5,6 +5,8 @@
 //! - image      -> ComfyUI (si està actiu) o Ollama (fallback)
 //! - 3d         -> backend 3D local (Ollama genera l'script Blender)
 
+pub mod runtools;
+
 use crate::ai::AiManager;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};

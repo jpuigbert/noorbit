@@ -134,8 +134,11 @@ pub fn run() {
             // Sistema operatiu
             commands::system::open_terminal,
             commands::system::reveal_in_finder,
+            commands::system::open_externally,
             commands::system::system_total_memory,
             commands::system::system_memory_status,
+            // Actualitzacions (GitHub Releases)
+            commands::update::check_update,
             // IA
             commands::ai::send_prompt,
             commands::ai::send_prompt_stream,
@@ -155,8 +158,13 @@ pub fn run() {
             commands::ai::comfyui_running,
             commands::ai::start_comfyui,
             commands::ai::install_comfyui,
+            commands::ai::dsh_installed,
+            commands::ai::install_dsh,
+            commands::ai::start_dsh_web,
+            commands::ai::dsh_web_running,
             commands::ai::ollama_get_models_dir,
             commands::ai::ollama_set_models_dir,
+            commands::ai::ollama_migrate_models,
             commands::ai::list_external_volumes,
             commands::ai::ollama_set_model,
             commands::ai::ollama_active_model,
@@ -174,6 +182,8 @@ pub fn run() {
             commands::image::image_edit,
             commands::image::image_transform,
             commands::image::image_import,
+                        commands::image::file_import,
+                        commands::image::file_context_read,
             // Navegador web intern (quan la IA ho necessiti: llegir pàgines
             // renderitzades; les accions humanes es mostren, mai se supla ningú)
             commands::browser::browser_open,

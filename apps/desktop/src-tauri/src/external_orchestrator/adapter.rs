@@ -4,6 +4,8 @@
 //! `/api/chat` i la resta amb la interfície compatible amb OpenAI
 //! `/v1/chat/completions`. Totes dues en mode sense streaming: l'orquestrador
 //! vol la resposta completa per reemetre-la després al xat.
+//! DeepSeek Harness (dsh) no té API HTTP: s'executa el seu mode headless
+//! (`dsh --profile headless "tasca"`), que imprimeix la resposta final i surt.
 
 use crate::external_orchestrator::discovery::ExternalIa;
 use anyhow::{anyhow, Result};
@@ -20,6 +22,7 @@ pub async fn send_request(
 ) -> Result<(String, String)> {
     match ia.api.as_str() {
         "ollama" => chat_ollama(http, ia, prompt, system).await,
+        "dsh" => chat_dsh(ia, prompt, system).await,
         _ => chat_openai(http, ia, prompt, system).await,
     }
 }
@@ -140,4 +143,39 @@ async fn chat_openai(
         .ok_or_else(|| anyhow!("Sense resposta de {}", ia.name))?
         .to_string();
     Ok((content, model))
+}
+
+/// Comunicació amb DeepSeek Harness (dsh): cap HTTP — el harness no en
+/// pública un de compatible. S'executa el seu mode headless, que obri una
+/// sessió nova, imprimeix la resposta final i eix. La instrucció de sistema
+/// es prefixa al prompt perquè headless no en rep un d'independient.
+async fn chat_dsh(
+    ia: &ExternalIa,
+    prompt: &str,
+    system: Option<&str>,
+) -> Result<(String, String)> {
+    let full = match system.filter(|s| !s.trim().is_empty()) {
+        Some(s) => format!("{s}\n\n{prompt}"),
+        None => prompt.to_string(),
+    };
+    // Command::output() bloqueja: al thread blocat, com la resta del codi
+    // que llança processos externs. Un agent headless pot tardar força.
+    // `dsh::run_blocking` resol el binari (sistema o instal·lació local de
+    // NoOrbit) i augmenta el PATH perquè el seu shebang trobe node.
+    let out = tauri::async_runtime::spawn_blocking(move || {
+        crate::external_orchestrator::dsh::run_blocking(&["--profile", "headless", &full])
+    })
+    .await
+    .map_err(|e| anyhow!("Error llançant {}: {}", ia.name, e))??;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(anyhow!("dsh error ({}): {}", out.status, err));
+    }
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if text.is_empty() {
+        return Err(anyhow!("Sense resposta de {}", ia.name));
+    }
+    // El model concret el tria el perfil headless dins del harness: NoOrbit
+    // ho etiqueta honestament com el harness, no com un model específic.
+    Ok((text, "dsh headless".into()))
 }

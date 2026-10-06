@@ -56,6 +56,157 @@ pub fn runaway_repetition(full: &str) -> bool {
 /// qualsevol crida que no s'haja iniciat dins d'un xat múltiple.
 pub const DEFAULT_SESSION: &str = "main";
 
+/// Extrau el RAONAMENT d'un fragment NDJSON d'Ollama. El camp oficial és
+/// `message.thinking`, però els servidors compatibles amb OpenAI (Ollama Cloud,
+/// DeepSeek, OpenRouter…) l'anomenen `reasoning` o `reasoning_content`: els
+/// tres es reconeixen perquè QUALSEVOL model puga mostrar el seu pensament.
+fn chunk_thinking(msg: &serde_json::Value) -> String {
+    ["thinking", "reasoning", "reasoning_content"]
+        .iter()
+        .filter_map(|k| msg.get(*k).and_then(|v| v.as_str()))
+        .find(|s| !s.is_empty())
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// Què està fent REALMENT Ollama mentre encara no ha mostrat text. Abans
+/// NoOrbit ho deia tot endevinant («està CARREGANT el model»…) i repetia la
+/// mateixa línia cada 15 s; ara ho pregunta a Ollama amb «/api/ps».
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum WaitPhase {
+    /// Ollama no respon a l'estat dels models: no ho endevinem, ho diem.
+    Unknown,
+    /// El model encara no és a la memòria: es carrega des del disc.
+    Loading,
+    /// Ja és a la memòria: llegeix el context abans de la primera paraula.
+    Prefill,
+    /// Ja estan arribant fragments de text, però triga.
+    Generating,
+}
+
+/// Bytes en «GB» amb una xifra decimal (els fabricants de models fan servir
+/// unitats decimals, com «/api/tags»).
+fn fmt_gb(bytes: u64) -> String {
+    format!("{:.1} GB", bytes as f64 / 1e9)
+}
+
+/// Temps d'espera llegible: «45 s» o «2 min 15 s».
+fn fmt_wait(ms: u64) -> String {
+    let s = ms / 1000;
+    if s < 60 {
+        format!("{} s", s)
+    } else {
+        format!("{} min {} s", s / 60, s % 60)
+    }
+}
+
+/// Context d'una esperada: què sap NoOrbit del model i de l'equip, i quina
+/// nota va donar per última vegada. Serveix per dir VERITATS (mida del model,
+/// RAM disponible, si ja és carregat) i per NO repetir la mateixa frase.
+struct WaitCtx {
+    model: String,
+    /// Mida del model al disc (bytes), si Ollama la dona.
+    size: Option<u64>,
+    /// RAM total de l'equip (bytes).
+    ram: Option<u64>,
+    /// Clau de l'última nota emesa i instant en què es va emetre.
+    last: Option<(String, u64)>,
+}
+
+impl WaitCtx {
+    fn new(model: String, size: Option<u64>, ram: Option<u64>) -> Self {
+        Self { model, size, ram, last: None }
+    }
+
+    /// El model no cap còmodament a la RAM (més del 60 %: el mateix criteri
+    /// que usa `best_fit_model` per triar-lo). Aleshores carregar-lo vol dir
+    /// anar lent i intercanviar dades amb el disc.
+    fn tight(&self) -> bool {
+        match (self.size, self.ram) {
+            (Some(s), Some(r)) if r > 0 => s * 5 > r * 3,
+            _ => false,
+        }
+    }
+
+    /// Mida i RAM entre parèntesis, si les sabem.
+    fn sizes(&self) -> String {
+        match (self.size, self.ram) {
+            (Some(s), Some(r)) => format!(" ({} al disc, {} de RAM)", fmt_gb(s), fmt_gb(r)),
+            (Some(s), None) => format!(" ({} al disc)", fmt_gb(s)),
+            (None, Some(r)) => format!(" (l'equip en té {} de RAM)", fmt_gb(r)),
+            (None, None) => String::new(),
+        }
+    }
+
+    /// Consell pràctic: QUÈ fer, no només esperar. L'avís de la RAM ja es va
+    /// dir abans de començar; ací es RECORDA quan l'esperada es fa llarga.
+    fn advice(&self, ms: u64) -> String {
+        let mut s = String::new();
+        if self.tight() && ms >= 60_000 {
+            s.push_str(&format!(
+                "\n⚠️ «{}» ocupa {} i l'equip en té {} de RAM: anirà molt a poc a poc i pot \
+                 quedar-se sense memòria.",
+                self.model,
+                fmt_gb(self.size.unwrap_or_default()),
+                fmt_gb(self.ram.unwrap_or_default())
+            ));
+        }
+        if ms >= 300_000 {
+            s.push_str(
+                "\nPorta més de 5 minuts: sol ser perquè el model no hi cap. Prem «Atura» i, al \
+                 «Gestor de models», tria'n un de més lleuger o connecta'n un de gratuït al \
+                 núvol (aquest NO cal baixar-lo).",
+            );
+        }
+        s
+    }
+
+    /// Redacta la nota per a una fase i un temps donats.
+    fn note(&self, phase: WaitPhase, ms: u64) -> String {
+        let head = match phase {
+            WaitPhase::Generating => format!(
+                "NoOrbit espera paraules del model ({}): «{}» ja és a la memòria i genera, poc a poc \
+                 si el model és gran per a aquesta RAM.",
+                fmt_wait(ms), self.model
+            ),
+            WaitPhase::Prefill => format!(
+                "NoOrbit espera Ollama ({}): «{}» JA és a la memòria; ara llegeix tot el context \
+                 abans d'escriure la primera paraula.",
+                fmt_wait(ms), self.model
+            ),
+            WaitPhase::Loading => format!(
+                "NoOrbit espera Ollama ({}): està CARREGANT «{}»{} des del disc.",
+                fmt_wait(ms), self.model, self.sizes()
+            ),
+            WaitPhase::Unknown => format!(
+                "NoOrbit espera Ollama ({}): Ollama no respon a l'estat dels models, així que NoOrbit \
+                 no pot saber si està carregant «{}» o bloquejat.",
+                fmt_wait(ms), self.model
+            ),
+        };
+        format!("{}{}\n", head, self.advice(ms))
+    }
+
+    /// Diu quina nota cal emetre ara mateix, o `None` si NO cal dir res de nou:
+    /// només es parla quan CANVIA l'estat real o cada 60 s. Així el visor ja no
+    /// s'omple de nou vegades la mateixa línia.
+    fn take(&mut self, phase: WaitPhase, ms: u64) -> Option<String> {
+        let key = format!("{:?}|{}|{}", phase, self.tight(), ms >= 300_000);
+        let repeat = self
+            .last
+            .as_ref()
+            .map(|(_, t)| ms.saturating_sub(*t) >= 60_000)
+            .unwrap_or(true);
+        let changed = self.last.as_ref().map(|(k, _)| *k != key).unwrap_or(true);
+        if !changed && !repeat {
+            return None;
+        }
+        let note = self.note(phase, ms);
+        self.last = Some((key, ms));
+        Some(note)
+    }
+}
+
 tokio::task_local! {
     /// Xat ACTUAL. Cada comanda de xat l'obre amb `in_session` abans de cridar
     /// la IA: així els events, la cancel·lació i el model triat pertanyen al
@@ -116,6 +267,9 @@ pub struct SessionCtl {
     thinking: Arc<RwLock<Option<String>>>,
     provider: Arc<RwLock<Option<String>>>,
     model: Arc<RwLock<Option<String>>>,
+    /// Certifica que AQUEST xat ja ha llançat un «error» explicat al visor. Així
+    /// la comanda de xat no repeteix el mateix faliment com un segon bàner.
+    err_shown: Arc<AtomicBool>,
 }
 
 impl SessionCtl {
@@ -127,12 +281,14 @@ impl SessionCtl {
             thinking: Arc::new(RwLock::new(None)),
             provider: Arc::new(RwLock::new(None)),
             model: Arc::new(RwLock::new(None)),
+            err_shown: Arc::new(AtomicBool::new(false)),
         }
     }
 
     /// Comença un torn nou: sense bandera d'aturada i sense raonament anterior.
     pub async fn begin(&self) {
         self.cancel.store(false, Ordering::Relaxed);
+        self.err_shown.store(false, Ordering::Relaxed);
         *self.thinking.write().await = None;
     }
 
@@ -194,6 +350,15 @@ impl SessionCtl {
     /// Emet el procés d'aquest xat (fase + proveïdor + model + temps).
     pub fn process(&self, app: &tauri::AppHandle, provider: &str, model: &str, phase: &str, chunk: &str, elapsed_ms: u64) {
         emit_process(app, &self.id, provider, model, phase, chunk, elapsed_ms);
+        // Un sol «error» per torn: el primer és el que conté l'explicació.
+        if phase == "error" {
+            self.err_shown.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Diu si aquest xat ja ha mostrat un error en el torn en curs.
+    pub fn error_shown(&self) -> bool {
+        self.err_shown.load(Ordering::Relaxed)
     }
 }
 
@@ -272,7 +437,10 @@ struct ChatMessage {
     role: String,
     content: String,
     /// Raonament que alguns models (deepseek-r1, qwen3…) retornen a part.
-    #[serde(default)]
+    /// Els servidors compatibles amb OpenAI fan servir altres noms per al
+    /// mateix canal: es reconeixen tots perquè cap IA es quede sense que se
+    /// n'mostre el pensament.
+    #[serde(default, alias = "reasoning", alias = "reasoning_content")]
     thinking: Option<String>,
     /// Imatges en base64 (format Ollama) per a models amb visió.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -308,6 +476,11 @@ struct ChatRequest {
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<String>,
+    /// Demana el RAONAMENT SEPARAT al model (la bandera «think» d'Ollama).
+    /// Només s'envia quan el model declara l'habilitat «thinking»: si no,
+    /// Ollama retorna un error 400 i el torn moriria sense resposta.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    think: Option<bool>,
     /// Opcions d'Ollama (p. ex. «num_ctx»). Absent = valors per defecte.
     #[serde(skip_serializing_if = "Option::is_none")]
     options: Option<serde_json::Value>,
@@ -320,6 +493,10 @@ struct ChatResponse {
 
 pub struct AiManager {
     http: reqwest::Client,
+    /// Client per a streaming, SENSE temps màxim total: un model local en CPU
+    /// pot trigar més de quatre minuts a generar, i tallar-ho era un error
+    /// falsò. La seguretat la dona el «watchdog» d'inactivitat del bucle.
+    http_stream: reqwest::Client,
     ollama_url: String,
     default_model: String,
     active_provider: Arc<RwLock<String>>,
@@ -335,6 +512,9 @@ pub struct AiManager {
     /// fils i una finestra de context més xicoteta per no saturar la màquina
     /// mentre la tasca s'ha degradat a segon pla.
     background: Arc<AtomicBool>,
+    /// Habilitats declarades per cada model («thinking», «vision», «tools»…),
+    /// llegides una sola vegada amb «/api/show» i recordades.
+    caps_cache: Arc<Mutex<HashMap<String, Vec<String>>>>,
     /// Orquestrador d'IAs externes: si la IA principal no resol la
     /// tasca, s'intenta amb una altra IA local i, si no n'hi ha cap de
     /// disponible, amb els proveïdors en línia oficials de l'usuari.
@@ -376,6 +556,234 @@ where
             }
         }
     }
+}
+
+/// Etiquetes que alguns models empren per a escriure el raonament DINS del seu
+/// propi text (formats antics de DeepSeek, models a què es demana «pensament en
+/// veu alta»…). La primera component OBRI el pensament i la segona el TANCA.
+/// S'escriuen per parts amb `concat!` perquè aquest fitxer no continga mai la
+/// marca literal sencera (confongria cerques i resums).
+const REASON_TAGS: [(&str, &str); 2] = [
+    (concat!("<", "think", ">"), concat!("<", "/think", ">")),
+    (
+        concat!("<", "reasoning", ">"),
+        concat!("<", "/reasoning", ">"),
+    ),
+];
+
+/// Paraules que obren/tanquen el pensament quan el model no usa etiquetes.
+const REASON_OPEN_WORDS: [&str; 5] = ["reason:", "thinking:", "think:", "pensament:", "pensa:"];
+const REASON_CLOSE_WORDS: [&str; 3] = ["answer:", "respon:", "respuesta:"];
+
+/// Separa el raonament que un model escriu MESCLAT amb la seua resposta.
+/// Retorna (pensament, resposta); si no hi ha cap senyal, el text sencer és la
+/// resposta i el pensament queda buit.
+fn split_inline_reasoning(text: &str) -> (String, String) {
+    let lower = text.to_lowercase();
+    // 1) hi ha una ETIQUETA DE TANCAMENT? tot el que precedeix és pensament.
+    let closes: Vec<&str> = REASON_TAGS
+        .iter()
+        .map(|(_, c)| *c)
+        .chain(REASON_CLOSE_WORDS.iter().copied())
+        .collect();
+    let mut best: Option<(usize, usize)> = None; // (índex, longitud de l'etiqueta)
+    for c in closes {
+        if let Some(i) = lower.find(c) {
+            if best.map(|(bi, _)| i < bi).unwrap_or(true) {
+                best = Some((i, c.len()));
+            }
+        }
+    }
+    if let Some((i, len)) = best {
+        let head = &text[..i];
+        // Si l'etiqueta d'obertura era una paraula, el pensament comença després.
+        let opens: Vec<&str> = REASON_TAGS
+            .iter()
+            .map(|(o, _)| *o)
+            .chain(REASON_OPEN_WORDS.iter().copied())
+            .collect();
+        let mut thought = head.to_string();
+        for o in opens {
+            if let Some(s) = head.to_lowercase().find(o) {
+                thought = head[s + o.len()..].to_string();
+                break;
+            }
+        }
+        let answer = text[i + len..].trim_start().to_string();
+        return (thought.trim().to_string(), answer);
+    }
+    // 2) encara no hi ha tancament: si el fragment COMENÇA per una obertura, tot
+    //    el que porta fins ara és raonament i el model no ha contestat.
+    let t = text.trim_start();
+    let low = t.to_lowercase();
+    for (o, _) in REASON_TAGS {
+        if low.starts_with(o) {
+            return (t[o.len()..].to_string(), String::new());
+        }
+    }
+    for p in REASON_OPEN_WORDS {
+        if low.starts_with(p) {
+            return (t[p.len()..].trim_start().to_string(), String::new());
+        }
+    }
+    (String::new(), text.to_string())
+}
+
+/// Tallem un tram del text acumulat, respectant els límits de caràcter (els
+/// fragments d'un model poden partir un accent per la meitat).
+fn take(s: &str, a: usize, b: usize) -> String {
+    let (a, b) = (a.min(s.len()), b.min(s.len()));
+    let mut i = a;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    let mut j = b;
+    while j < s.len() && !s.is_char_boundary(j) {
+        j += 1;
+    }
+    s[i..j].to_string()
+}
+
+/// Cerca la TANCAMENT del pensament dins d'un text ja baixat a minúscules.
+/// Retorna (índex, longitud de l'etiqueta).
+fn reasoning_close_at(low: &str) -> Option<(usize, usize)> {
+    let mut best: Option<(usize, usize)> = None;
+    for c in REASON_TAGS
+        .iter()
+        .map(|(_, c)| *c)
+        .chain(REASON_CLOSE_WORDS.iter().copied())
+    {
+        if let Some(i) = low.find(c) {
+            if best.map(|(bi, _)| i < bi).unwrap_or(true) {
+                best = Some((i, c.len()));
+            }
+        }
+    }
+    best
+}
+
+/// Separa EN DIRECTE el pensament de la resposta quan un model escriu les dues
+/// coses pel mateix canal. No es pot mirar fragment per fragment: Ollama
+/// parteix les etiquetes entre tokens (d'««» en feia «<th» + «ink»»), així que
+/// es guarda el text brut acumulat i es busca sempre damunt del conjunt.
+struct ThoughtSplitter {
+    /// Tot el «content» rebut fins ara.
+    raw: String,
+    /// Bytes de `raw` ja repartits al visor.
+    sent: usize,
+    /// None: encara no sabem si aquest model pensa en veu alta.
+    /// Some(true): estem dins del pensament. Some(false): ja respon.
+    mode: Option<bool>,
+}
+
+impl ThoughtSplitter {
+    fn new() -> Self {
+        Self {
+            raw: String::new(),
+            sent: 0,
+            mode: None,
+        }
+    }
+
+    /// Afegeix un fragment i retorna (pensament nou, resposta nova) per emetre.
+    fn push(&mut self, delta: &str) -> (String, String) {
+        self.raw.push_str(delta);
+        loop {
+            // Encara sense decidir: es mira l'inici del text, no el fragment.
+            if self.mode.is_none() {
+                let skip = self.raw.len() - self.raw.trim_start().len();
+                let head = take(&self.raw, skip, self.raw.len());
+                let low = head.to_lowercase();
+                // Quina etiqueta d'obertura (si n'hi ha) comença el text?
+                let open_len = REASON_TAGS
+                    .iter()
+                    .map(|(o, _)| *o)
+                    .chain(REASON_OPEN_WORDS)
+                    .find(|tag| low.starts_with(tag))
+                    .map(|t| t.len())
+                    .unwrap_or(0);
+                if let Some((i, len)) = reasoning_close_at(&low) {
+                    // Pensament tancat abans de decidir-ne res: tot el que hi
+                    // ha abans de l'etiqueta de tancament ho és.
+                    let thought = take(&head, open_len, i).trim().to_string();
+                    self.sent = skip + i + len;
+                    self.mode = Some(false);
+                    let answer = take(&self.raw, self.sent, self.raw.len());
+                    self.sent = self.raw.len();
+                    return (thought, answer);
+                }
+                if open_len > 0 {
+                    self.mode = Some(true);
+                    self.sent = skip + open_len;
+                    continue;
+                }
+                // Massa text sense cap senyal: era la resposta normal i corrent.
+                if head.chars().count() >= 24 || self.raw.len() >= 96 {
+                    self.mode = Some(false);
+                    self.sent = 0;
+                    continue;
+                }
+                // Poquet encara: esperem el següent fragment abans de mostrar.
+                return (String::new(), String::new());
+            }
+            if self.mode == Some(true) {
+                // Dins del pensament: tot és raonament fins que aparega el
+                // tancament (que pot haver arribat retallat en dues parts).
+                let rest = take(&self.raw, self.sent, self.raw.len());
+                if let Some((i, len)) = reasoning_close_at(&rest.to_lowercase()) {
+                    let thought = take(&self.raw, self.sent, self.sent + i);
+                    self.sent += i + len;
+                    self.mode = Some(false);
+                    let answer = take(&self.raw, self.sent, self.raw.len());
+                    self.sent = self.raw.len();
+                    return (thought, answer);
+                }
+                self.sent = self.raw.len();
+                return (rest, String::new());
+            }
+            let answer = take(&self.raw, self.sent, self.raw.len());
+            self.sent = self.raw.len();
+            return (String::new(), answer);
+        }
+    }
+
+    /// El que quedava per repartir quan el model ha acabat: si encara no
+    /// s'havia decidit res, era una resposta curta i no cal perdre-la.
+    fn flush(&mut self) -> (String, String) {
+        let rest = take(&self.raw, self.sent, self.raw.len());
+        self.sent = self.raw.len();
+        match self.mode {
+            Some(true) => (rest, String::new()),
+            _ => (String::new(), rest),
+        }
+    }
+}
+
+/// Tradueix un codi d'error d'Ollama a una explicació accionable: un simple
+/// «ERROR» no diu res, cal dir quin és el problema real i com eixir-ne.
+fn ollama_error_note(model: &str, status: reqwest::StatusCode, body: &str) -> String {
+    let low = body.to_lowercase();
+    let q = format!("«{}»", model);
+    let causa =
+        if status.as_u16() == 404 || low.contains("not found") || low.contains("no such model") {
+            format!("El model {} no està instal·lat a Ollama (404). Baixa'l o tries-ne un altre.", q)
+        } else if low.contains("does not support thinking") {
+            format!("{} no admet raonament separat: NoOrbit no el tornarà a demanar.", q)
+        } else if low.contains("memory") || low.contains("oom") || low.contains("allocate") {
+            format!(
+                "La memòria d'aquest ordinador no abasta {}. Prova un model més lleuger (:3b, :1.5b o q4).",
+                q
+            )
+        } else if status.is_server_error() {
+            format!(
+                "Ollama no ha sabut carregar {} (error {}). Pot ser el model malmès o la RAM insuficient.",
+                q,
+                status.as_u16()
+            )
+        } else {
+            format!("Ollama ha rebutjat la petició amb l'error {}.", status.as_u16())
+        };
+    format!("{}\nDetall tècnic: {}", causa, body)
 }
 
 /// Tradueix errors opacs d'Ollama (memòria, connexió…) en missatges útils.
@@ -672,24 +1080,81 @@ pub fn ollama_installed() -> bool {
     false
 }
 
-/// Arrenca `ollama serve` en segon pla si el binari existeix (perquè el
-/// port 11434 responda quan l'usuari no té l'app oberta).
-pub fn start_ollama_server() -> Result<()> {
-    if !ollama_installed() {
-        return Err(anyhow!("Ollama no està instal·lat"));
-    }
-    // Carpeta de models configurada (p. ex. un USB extern); buida = per defecte.
-    let models_dir = crate::config::AppConfig::load()
-        .map(|c| c.ai.models_dir.trim().to_string())
-        .unwrap_or_default();
-    // Si ja escolta, no cal fer res.
-    if std::net::TcpStream::connect_timeout(
+/// Compràpida: algun procés escolta al port 11434 (el servidor Ollama)?
+fn ollama_port_open() -> bool {
+    std::net::TcpStream::connect_timeout(
         &std::net::SocketAddr::from(([127, 0, 0, 1], 11434)),
         std::time::Duration::from_millis(400),
     )
     .is_ok()
+}
+
+/// Espera que el port d'Ollama quede (obert | tancat); cert si ho aconsegueix.
+fn wait_ollama_port(want_open: bool, timeout_ms: u64) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+    loop {
+        if ollama_port_open() == want_open {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+}
+
+/// Atura el servidor Ollama en marxa. A macOS tanca també l'app d'escriptori
+/// (que reengegar `serve` sola sense la nostra variable d'entorn).
+fn stop_ollama_server() {
+    #[cfg(target_os = "macos")]
     {
-        return Ok(());
+        let _ = std::process::Command::new("osascript")
+            .args(["-e", "quit app \"Ollama\""])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    }
+    #[cfg(unix)]
+    {
+        let _ = std::process::Command::new("pkill")
+            .args(["-f", "ollama serve"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    #[cfg(windows)]
+    {
+        for img in ["ollama.exe", "ollama app.exe"] {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/IM", img])
+                .creation_flags(0x08000000)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
+    }
+    // Dona temps perquè allibere el port abans de reengegar-lo.
+    wait_ollama_port(false, 8_000);
+}
+
+/// Arrenca `ollama serve` en segon pla. Si `models_dir` no és buit, li passa
+/// `OLLAMA_MODELS` perquè els models es baixin i s'executin des d'aquesta
+/// carpeta (p. ex. un disc extern); Ollama en si pot seguir al disc intern.
+/// A macOS, `launchctl setenv` fa que l'app d'Ollama també la faci servir
+/// quan es torne a obrir des del Finder.
+fn spawn_ollama_serve(models_dir: &str) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut cmd = std::process::Command::new("launchctl");
+        if models_dir.is_empty() {
+            cmd.args(["unsetenv", "OLLAMA_MODELS"]);
+        } else {
+            cmd.args(["setenv", "OLLAMA_MODELS", models_dir]);
+        }
+        let _ = cmd
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
     }
     #[cfg(unix)]
     {
@@ -699,7 +1164,7 @@ pub fn start_ollama_server() -> Result<()> {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
         if !models_dir.is_empty() {
-            cmd.env("OLLAMA_MODELS", &models_dir);
+            cmd.env("OLLAMA_MODELS", models_dir);
         }
         cmd.spawn()
             .map(|_| ())
@@ -710,12 +1175,239 @@ pub fn start_ollama_server() -> Result<()> {
         let mut cmd = std::process::Command::new("ollama");
         cmd.arg("serve").creation_flags(0x00000008);
         if !models_dir.is_empty() {
-            cmd.env("OLLAMA_MODELS", &models_dir);
+            cmd.env("OLLAMA_MODELS", models_dir);
         }
         cmd.spawn()
             .map(|_| ())
             .map_err(|e| anyhow!("No s'ha pogut arrencar Ollama: {}", e))?;
     }
+    Ok(())
+}
+
+/// Recorda quina carpeta de models fa servir REALMENT el servei en marxa,
+/// perquè NoOrbit sàpiga si cal reiniciar-lo després d'un canvi.
+fn set_applied_models_dir(dir: &str) {
+    if let Ok(mut cfg) = crate::config::AppConfig::load() {
+        cfg.ai.models_dir_applied = dir.trim().to_string();
+        let _ = cfg.save();
+    }
+}
+
+/// Assegura que el servidor Ollama en marxa utilitzi la carpeta de models
+/// configurada (`ai.models_dir`). És el cas típic de l'error: l'app d'Ollama
+/// arrencada des del Finder no la coneix, i per això els models es baixaven
+/// al disc intern encara que hi hagués un USB triat. Si la carpeta no és la
+/// aplicada, reinicia el servei amb `OLLAMA_MODELS`. Retorna un missatge per
+/// a la UI quan ha calgut fer alguna cosa. `force = true` el reinicia sempre
+/// (per exemple, just després que l'usuari triï una carpeta nova).
+pub fn apply_models_dir(force: bool) -> Result<Option<String>> {
+    let cfg = crate::config::AppConfig::load()?;
+    let dir = cfg.ai.models_dir.trim().to_string();
+    let applied = cfg.ai.models_dir_applied.trim().to_string();
+
+    if dir.is_empty() {
+        // Sense carpeta externa: si el servei ja fa servir la per defecte, res.
+        if applied.is_empty() {
+            return Ok(None);
+        }
+        if !ollama_port_open() {
+            set_applied_models_dir("");
+            return Ok(None);
+        }
+        // L'usuari ha tornat a la carpeta per defecte: reinicia sense OLLAMA_MODELS.
+        stop_ollama_server();
+        spawn_ollama_serve("")?;
+        wait_ollama_port(true, 25_000);
+        set_applied_models_dir("");
+        return Ok(Some(
+            "Ollama torna a fer servir la carpeta de models per defecte del sistema.".to_string(),
+        ));
+    }
+
+    // Hi ha una carpeta externa configurada. Pot ser una subcarpeta nova del
+    // disc extern (p. ex. «/Volumes/USB/ollama-models»): intentem crear-la;
+    // si no podem, és que el volum no està muntat.
+    if !std::path::Path::new(&dir).exists() && std::fs::create_dir_all(&dir).is_err() {
+        // El disc extern no és disponible: no es pot aplicar; arrenca Ollama al disc intern.
+        if !ollama_port_open() {
+            spawn_ollama_serve("")?;
+            wait_ollama_port(true, 20_000);
+            set_applied_models_dir("");
+        }
+        return Ok(Some(format!(
+            "El disc extern encara no està disponible ({}). Connecta'l i prem \
+             «Arrenca Ollama»: aleshores els models es baixaran des d'allà.",
+            dir
+        )));
+    }
+    if ollama_port_open() && applied == dir && !force {
+        return Ok(None); // el servei ja mira cap a aquesta carpeta
+    }
+    std::fs::create_dir_all(&dir)?;
+    if ollama_port_open() {
+        stop_ollama_server();
+    }
+    spawn_ollama_serve(&dir)?;
+    let ok = wait_ollama_port(true, 25_000);
+    set_applied_models_dir(&dir);
+    Ok(Some(if ok {
+        format!("Ollama reiniciat: els models es baixen i s'executen des de {}.", dir)
+    } else {
+        format!(
+            "He arrencat Ollama amb la carpeta {}; pot trigar uns segons a estar llest.",
+            dir
+        )
+    }))
+}
+
+/// Versió per cridar abans de cada descàrrega: si Ollama no roda, l'arrenca
+/// amb la carpeta configurada; si roda sense aplicar-la, el reinicia.
+pub fn ensure_models_dir_applied() -> Result<Option<String>> {
+    if !ollama_port_open() {
+        if ollama_installed() {
+            start_ollama_server()?;
+            wait_ollama_port(true, 20_000);
+        }
+        return Ok(None); // start_ollama_server ja usa la carpeta configurada
+    }
+    apply_models_dir(false)
+}
+
+/// Mida total (bytes) d'un arbre de directoris; 0 si no existeix.
+fn dir_size(path: &std::path::Path) -> u64 {
+    let mut total = 0u64;
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if let Ok(md) = e.metadata() {
+                if md.is_dir() {
+                    total += dir_size(&p);
+                } else {
+                    total += md.len();
+                }
+            }
+        }
+    }
+    total
+}
+
+/// Copia recursivament `from` dins `to` anant emetent progrés a «ai://migrate».
+fn copy_tree_progress(
+    app: &tauri::AppHandle,
+    from: &std::path::Path,
+    to: &std::path::Path,
+    total: u64,
+    done: &mut u64,
+) -> Result<()> {
+    use tauri::Emitter;
+    std::fs::create_dir_all(to)?;
+    for e in std::fs::read_dir(from)? {
+        let e = e?;
+        let src = e.path();
+        let dst = to.join(e.file_name());
+        let ft = e.file_type()?;
+        if ft.is_dir() {
+            copy_tree_progress(app, &src, &dst, total, done)?;
+        } else if ft.is_file() {
+            let size = e.metadata().map(|m| m.len()).unwrap_or(0);
+            // Els blobs són únics (adreça de contingut): si ja hi és amb la
+            // mateixa mida, ja el tenim i estalviem la còpia.
+            let ja_copiat = std::fs::metadata(&dst).map(|m| m.len() == size).unwrap_or(false);
+            if !ja_copiat {
+                std::fs::copy(&src, &dst)?;
+            }
+            *done += size;
+            let pct = if total > 0 { (100.0 * *done as f64 / total as f64) as u32 } else { 100 };
+            let _ = app.emit(
+                "ai://migrate",
+                serde_json::json!({
+                    "message": format!("Mouent els models al disc extern… {}%", pct)
+                }),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Mou els models ja baixats al disc intern (per defecte, `~/.ollama/models`)
+/// cap a la carpeta externa configurada, i reinicia Ollama apuntant-hi. Els
+/// blobs es copien un per un (amb progrés) i, només quan tot és copiat, 
+/// s'esborra la còpia del disc intern per alliberar espai.
+pub fn migrate_models(app: &tauri::AppHandle) -> Result<String> {
+    let cfg = crate::config::AppConfig::load()?;
+    let target = cfg.ai.models_dir.trim().to_string();
+    if target.is_empty() {
+        return Err(anyhow!("Primer tria una carpeta en un disc extern"));
+    }
+    let target_path = std::path::Path::new(&target);
+    if !target_path.exists() {
+        return Err(anyhow!(
+            "El disc extern no està connectat ({})", 
+            target
+        ));
+    }
+    let source = dirs::home_dir()
+        .map(|h| h.join(".ollama").join("models"))
+        .filter(|p| p.is_dir())
+        .ok_or_else(|| anyhow!("No hi ha models al disc intern (~/.ollama/models)"))?;
+    if source == target_path {
+        return Ok("La carpeta triada ja és la per defecte: no cal moure res.".to_string());
+    }
+    let total = dir_size(&source);
+    if total == 0 {
+        return Ok("No hi havia models a moure.".to_string());
+    }
+    let mut done = 0u64;
+    for sub in ["blobs", "manifests"] {
+        let from = source.join(sub);
+        if from.is_dir() {
+            copy_tree_progress(app, &from, &target_path.join(sub), total, &mut done)?;
+        }
+    }
+    // Tot copiat: esborra només les dades de models del disc intern (mai les
+    // claus d'usuari del veí ~/.ollama).
+    for sub in ["blobs", "manifests"] {
+        let _ = std::fs::remove_dir_all(source.join(sub));
+    }
+    // El servidor ha de mirar ara cap al disc extern.
+    let _ = apply_models_dir(true);
+    let gb = total as f64 / 1e9;
+    Ok(format!(
+        "He mogut {:.1} GB de models a {} i he alliberat el disc intern.", 
+        gb, target
+    ))
+}
+
+/// Arrenca `ollama serve` en segon pla si el binari existeix (perquè el
+/// port 11434 responda quan l'usuari no té l'app oberta). Si hi ha una
+/// carpeta de models configurada (p. ex. un USB extern), l'arrenca-hi o,
+/// si ja roda sense aplicar-la, el reinicia perquè les descàrregues hi vagin.
+pub fn start_ollama_server() -> Result<()> {
+    if !ollama_installed() {
+        return Err(anyhow!("Ollama no està instal·lat"));
+    }
+    // Si ja escolta, assegurem que utilitzi la carpeta configurada (si cal,
+    // el reinicia amb OLLAMA_MODELS).
+    if ollama_port_open() {
+        let _ = apply_models_dir(false);
+        return Ok(());
+    }
+    // Carpeta de models configurada (p. ex. un USB extern); buida = per defecte.
+    let models_dir = crate::config::AppConfig::load()
+        .map(|c| c.ai.models_dir.trim().to_string())
+        .unwrap_or_default();
+    // Si el disc extern no és muntat (o la carpeta no es pot crear), arrenca
+    // amb la carpeta del sistema.
+    let dir = if !models_dir.is_empty()
+        && (std::path::Path::new(&models_dir).exists()
+            || std::fs::create_dir_all(&models_dir).is_ok())
+    {
+        models_dir
+    } else {
+        String::new()
+    };
+    spawn_ollama_serve(&dir)?;
+    set_applied_models_dir(&dir);
     Ok(())
 }
 
@@ -813,6 +1505,12 @@ impl AiManager {
                 .timeout(std::time::Duration::from_secs(240))
                 .build()
                 .unwrap_or_default(),
+            // El mateix, però sense `timeout`: per al streaming, on el temps
+            // el controla l'usuari (botó «Atura») i el watchdog d'inactivitat.
+            http_stream: reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(10))
+                .build()
+                .unwrap_or_default(),
             ollama_url: config.ai.ollama_url.clone(),
             default_model: config.ai.default_model.clone(),
             active_provider: Arc::new(RwLock::new("ollama".into())),
@@ -820,6 +1518,7 @@ impl AiManager {
             remote: None,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             background: Arc::new(AtomicBool::new(false)),
+            caps_cache: Arc::new(Mutex::new(HashMap::new())),
             external: Arc::new(OrchestratorAgent::new()),
         }
     }
@@ -884,6 +1583,68 @@ impl AiManager {
             })
             .unwrap_or_default();
         Ok(models)
+    }
+
+    /// Normalitza un nom de model per comparar-lo amb els que Ollama reporta:
+    /// «llama3.2» i «llama3.2:latest» són el mateix model.
+    fn ps_key(name: &str) -> String {
+        name.trim().trim_end_matches(":latest").to_lowercase()
+    }
+
+    /// Mida AL DISC d'un model (bytes) segons «/api/tags», o `None` si no la
+    /// dona. Temps propi i curt: si Ollama està carregant alguna cosa, no volem
+    /// afegir més esperada abans fins i tot de començar la generació.
+    async fn model_disk_size(&self, model: &str) -> Option<u64> {
+        let want = Self::ps_key(model);
+        let value = self
+            .http
+            .get(self.url("/api/tags"))
+            .timeout(std::time::Duration::from_secs(4))
+            .send()
+            .await
+            .ok()?
+            .json::<serde_json::Value>()
+            .await
+            .ok()?;
+        value
+            .get("models")?
+            .as_array()?
+            .iter()
+            .find(|m| {
+                Self::ps_key(m.get("name").and_then(|s| s.as_str()).unwrap_or_default()) == want
+            })
+            .and_then(|m| m.get("size").and_then(|s| s.as_u64()))
+            .filter(|s| *s > 0)
+    }
+
+    /// Diu si Ollama té ARA MATEIX el model a la memòria («/api/ps»). Així es
+    /// pot distingir «encara el carrega del disc» de «ja el té i llegeix el
+    /// context». `None` = Ollama no respon i NO ho sabem: millor dir-ho que
+    /// endevinar-ho (abans sempre deia «carregant», encara que no fos cert).
+    async fn model_is_loaded(&self, model: &str) -> Option<bool> {
+        let want = Self::ps_key(model);
+        let value = self
+            .http
+            .get(self.url("/api/ps"))
+            .timeout(std::time::Duration::from_secs(3))
+            .send()
+            .await
+            .ok()?
+            .json::<serde_json::Value>()
+            .await
+            .ok()?;
+        Some(
+            value
+                .get("models")?
+                .as_array()?
+                .iter()
+                .any(|m| {
+                    ["model", "name"]
+                        .iter()
+                        .filter_map(|k| m.get(*k).and_then(|s| s.as_str()))
+                        .any(|n| Self::ps_key(n) == want)
+                }),
+        )
     }
 
     /// descarrega un model amb streaming de progrés (event "ai://pull").
@@ -1101,6 +1862,21 @@ impl AiManager {
         }
     }
 
+    /// Etiqueta (proveïdor, model) amb la qual treballa un xat ara mateix. El
+    /// visor del procés la fa servir per a etiquetar també els errors.
+    pub async fn session_labels(&self, session: &str) -> (String, String) {
+        let ctl = self.ctl(session);
+        let provider = self.effective_provider(&ctl).await;
+        let model = self.model_for(&ctl).await;
+        (provider, model)
+    }
+
+    /// La comanda de xat només ha de contar un faliment si cap backend (Ollama
+    /// o remot) no n'ha llançat ja un amb explicació i temps real.
+    pub fn session_error_shown(&self, session: &str) -> bool {
+        self.ctl(session).error_shown()
+    }
+
     /// Envia un prompt de xat i retorna la resposta completa.
     /// Si hi ha un proveïdor remot actiu, enruta cap a ell; si no, usa Ollama.
     pub async fn chat(&self, prompt: &str, system: Option<&str>) -> Result<String> {
@@ -1257,10 +2033,13 @@ impl AiManager {
             if e.to_string() != CANCELLED_MSG && is_body_cut(&e.to_string()) {
                 let compacted = compact_prompt(prompt);
                 if compacted != prompt {
+                    // El visor ha de continuar mostrant el model REAL: posar-hi
+                    // «noorbit» com a etiqueta confonia l'usuari.
+                    let (_, m) = self.session_labels(&ctl.id).await;
                     ctl.process(
                         app,
                         "ollama",
-                        "noorbit",
+                        &m,
                         "thinking",
                         "La memòria no abastava tot el context: el comprimeix i ho torna a provar.",
                         start.elapsed().as_millis() as u64,
@@ -1385,35 +2164,162 @@ impl AiManager {
             Self::ctx_options(prompt_chars, sys_chars)
         };
         let model_label = model.clone();
+        // Els models que declaren l'habilitat «thinking» (qwen3, deepseek-r1…)
+        // poden emetre el raonament en un CANAL PROPI: se'ls demana de forma
+        // expressa. Els que no la tenen rebutjarien la bandera amb un 400
+        // («does not support thinking»), així que simplement no s'envia.
+        let think = if self.supports_thinking(&model_label).await {
+            Some(true)
+        } else {
+            None
+        };
         let req = ChatRequest {
             model,
             messages,
             stream: true,
             system: system.map(|s| s.to_string()),
+            think,
             options,
         };
-        ctl.process(app, "ollama", &model_label, "thinking", "", 0);
+        // Arrencada del procés: el visor explica QUÈ està fent NoOrbit en lloc
+        // de quedar-se en blanc amb un simple «Treballant…». Abans de llançar
+        // la generació es miren les DADES reals del model (mida al disc, si ja
+        // és a la memòria i quanta RAM té l'equip): així les notes d'espera
+        // diuen veritats en lloc d'endevinar-ho.
+        let size = self.model_disk_size(&model_label).await;
+        let already_loaded = self.model_is_loaded(&model_label).await == Some(true);
+        let mut wc = WaitCtx::new(model_label.clone(), size, Self::total_memory_bytes());
+        ctl.process(
+            app,
+            "ollama",
+            &model_label,
+            "thinking",
+            &format!(
+                "NoOrbit crida «{}» a Ollama…{}\n",
+                model_label,
+                if already_loaded {
+                    " (ja el té a la memòria: anirà ràpid)"
+                } else {
+                    ""
+                }
+            ),
+            0,
+        );
+        // Avís immediat: si el model no cap còmodament a la RAM, l'usuari ho
+        // sap ABANS d'esperar-se minuts sense saber per què.
+        if wc.tight() {
+            ctl.process(
+                app,
+                "ollama",
+                &model_label,
+                "thinking",
+                &format!(
+                    "⚠️ Aquest model ocupa {} i l'equip en té {} de RAM: carregar-lo pot tardar \
+                     minuts i anar molt lent. Al «Gestor de models» pots triar-ne un de més \
+                     lleuger o un de gratuït al NÚVOL (aquest NO cal baixar-lo).\n",
+                    fmt_gb(size.unwrap_or_default()),
+                    fmt_gb(wc.ram.unwrap_or_default())
+                ),
+                0,
+            );
+        }
+        if think.is_none() {
+            ctl.process(
+                app,
+                "ollama",
+                &model_label,
+                "thinking",
+                "Aquest model no emet el raonament en un canal separat: NoOrbit mostra el text que va generant, paraula a paraula.\n",
+                0,
+            );
+        }
         let chat_url = self.url("/api/chat");
-        let resp = match Self::send_chat(&self.http, &chat_url, &req).await {
+        use futures::StreamExt;
+        let notify = ctl.notify();
+        // Sense temps màxim total (http_stream): un model local en CPU pot
+        // tardar més de quatre minuts i tallar-ho era un error falsò. Mentre
+        // espera la capçalera, el visor ho pregunta a Ollama cada 15 s i només
+        // en parla quan hi ha alguna cosa NOVA a dir (o cada 60 s).
+        let send = Self::send_chat(&self.http_stream, &chat_url, &req);
+        tokio::pin!(send);
+        // «Atura» es mira des de ja: la futura d'avís es crea ABANS d'esperar
+        // i es manté d'una iteració a l'altra (si es creara dins del `select!`,
+        // un clic fet entre dues iteracions es podria perdre).
+        let watch = async {
+            loop {
+                if ctl.is_cancelled() {
+                    return;
+                }
+                tokio::select! {
+                    _ = notify.notified() => return,
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(150)) => {}
+                }
+            }
+        };
+        tokio::pin!(watch);
+        let resp = loop {
+            tokio::select! {
+                biased;
+                _ = &mut watch => return Err(anyhow!(CANCELLED_MSG)),
+                r = &mut send => break r,
+                _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
+                    let ms = start.elapsed().as_millis() as u64;
+                    // Què fa Ollama DE VERITAT: si el model ja és a la memòria,
+                    // el que triga és la lectura del context, no la càrrega.
+                    let phase = match self.model_is_loaded(&model_label).await {
+                        Some(true) => WaitPhase::Prefill,
+                        Some(false) => WaitPhase::Loading,
+                        None => WaitPhase::Unknown,
+                    };
+                    if let Some(note) = wc.take(phase, ms) {
+                        ctl.process(app, "ollama", &model_label, "thinking", &note, ms);
+                    }
+                }
+            }
+        };
+        let resp = match resp {
             Ok(r) => r,
             Err(e) => {
-                ctl.process(app, "ollama", &model_label, "error", &e.to_string(), 0);
+                ctl.process(
+                    app,
+                    "ollama",
+                    &model_label,
+                    "error",
+                    &e.to_string(),
+                    start.elapsed().as_millis() as u64,
+                );
                 return Err(e);
             }
         };
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            let err = anyhow!("Ollama error {}: {}", status, text);
-            ctl.process(app, "ollama", &model_label, "error", &err.to_string(), 0);
-            return Err(err);
+            let note = ollama_error_note(&model_label, status, &text);
+            ctl.process(
+                app,
+                "ollama",
+                &model_label,
+                "error",
+                &note,
+                start.elapsed().as_millis() as u64,
+            );
+            return Err(anyhow!("Ollama error {}: {}", status, text));
         }
         let mut stream = resp.bytes_stream();
-        use futures::StreamExt;
-        let notify = ctl.notify();
         let mut buf: Vec<u8> = Vec::new();
         let mut full = String::new();
         let mut thinking_acc = String::new();
+        // Temps sense rebre cap fragment. Un model que no pot cabre en la RAM
+        // no dona senyals: amb 3 minuts de silenci es talla i HO EXPLICA, en
+        // lloc de penjar la interfície o mostrar un «ERROR» buit.
+        let idle = std::time::Duration::from_secs(180);
+        let mut tick = tokio::time::interval_at(
+            tokio::time::Instant::now() + std::time::Duration::from_secs(15),
+            std::time::Duration::from_secs(15),
+        );
+        // Reparteix el «content» entre pensament i resposta quan el model no els
+        // separa en canals propis (amb «think» actiu ja vénen separats).
+        let mut splitter = ThoughtSplitter::new();
         'stream: loop {
             // Aturada immediata entre chunks: es mira la bandera del PROPI xat
             // i el botó «Atura» respon tot seguit, sense esperar dades noves.
@@ -1424,6 +2330,46 @@ impl AiManager {
                 biased;
                 _ = notify.notified() => {
                     return Err(anyhow!(CANCELLED_MSG));
+                }
+                // Sense cap fragment durant 3 minuts el model no avança: es
+                // talla i s'explica PER QUÈ (normalment, la memòria).
+                _ = tokio::time::sleep(idle) => {
+                    let ms = start.elapsed().as_millis() as u64;
+                    let msg = format!(
+                        "Ollama porta {} s sense emetre ni un sol fragment: la generació no avança. \
+                         Sol ser perquè el model {} no cap a la memòria d'aquest ordinador o perquè \
+                         el context és enorme. Prova un model més lleuger (p. ex. qwen2.5-coder:1.5b) \
+                         o desactiva «Inclou el codi del projecte».",
+                        ms / 1000, model_label
+                    );
+                    if full.trim().is_empty() && thinking_acc.trim().is_empty() {
+                        ctl.process(app, "ollama", &model_label, "error", &msg, ms);
+                        return Err(anyhow!(msg));
+                    }
+                    // Ja hi ha alguna cosa escrita: es conserva i es tanca el torn.
+                    ctl.process(app, "ollama", &model_label, "thinking", &format!("\n{}\n", msg), ms);
+                    break;
+                }
+                // Cor del procés: mentre no arriba res, el visor no està mut.
+                _ = tick.tick() => {
+                    let ms = start.elapsed().as_millis() as u64;
+                    if ms >= 15_000 {
+                        // Si ja ha caigut algun fragment, el model està generant;
+                        // si no, mirem si el té carregat o si encara carrega.
+                        let phase = if !full.is_empty() {
+                            WaitPhase::Generating
+                        } else {
+                            match self.model_is_loaded(&model_label).await {
+                                Some(true) => WaitPhase::Prefill,
+                                Some(false) => WaitPhase::Loading,
+                                None => WaitPhase::Unknown,
+                            }
+                        };
+                        if let Some(note) = wc.take(phase, ms) {
+                            ctl.process(app, "ollama", &model_label, "thinking", &note, ms);
+                        }
+                    }
+                    continue;
                 }
                 item = stream.next() => item,
             };
@@ -1462,50 +2408,70 @@ impl AiManager {
                     continue;
                 }
                 if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&line) {
-                    if let Some(msg) = v.get("message") {
-                        if let Some(c) = msg.get("content").and_then(|c| c.as_str()) {
-                            if !c.is_empty() {
-                                full.push_str(c);
-                                let ms = start.elapsed().as_millis() as u64;
-                                ctl.chunk(app, c);
-                                ctl.process(
-                                    app,
-                                    "ollama",
-                                    &model_label,
-                                    "streaming",
-                                    c,
-                                    ms,
-                                );
-                                if runaway_repetition(&full) {
-                                    ctl.process(
-                                        app,
-                                        "ollama",
-                                        &model_label,
-                                        "thinking",
-                                        "S'ha detectat un bucle de repetició: la generació s'atura per a no bloquejar-se.",
-                                        ms,
-                                    );
-                                    break 'stream;
-                                }
-                            }
-                        }
-                        if let Some(th) = msg.get("thinking").and_then(|c| c.as_str()) {
-                            if !th.is_empty() {
-                                thinking_acc.push_str(th);
-                                let ms = start.elapsed().as_millis() as u64;
-                                ctl.process(
-                                    app,
-                                    "ollama",
-                                    &model_label,
-                                    "thinking",
-                                    th,
-                                    ms,
-                                );
-                            }
+                    let msg = match v.get("message") {
+                        Some(m) => m,
+                        None => continue,
+                    };
+                    // 1) Raonament en canal PROPI: «thinking» (Ollama amb «think»
+                    //    actiu) o «reasoning»/«reasoning_content» en servidors
+                    //    compatibles amb OpenAI.
+                    let own = chunk_thinking(msg);
+                    if !own.is_empty() {
+                        thinking_acc.push_str(&own);
+                        let ms = start.elapsed().as_millis() as u64;
+                        ctl.process(app, "ollama", &model_label, "thinking", &own, ms);
+                    }
+                    // 2) Raonament MESCLAT amb la resposta: hi ha models (MiMo-RL
+                    //    i semblants) que NO separen el pensament i l'escriuen
+                    //    primer, amb etiquetes. El repartidor els separa EN DIRECTE
+                    //    perquè el visor mai quede reduït a un «està treballant».
+                    let raw = msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                    let (thought, answer) = if raw.is_empty() {
+                        (String::new(), String::new())
+                    } else if think.is_some() || !own.is_empty() {
+                        (String::new(), raw.to_string())
+                    } else {
+                        splitter.push(raw)
+                    };
+                    if !thought.is_empty() {
+                        thinking_acc.push_str(&thought);
+                        let ms = start.elapsed().as_millis() as u64;
+                        ctl.process(app, "ollama", &model_label, "thinking", &thought, ms);
+                    }
+                    if !answer.is_empty() {
+                        full.push_str(&answer);
+                        let ms = start.elapsed().as_millis() as u64;
+                        ctl.chunk(app, &answer);
+                        ctl.process(app, "ollama", &model_label, "streaming", &answer, ms);
+                        // Bucle desbocat (model petit repetint la mateixa frase).
+                        if runaway_repetition(&full) {
+                            ctl.process(
+                                app,
+                                "ollama",
+                                &model_label,
+                                "thinking",
+                                "\nS'ha detectat un bucle de repetició: la generació s'atura per a no bloquejar-se.\n",
+                                ms,
+                            );
+                            break 'stream;
                         }
                     }
                 }
             }
+        }
+        // El torn pot acabar amb el repartidor encara indecis (resposta de
+        // poquíssimes paraules): el que retenia és la resposta i s'emet ara.
+        let (thought, answer) = splitter.flush();
+        if !thought.is_empty() {
+            thinking_acc.push_str(&thought);
+            let ms = start.elapsed().as_millis() as u64;
+            ctl.process(app, "ollama", &model_label, "thinking", &thought, ms);
+        }
+        if !answer.is_empty() {
+            full.push_str(&answer);
+            let ms = start.elapsed().as_millis() as u64;
+            ctl.chunk(app, &answer);
+            ctl.process(app, "ollama", &model_label, "streaming", &answer, ms);
         }
         if !thinking_acc.trim().is_empty() {
             ctl.set_thinking(Some(thinking_acc)).await;
@@ -1566,11 +2532,21 @@ impl AiManager {
         // El context que veu el model és tota la conversa, no només l'últim
         // missatge: la finestra de context s'ha de dimensionar per això.
         let prompt_chars = messages.iter().map(|m| m.content.chars().count()).sum();
+        // Mateix criteri que el camí streaming: només demanem el raonament
+        // separat als models que declaren l'habilitat «thinking»; els altres
+        // rebutjarien la bandera amb un 400, així que no s'envia res.
+        let model_label = model.clone();
+        let think = if self.supports_thinking(&model_label).await {
+            Some(true)
+        } else {
+            None
+        };
         let req = ChatRequest {
             model,
             messages,
             stream: false,
             system: system.map(|s| s.to_string()),
+            think,
             options: Self::ctx_options(prompt_chars, system.map_or(0, |s| s.len())),
         };
         let chat_url = self.url("/api/chat");
@@ -1585,9 +2561,19 @@ impl AiManager {
             Ok(parsed)
         })
         .await?;
-        ctl.set_thinking(parsed.message.thinking.filter(|t| !t.trim().is_empty()))
-            .await;
-        Ok(parsed.message.content)
+        // Sense canal propi de raonament, potser el model l'ha escrit dins del
+        // text: se'n separa una part per a poder-lo mostrar al xat i al visor.
+        let mut content = parsed.message.content;
+        let mut thought = parsed.message.thinking.filter(|t| !t.trim().is_empty());
+        if thought.is_none() && think.is_none() {
+            let (t, a) = split_inline_reasoning(&content);
+            if !t.trim().is_empty() {
+                thought = Some(t);
+                content = a;
+            }
+        }
+        ctl.set_thinking(thought).await;
+        Ok(content)
     }
 
     /// POST /api/chat separat per poder enrotllar-lo amb la cancel·lació.
@@ -1634,16 +2620,18 @@ impl AiManager {
     /// Dimensiona la finestra de context d'Ollama («num_ctx») segons la
     /// llargària del prompt. SENSE açò, Ollama usa la finestra xiqueta per
     /// defecte i TALLA el context del projecte abans que el model el veja.
-    /// Es manté entre 2048 i 4096 tokens: una finestra gran desborda la RAM
-    /// d'equips lleugers (8 GB) i fa que la resposta trigui minuts.
+    /// Creix fins a 16384 tokens: amb un sostre baix (4096) la resposta llarga
+    /// (un fitxer sencer, per exemple) es tallava a mitges perquè el prompt
+    /// menjava tota la finestra. `num_predict: -1` elimina el límit de tokens
+    /// eixents: la IA acaba la resposta sencera, no mig JSON.
     /// En mode segon pla (eco) es redueix a 2048 fixos i es limiten els fils.
     fn ctx_options(prompt_chars: usize, system_chars: usize) -> Option<serde_json::Value> {
         let approx_tokens = (prompt_chars + system_chars) / 3 + 512;
         let mut n = 2048usize;
-        while n < 4096 && n < approx_tokens {
+        while n < 16384 && n < approx_tokens {
             n *= 2;
         }
-        Some(serde_json::json!({ "num_ctx": n }))
+        Some(serde_json::json!({ "num_ctx": n, "num_predict": -1 }))
     }
 
     /// Opcions d'Ollama en mode eco (tasca degradada a segon pla): menys fils,
@@ -1655,6 +2643,51 @@ impl AiManager {
             "num_thread": 2,
             "num_predict": 512,
         }))
+    }
+
+    /// Llegeix i recorda les HABILITATS que un model d'Ollama declara
+    /// («thinking», «vision», «tools»…). Es consulta amb «/api/show», que és
+    /// instantani i no carrega el model. Si Ollama no respon, la llista és buida
+    /// i NoOrbit no demanarà raonament separat (millor cap pensament que un 400).
+    pub async fn model_capabilities(&self, model: &str) -> Vec<String> {
+        if let Some(c) = self.caps_cache.lock().unwrap().get(model) {
+            return c.clone();
+        }
+        let caps = match self
+            .http
+            .post(self.url("/api/show"))
+            .timeout(std::time::Duration::from_secs(15))
+            .json(&serde_json::json!({ "model": model }))
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => resp
+                .json::<serde_json::Value>()
+                .await
+                .ok()
+                .and_then(|v| {
+                    v.get("capabilities")
+                        .and_then(|c| c.as_array())
+                        .map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect())
+                })
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        self.caps_cache
+            .lock()
+            .unwrap()
+            .insert(model.to_string(), caps.clone());
+        caps
+    }
+
+    /// Diu si el model pot emetre raonament SEPARAT de la resposta. Alguns
+    /// (qwen3, deepseek-r1…) sí; d'altres que també raonen (MiMo-RL) ho fan
+    /// dins del mateix text i Ollama rebutja la bandera «think» amb un 400.
+    async fn supports_thinking(&self, model: &str) -> bool {
+        self.model_capabilities(model)
+            .await
+            .iter()
+            .any(|c| c == "thinking")
     }
 
     /// Retorna el model si és instal·lat; si no, el primer model disponible.

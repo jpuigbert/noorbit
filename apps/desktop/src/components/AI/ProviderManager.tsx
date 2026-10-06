@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Plus, Trash2, Zap, Star, Pencil } from "lucide-react";
 import { useT } from "../../i18n";
+import HarnessSection from "./HarnessSection";
+import { OLLAMA_CLOUD_MODELS } from "../../stores/aiStore";
 import {
   useProviderStore,
   type ProviderInput,
@@ -222,11 +224,19 @@ export default function ProviderManager() {
         </div>
         <div className="field">
           <label>{t("providers.model")}</label>
+          {/* El camp admet qualsevol nom escrit a mà; el «datalist» ofereix els
+              models gratuïts del núvol d'Ollama com a suggeriments. */}
           <input
+            list="noorbit-cloud-models"
             value={form.model}
             onChange={(e) => set({ model: e.target.value })}
             placeholder="gpt-4o-mini"
           />
+          <datalist id="noorbit-cloud-models">
+            {OLLAMA_CLOUD_MODELS.map((m) => (
+              <option key={m.name} value={m.name} />
+            ))}
+          </datalist>
         </div>
         <div className="field">
           <label>{t("providers.kind")}</label>
@@ -281,6 +291,12 @@ export default function ProviderManager() {
           )}
         </div>
       </div>
+
+      {/* Menú APART per a harnessos d'agents (DeepSeek Harness/dsh): no són
+          proveïdors d'API i per això no figuren a la llista de dalt. Ací es
+          poden instal·lar (Node.js inclòs, automàtic, sense administració),
+          arrencar i obrir la seva interfície. */}
+      <HarnessSection />
     </div>
   );
 }

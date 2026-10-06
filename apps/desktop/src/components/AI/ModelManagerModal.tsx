@@ -4,7 +4,7 @@ import { X, Download, Trash2, RefreshCw, Check, Search, Cloud, Play, HardDrive, 
 import { useT } from "../../i18n";
 import { useUIStore } from "../../stores/uiStore";
 import { useAIStore, OLLAMA_CLOUD_MODELS, OLLAMA_CLOUD_URL } from "../../stores/aiStore";
-import { useProviderStore } from "../../stores/providerStore";
+import { useProviderStore, isOllamaCloudProvider } from "../../stores/providerStore";
 
 function fmtSize(bytes: number): string {
   if (!bytes) return "—";
@@ -49,8 +49,10 @@ export default function ModelManagerModal() {
     selectModel,
     modelsDir,
     volumes,
+    migrating,
     loadModelsDir,
     setModelsDir,
+    migrateModels,
   } = useAIStore();
 
   const [custom, setCustom] = useState("");
@@ -59,15 +61,23 @@ export default function ModelManagerModal() {
   const [internetQuery, setInternetQuery] = useState("");
   // Connexió a Ollama Cloud (models gratuïts al núvol, sense descàrrega).
   const [cloudKey, setCloudKey] = useState("");
+  // El catàleg del núvol és molt més llarg que la llista base: qualsevol nom
+  // allotjat a ollama.com es pot usar sense baixar-lo res al disc.
+  const [cloudCustom, setCloudCustom] = useState("");
   const providers = useProviderStore((s) => s.providers);
   const activeProvider = useProviderStore((s) => s.active);
   const loadProviders = useProviderStore((s) => s.load);
   const addProvider = useProviderStore((s) => s.add);
   const updateProvider = useProviderStore((s) => s.update);
   const selectProvider = useProviderStore((s) => s.select);
-  // El model concret que ara mateix serveix el proveïdor «ollama-cloud»:
-  // així només es marca aquell model, no tots a la vegada.
-  const cloudProvider = providers.find((p) => p.id === "ollama-cloud");
+  // El model concret que ara mateix serveix el núvol d'Ollama: així només es
+  // marca aquell model, no tots a la vegada. Pot tenir un id automàtic si
+  // l'usuari el va afegir a mà des del gestor de proveïdors.
+  const cloudProvider = providers.find(isOllamaCloudProvider);
+  // El proveïdor global actiu és del núvol d'Ollama?
+  const cloudIsActive = isOllamaCloudProvider(
+    providers.find((p) => p.id === activeProvider),
+  );
 
   useEffect(() => {
     if (show) {
@@ -112,14 +122,14 @@ export default function ModelManagerModal() {
     if (typeof selected === "string") await setModelsDir(selected);
   };
 
-  // Connecta/actualitza el proveïdor «ollama-cloud» amb el model triat i
+  // Connecta/actualitza el proveïdor del núvol d'Ollama amb el model triat i
   // l'activa. Reutilitza el sistema de proveïdors (compatible amb OpenAI).
   const connectOllamaCloud = async (model: string) => {
-    const existing = providers.find((p) => p.id === "ollama-cloud");
+    const existing = cloudProvider;
     const token = cloudKey.trim();
     if (existing) {
       await updateProvider({
-        id: "ollama-cloud",
+        id: existing.id,
         name: "Ollama Cloud (gratuït)",
         baseUrl: OLLAMA_CLOUD_URL,
         model,
@@ -226,7 +236,15 @@ export default function ModelManagerModal() {
             )}
             {modelsDir && (
               <div className="mm-ollama-actions" style={{ marginTop: 8 }}>
-                <span className="lp-hint">{t("ai.modelsDirApplied")}</span>
+                <span className="lp-hint">{migrating || t("ai.modelsDirApplied")}</span>
+                <button
+                  className="btn sm"
+                  title={t("ai.migrateModelsHint")}
+                  disabled={!!migrating}
+                  onClick={() => void migrateModels()}
+                >
+                  <HardDrive size={12} /> {t("ai.migrateModels")}
+                </button>
                 <button className="btn sm primary" onClick={() => void startOllama()}>
                   <Play size={12} /> {t("ai.startOllama")}
                 </button>
@@ -250,12 +268,31 @@ export default function ModelManagerModal() {
                 onChange={(e) => setCloudKey(e.target.value)}
               />
             </div>
+            {/* Qualsevol model allotjat a ollama.com, no només els de la llista:
+                s'escriu el nom i «Usa» el connecta sense descarregar-lo. */}
+            <div className="mm-custom" style={{ marginTop: 6 }}>
+              <input
+                placeholder={t("ai.cloudFreeCustomPh")}
+                value={cloudCustom}
+                onChange={(e) => setCloudCustom(e.target.value)}
+                onKeyDown={(e) =>
+                  e.key === "Enter" && cloudCustom.trim() && void connectOllamaCloud(cloudCustom.trim())
+                }
+              />
+              <button
+                className="btn sm primary"
+                disabled={!cloudCustom.trim()}
+                onClick={() => void connectOllamaCloud(cloudCustom.trim())}
+              >
+                <Zap size={12} /> {t("ai.cloudFreeUse")}
+              </button>
+            </div>
             <div className="mm-cloud-list">
               {OLLAMA_CLOUD_MODELS.map((m) => {
                 // Només actiu si el núvol està seleccionat I aquest n'és el
                 // model. Clicar-lo de nou el desactiva (torna a Ollama local).
                 const isActive =
-                  activeProvider === "ollama-cloud" && cloudProvider?.model === m.name;
+                  cloudIsActive && cloudProvider?.model === m.name;
                 return (
                   <div key={m.name} className="mm-row">
                     <div className="mm-cloud-info">
@@ -277,7 +314,7 @@ export default function ModelManagerModal() {
                 );
               })}
             </div>
-            {activeProvider === "ollama-cloud" && (
+            {cloudIsActive && (
               <p className="lp-hint" style={{ marginTop: 6 }}>
                 {t("ai.cloudFreeActive")}
               </p>

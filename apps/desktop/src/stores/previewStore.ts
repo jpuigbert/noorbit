@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 
-export type RightTab = "preview" | "agent" | "process" | "computer" | "experts" | "unreal" | "blender" | "mobile" | "git";
+export type RightTab = "preview" | "agent" | "process" | "computer" | "experts" | "unreal" | "blender" | "mobile" | "git" | "problems" | "console";
 
 interface PreviewState {
   rightTab: RightTab;

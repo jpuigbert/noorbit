@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import { OLLAMA_CLOUD_URL } from "./aiStore";
 
 export type AuthScheme = "bearer" | "header" | "none";
 /// Format d'API del proveïdor: compatible OpenAI o Anthropic (Claude).
@@ -43,6 +44,15 @@ interface ProviderState {
   remove: (id: string) => Promise<void>;
   test: (id: string) => Promise<void>;
   select: (id: string) => Promise<void>;
+}
+
+/// Diu si un proveïdor és el NÚVOL d'Ollama (models gratuïts a ollama.com).
+/// Es reconeix per id o per URL base: l'usuari pot haver-lo afegit a mà des
+/// del gestor de proveïdors, on rep un id automàtic («prov_…»).
+export function isOllamaCloudProvider(p?: ProviderPublic | null): boolean {
+  if (!p) return false;
+  const base = (u: string) => u.trim().replace(/\/+$/, "");
+  return p.id === "ollama-cloud" || base(p.base_url) === base(OLLAMA_CLOUD_URL);
 }
 
 export const useProviderStore = create<ProviderState>((set, get) => ({

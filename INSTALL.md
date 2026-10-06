@@ -49,21 +49,42 @@ pnpm app:build:mac:arm     # només aarch64 (Apple Silicon)
 
 ```
 apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/
-├── dmg/NoOrbit_0.6.0_universal.dmg   ← comparteix això
+├── dmg/NoOrbit_0.61.2-alpha_universal.dmg   ← comparteix això
 └── macos/NoOrbit.app
 ```
 
-### Instal·lar (usuari final)
+### Signar ad-hoc (perquè arrenqui amb doble clic a qualsevol Mac)
 
-1. Obre el `.dmg` i arrossega **NoOrbit** a la carpeta **Aplicacions**.
-2. La primera vegada, com que l'app **no està signada ni notaritzada**, macOS la
-   bloqueja. Fes **clic dret → Obre** (una sola vegada) o, per terminal:
+Sense cap signatura, macOS 15+ es nega a obrir l'app («l'aplicació està
+malmesa»). La signatura **ad-hoc** (`--sign -`) ho resol sense certificat
+Apple. El CI de GitHub ja ho fa sol en publicar; en local:
+
+```bash
+BUNDLE=apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle
+codesign --force --deep --sign - "$BUNDLE/macos/NoOrbit.app"
+codesign --verify --deep --strict "$BUNDLE/macos/NoOrbit.app" && echo OK
+# regenera el DMG amb la .app signada:
+STAGE=$(mktemp -d); cp -R "$BUNDLE/macos/NoOrbit.app" "$STAGE/"
+ln -s /Applications "$STAGE/Applications"
+hdiutil create -volname NoOrbit -srcfolder "$STAGE" -ov -format UDZO \
+  "$BUNDLE/dmg/NoOrbit_0.61.2-alpha_universal.dmg"; rm -rf "$STAGE"
+```
+
+### Instal·lar en un altre Mac (usuari final — doble clic)
+
+1. Descarrega el `.dmg` **universal** del GitHub Release, fes-hi **doble clic**
+   i arrossega **NoOrbit** a la carpeta **Aplicacions**.
+2. Fes **doble clic** a NoOrbit. Com que ve signada ad-hoc (no notaritzada),
+   la **primera vegada** pot ser que macOS la bloquegi; solució d'un sol cop:
+   - **clic dret → Obre → Obre**, o bé per terminal:
 
    ```bash
    xattr -dr com.apple.quarantine /Applications/NoOrbit.app
    ```
 
-> Per distribuir-ho públicament sense aquest avís, cal signar amb un certificat Apple
+   A partir d'aquí, doble clic normal per sempre.
+
+> Per distribuir-ho públicament sense cap avís, cal signar amb un certificat Apple
 > Developer i notaritzar (`pnpm tauri build` amb les variables d'entorn de signatura).
 
 ---
@@ -91,15 +112,18 @@ pnpm app:build:deb          # només .deb
 ### Resultat
 
 ```
-apps/desktop/src-tauri/target/release/bundle/deb/NoOrbit_0.6.0_amd64.deb
+apps/desktop/src-tauri/target/release/bundle/deb/NoOrbit_0.61.2-alpha_amd64.deb
 ```
 
 ### Instal·lar (usuari final)
 
+**Doble clic** sobre el `.deb` (s'obri amb el GDebi o el centre de
+programari) o bé per terminal:
+
 ```bash
-sudo apt install ./NoOrbit_0.6.0_amd64.deb
+sudo apt install ./NoOrbit_0.61.2-alpha_amd64.deb
 # o bé, després d'haver-lo descarregat:
-sudo dpkg -i NoOrbit_0.6.0_amd64.deb && sudo apt -f install
+sudo dpkg -i NoOrbit_0.61.2-alpha_amd64.deb && sudo apt -f install
 ```
 
 Executa'l amb `no-orbit` o des del menú d'aplicacions.
@@ -131,13 +155,13 @@ pnpm app:build:win
 
 ```
 apps\desktop\src-tauri\target\release\bundle\
-├── nsis\NoOrbit_0.6.0_x64-setup.exe   ← instal·lador clàssic (recomanat)
-└── msi\NoOrbit_0.6.0_x64_en-US.msi     ← paquet per a desplegaments empresarials
+├── nsis\NoOrbit_0.61.2-alpha_x64-setup.exe   ← instal·lador clàssic (recomanat)
+└── msi\NoOrbit_0.61.2-alpha_x64_en-US.msi     ← paquet per a desplegaments empresarials
 ```
 
 ### Instal·lar (usuari final)
 
-Doble clic al `*-setup.exe`; segueix l'assistent. S'instal·la **per a l'usuari
+**Doble clic** al `*-setup.exe`; segueix l'assistent. S'instal·la **per a l'usuari
 actual** (sense drets d'administrador). El `.msi` serveix per a desplegaments
 massius (GPO/SCCM).
 

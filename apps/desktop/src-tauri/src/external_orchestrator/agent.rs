@@ -3,8 +3,8 @@
 //!
 //! Flux de `delegate_task`:
 //! 1. Si la màquina té prou memòria lliure, descobreix les IAs locals
-//!    externes (Ollama, LM Studio, Jan, llama.cpp, vLLM) i prova els seus
-//!    adaptadors de comunicació.
+//!    externes (Ollama, LM Studio, Jan, llama.cpp, vLLM, DeepSeek Harness) i
+//!    prova els seus adaptadors de comunicació.
 //! 2. Si no n'hi ha cap en marxa o totes fallen, fa el bot de rescat **en
 //!    línia** amb els proveïdors oficials registrats amb token per l'usuari
 //!    (`online_adapter`).

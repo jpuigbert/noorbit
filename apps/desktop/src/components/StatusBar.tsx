@@ -8,6 +8,8 @@ import { useAIStore } from "../stores/aiStore";
 import { useAIActivity } from "../stores/activityStore";
 import { useSystemStatsStore, memPercent, formatBytes } from "../stores/systemStatsStore";
 import BackgroundTaskBadge from "./BackgroundTaskBadge";
+import { ProblemsBadge } from "./Problems/ProblemsPanel";
+import UpdateBadge from "./Update/UpdateBadge";
 
 function Dot({ on }: { on: boolean }) {
   return <span className={"status-dot " + (on ? "on" : "off")} />;
@@ -49,6 +51,8 @@ export default function StatusBar() {
       <span className="status-item">
         {t("status.workspace")}: {folderName ?? t("status.noWorkspace")}
       </span>
+      <ProblemsBadge />
+      <UpdateBadge />
       <div className="spacer" />
       <BackgroundTaskBadge />
       {ramPct !== null && (

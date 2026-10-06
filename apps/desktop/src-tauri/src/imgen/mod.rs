@@ -142,6 +142,54 @@ pub fn import_base64(data_b64: &str, name: Option<&str>) -> Result<String> {
     Ok(path.to_string_lossy().to_string())
 }
 
+/// Carpeta de la zona de dades on van els fitxers adjuntats al xat (codi,
+/// documents, dades…). Separada de «generated» perquè no es barregi amb
+/// imatges creades per la IA.
+fn data_adjunts_dir() -> Result<PathBuf> {
+    let dir = AppConfig::data_dir()
+        .ok_or_else(|| anyhow!("No es pot determinar la carpeta de dades de NoOrbit"))?
+        .join("adjunts");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| anyhow!("No es pot crear la carpeta d'adjunts: {}", e))?;
+    Ok(dir)
+}
+
+/// Desa QUALSEVOL fitxer adjuntat al xat (enganxat del porta-retalls o triat
+/// al disc, que no arriba amb ruta real) a la carpeta de dades i en retorna
+/// la ruta absoluta. El nom s'hanitza: no pot eixir de la carpeta.
+pub fn attach_base64(data_b64: &str, name: &str) -> Result<String> {
+    use base64::Engine as _;
+    let payload = match data_b64.find("base64,") {
+        Some(i) => &data_b64[i + "base64,".len()..],
+        None => data_b64.trim(),
+    };
+    let cleaned: String = payload.chars().filter(|c| !c.is_whitespace()).collect();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&cleaned)
+        .map_err(|_| anyhow!("El fitxer adjunt no s'ha pogut descodificar"))?;
+    if bytes.is_empty() {
+        return Err(anyhow!("El fitxer adjunt és buit"));
+    }
+    if bytes.len() > 40_000_000 {
+        return Err(anyhow!("Fitxer adjunt massa gran (màx. 40 MB)"));
+    }
+    let raw = name.rsplit(['/', '\\']).next().unwrap_or("fitxer").trim();
+    let mut safe: String = raw
+        .chars()
+        .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | ' '))
+        .take(80)
+        .collect();
+    let trimmed = safe.trim_matches('.');
+    if trimmed.is_empty() {
+        safe = "fitxer".to_string();
+    }
+    let stamp = chrono::Utc::now().timestamp_millis();
+    let path = data_adjunts_dir()?.join(format!("adjunt-{}-{}", stamp, safe));
+    std::fs::write(&path, &bytes)
+        .map_err(|e| anyhow!("No s'ha pogut desar l'adjunt: {}", e))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 // ── ComfyUI (local) ─────────────────────────────────────────────────────────
 
 /// URL base si el servidor ComfyUI respon al port 8188.
@@ -348,7 +396,14 @@ async fn generate_online(
             .model
             .clone()
             .unwrap_or_else(|| "dall-e-3".to_string());
-        let body = json!({
+        // Venice permet contingut SENSE CENSURA si demanem explícitament el
+        // que acceptem rebre. Sense «acceptable_content», Venice respon amb
+        // una imatge filtrada/censurada encara que el prompt siga lliure.
+        // Així doncs, quan el proveïdor és Venice, declarant que acceptem
+        // contingut per a adults, l'API ens el retorna tal com es demana.
+        let is_venice = provider.base().to_lowercase().contains("venice")
+            || provider.name.to_lowercase().contains("venice");
+        let mut body = json!({
             "model": model,
             "prompt": o.prompt,
             "n": 1,
@@ -356,6 +411,12 @@ async fn generate_online(
                                      o.height.max(256).min(1024) - (o.height.max(256).min(1024) % 16)),
             "response_format": "b64_json",
         });
+        if is_venice {
+            // Venice no filtra: acceptem qualsevol contingut legítim (adults,
+            // violència artística, etc.) i el privacitat és total.
+            body["acceptable_content"] = json!(["sexual", "violence", "pii", "harassment", "hate"]);
+            body["privacy_level"] = json!("private");
+        }
         let resp = {
             let req = client
                 .post(format!("{}/images/generations", provider.base()))
@@ -502,7 +563,13 @@ pub async fn generate(
             );
         }
     } else {
-        note = "ComfyUI no està en marxa".into();
+        note = if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+            // ComfyUI oficial només es publica per a Apple Silicon: en un Mac 
+            // Intel el camí local no existeix, no té sentit recomanar-lo.
+            "ComfyUI local no és compatible amb Mac Intel (només Apple Silicon)".into()
+        } else {
+            "ComfyUI no està en marxa".into()
+        };
     }
 
     // 2) En línia amb les credencials explícites de l'usuari.
@@ -517,13 +584,18 @@ pub async fn generate(
     } else {
         note = format!("{} / sense proveïdors en línia registrats", note);
     }
-    Err(anyhow!(
-        "No puc generar la imatge ({}). Arrenca ComfyUI amb «start_comfyui» (o \
-         instal·la'l amb «install_comfyui») per fer-ho en local, o registra un \
-         proveïdor en línia amb token al menú de Proveïdors d'IA (p. ex. OpenAI \
-         amb «dall-e-3») indicant el model d'imatges.",
-        note
-    ))
+    let local_hint = if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        "En aquest Mac Intel, la generació local amb ComfyUI NO és possible: \
+         registra un proveïdor d'imatges en línia amb token al menú \
+         «Proveïdors d'IA» (p. ex. OpenAI amb «dall-e-3», o Venice) i indica el \
+         model d'imatges; el xat i la directriu IMG| l'usaran sols."
+    } else {
+        "Arrenca ComfyUI amb «start_comfyui» (o instal·la'l amb \
+         «install_comfyui») per fer-ho en local, o registra un proveïdor en \
+         línia amb token al menú de Proveïdors d'IA (p. ex. OpenAI amb \
+         «dall-e-3») indicant el model d'imatges."
+    };
+    Err(anyhow!("No puc generar la imatge ({}). {}", note, local_hint))
 }
 
 async fn local_txt2img(

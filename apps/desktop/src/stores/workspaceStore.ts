@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { lintOffline } from "../editor/diagnostics";
+import { dropMarkOnManualSave } from "./editReviewStore";
 
 export interface FileNode {
   name: string;
@@ -14,6 +16,9 @@ export interface OpenFile {
   name: string;
   content: string;
   dirty: boolean;
+  /// Ruta absoluta si el fitxer obert és una IMATGE: l'editor la mostra com a
+  /// previsualització (no la llegeix com a text, eixiria basura).
+  imagePath?: string;
 }
 
 interface WorkspaceState {
@@ -32,6 +37,9 @@ interface WorkspaceState {
   saveFile: (path: string, content: string) => Promise<void>;
   writeLive: (path: string, content: string) => Promise<void>;
   updateContent: (content: string) => void;
+  /// Canvia directament el fitxer obert (el usa la revisió d'edicions de la IA
+  /// per a posar el contingut definitiu o restaurar l'anterior sense escriure).
+  setOpenFile: (file: OpenFile | null) => void;
   closeFile: () => void;
 
   // Operacions de l'arbre del projecte (barra lateral).
@@ -49,6 +57,12 @@ interface WorkspaceState {
 
 const LS_RECENTS = "noorbit.recents";
 const MAX_RECENTS = 8;
+
+/// Extensions que l'editor ha de mostrar com a imatge, no com a text.
+const IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp|ico|tiff?|heic|avif)$/i;
+export function isImagePath(path: string): boolean {
+  return IMAGE_EXT.test(path);
+}
 
 function loadRecents(): string[] {
   try {
@@ -136,6 +150,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   loadFile: async (path) => {
+    // Les imatges NO es llegeixen com a text: es marquen perquè l'editor en
+    // faces una previsualització (Monaco mostraria bytes binaris sense sentit).
+    if (isImagePath(path)) {
+      set({
+        openFile: {
+          path,
+          name: path.split(/[/\\]/).pop() ?? path,
+          content: "",
+          dirty: false,
+          imagePath: path,
+        },
+      });
+      return;
+    }
     try {
       const content = await invoke<string>("read_file", { path });
       set({
@@ -148,6 +176,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   saveFile: async (path, content) => {
     await invoke("write_file", { path, content });
+    // Si la IA tenia un canvi pendent en este fitxer, el guardat manual de
+    // l'usuari l'aixafa: la revisió es tanca (com fa VS Code).
+    dropMarkOnManualSave(path);
     const current = get().openFile;
     if (current && current.path === path) {
       set({ openFile: { ...current, content, dirty: false } });
@@ -170,10 +201,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       set({
         openFile: { path, name: path.split(/[/\\]/).pop() ?? path, content, dirty: false },
       });
+    } else {
+      // La IA escriu un fitxer DISTINT de l'obert: Monaco no el veu (no en té
+      // model), així que fem-hi la revisió lleugera per registrar-ne els errors
+      // al panell «Problemes» igualment, sense obrir-lo.
+      lintOffline(path, path.split(/[/\\]/).pop() ?? path, content);
     }
   },
 
-  closeFile: () => set({ openFile: null }),
+  setOpenFile: (file) => set({ openFile: file }),
+
+  closeFile: () => {
+    // Tanca la pestanya NO descarta una revisió pendent: el compte enrere de
+    // l'acceptació automàtica (35 s) segueix corrent.
+    set({ openFile: null });
+  },
 
   // ---- Fitxer nou sense títol (com ⌘N de VS Code) ---------------------------
   newFile: () => {

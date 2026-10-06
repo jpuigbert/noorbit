@@ -1,13 +1,19 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ClipboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ClipboardEvent, type DragEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { ListChecks, Zap, CheckCircle2, XCircle, Server, Download, RefreshCw, Cpu, UserCog, Send, Square, Brain, Boxes, X, Plus, Trash2, FolderPlus, FileDown, FolderTree, GitFork, Smartphone, Apple, Monitor, Copy, FolderOpen, ImagePlus, ImageOff } from "lucide-react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { ListChecks, Zap, CheckCircle2, XCircle, Server, Download, RefreshCw, Cpu, UserCog, Send, Square, Brain, Boxes, X, Plus, Trash2, FolderPlus, FileDown, FolderTree, GitFork, Smartphone, Apple, Monitor, Copy, FolderOpen, ImageOff, Paperclip, ExternalLink } from "lucide-react";
 import { useT } from "../../i18n";
 import { useAgentStore, useActiveChat, extractRecommendedPaths, extractChatImagePaths } from "../../stores/agentStore";
-import { useAIStore } from "../../stores/aiStore";
+import { useAIStore, OLLAMA_CLOUD_MODELS } from "../../stores/aiStore";
 import { useExpertStore } from "../../stores/expertStore";
-import { useProviderStore } from "../../stores/providerStore";
+import {
+  useProviderStore,
+  isOllamaCloudProvider,
+  type ProviderKind,
+} from "../../stores/providerStore";
 import { usePreviewStore } from "../../stores/previewStore";
+import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { useSystemStatsStore, memPercent, formatBytes } from "../../stores/systemStatsStore";
 import { CopyButton, SaveButton } from "../CopyButton";
 
@@ -21,6 +27,13 @@ export default function AgentPanel() {
   const [pendingImgs, setPendingImgs] = useState<string[]>([]);
   const [attachErr, setAttachErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Fitxers NO-imatge adjuntats com a CONTEXT (codi, docs…): nom + text.
+  const [pendingFiles, setPendingFiles] = useState<{ name: string; text: string }[]>([]);
+  // Imatges generades pel xat que arriben per «runtools://image»: es mostren
+  // en el moment, sense esperar que el model acabe la resposta.
+  const [liveImgs, setLiveImgs] = useState<string[]>([]);
+  // Arrossegament d'OS/arbres: posa l'entrada en estat «solta ací».
+  const [dragOver, setDragOver] = useState(false);
 
   const {
     backends,
@@ -86,9 +99,12 @@ export default function AgentPanel() {
   const experts = useExpertStore((s) => s.experts);
   const loadExperts = useExpertStore((s) => s.load);
 
-  // Proveïdors configurats (Venice, Claude…) per triar la IA d'aquest xat.
+  // Proveïdors configurats (Venice, Claude, Ollama Cloud…) per triar la IA
+  // d'aquest xat. `active` és el proveïdor global (el de la configuració).
   const providers = useProviderStore((s) => s.providers);
+  const activeProvider = useProviderStore((s) => s.active);
   const loadProviders = useProviderStore((s) => s.load);
+  const updateProvider = useProviderStore((s) => s.update);
 
   // RAM en temps real: es mostra junt al cronòmetre «Treballant…» perquè
   // l'usuari veja si el model està omplint la memòria (causa de bucles/lentitud).
@@ -166,8 +182,9 @@ export default function AgentPanel() {
   }, [messages, running, timeline, lastResult, stream, activeId]);
 
   const hasText = prompt.trim().length > 0;
-  // Es pot enviar amb text, amb imatges enganxades, o amb totes dues coses.
-  const canSend = hasText || pendingImgs.length > 0;
+  // Es pot enviar amb text, amb imatges enganxades, amb fitxers adjunts, o
+  // amb qualsevol combinació d'elles.
+  const canSend = hasText || pendingImgs.length > 0 || pendingFiles.length > 0;
   const disabled = running || !hasText;
   const pullBusy = Object.keys(pulling).length > 0;
 
@@ -181,15 +198,24 @@ export default function AgentPanel() {
   const handleSend = () => {
     const text = prompt.trim();
     const imgs = pendingImgs;
-    if (!text && imgs.length === 0) return;
+    const files = pendingFiles;
+    if (!text && imgs.length === 0 && files.length === 0) return;
     setPrompt("");
     setPendingImgs([]);
+    setPendingFiles([]);
     setAttachErr(null);
+    // Els fitxers adjuntats (codi, docs…) es fiquen DINS del missatge com a
+    // context real, perquè QUALSEVOL model —sense eina read_file— el puga veure.
+    const attachBlock = files
+      .map((f) => `\n\n===== ADJUNT: ${f.name} =====\n\`\`\`\n${f.text}\n\`\`\``)
+      .join("");
+    setLiveImgs([]);
     if (running) {
-      const queued = [text, ...imgs].filter(Boolean).join("\n");
+      const queued = [text, ...imgs].filter(Boolean).join("\n") + attachBlock;
       enqueue(queued);
     } else {
-      void send(text || "(imatge adjunta)", undefined, imgs);
+      const base = text || (imgs.length ? "(imatge adjunta)" : "(fitxer adjunt)");
+      void send(base + attachBlock, undefined, imgs);
     }
   };
 
@@ -251,10 +277,25 @@ export default function AgentPanel() {
   };
 
   // Enganxar (⌘V) o triar fitxers: les imatges es desen a la carpeta de
-  // dades amb «image_import» i apareixen com a miniatures sota l'entrada.
+  // dades amb «image_import» i apareixen com a miniatures; la resta de
+  // fitxers (codi, documents…) es llegeixen i s'adjunten com a CONTEXT de text.
+  const isImageName = (name: string) => /\.(png|jpe?g|jpeg|gif|bmp|webp|ico|tiff?|heic|avif)$/i.test(name);
+
   const importImageFiles = async (files: File[]) => {
     for (const f of files) {
       try {
+        const isImg = f.type.startsWith("image/") || isImageName(f.name);
+        if (!isImg) {
+          // Fitxer de text: el llegim i el guardem com a context adjunt.
+          const text = await new Promise<string>((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(String(r.result ?? ""));
+            r.onerror = () => reject(r.error);
+            r.readAsText(f);
+          });
+          setPendingFiles((p) => [...p, { name: f.name || "fitxer", text }]);
+          continue;
+        }
         const dataUrl = await new Promise<string>((resolve, reject) => {
           const r = new FileReader();
           r.onload = () => resolve(String(r.result));
@@ -272,14 +313,76 @@ export default function AgentPanel() {
     }
   };
 
+  // Adjunta RUTES NATIVES (arrossegades des del Finder o des de l'arbre de
+  // fitxers). Les imatges van a «pendingImgs»; la resta es llegeix amb
+  // «file_context_read» i va al context. Esta funció rep rutes ABSOLUTES reals.
+  const attachNativePaths = async (paths: string[]) => {
+    for (const path of paths) {
+      try {
+        if (isImageName(path)) {
+          setPendingImgs((p) => (p.includes(path) ? p : [...p, path]));
+        } else {
+          const ctx = await invoke<{ name: string; text: string }>("file_context_read", { path });
+          setPendingFiles((p) => [...p, { name: ctx.name, text: ctx.text }]);
+        }
+      } catch (e) {
+        setAttachErr(String(e));
+      }
+    }
+  };
+
   const onPromptPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
-      f.type.startsWith("image/")
-    );
+    const files = Array.from(e.clipboardData?.files ?? []);
     if (files.length === 0) return; // text normal: deixem l'enganxat habitual
     e.preventDefault();
     void importImageFiles(files);
   };
+
+  // Arrossegament DES DE L'ARBRE DE FITXERS (HTML5 intern): cada node posa la
+  // seua ruta a «application/noorbit-path»; ací la recollim i l'adjuntem.
+  const onDropInternal = (e: DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const p = e.dataTransfer?.getData("application/noorbit-path");
+    if (p) void attachNativePaths([p]);
+  };
+
+  // Escoltadors globals: imatges generades en directe i fitxers soltats des de
+  // el sistema operatiu (Tauri dona les rutes absolutes reals del disc).
+  useEffect(() => {
+    const unImg = listen<{ path: string; session?: string }>("runtools://image", (e) => {
+      if ((e.payload.session ?? "main") === activeId) {
+        setLiveImgs((p) => (p.includes(e.payload.path) ? p : [...p, e.payload.path]));
+      }
+    });
+    return () => {
+      void unImg.then((f) => f());
+    };
+  }, [activeId]);
+
+  useEffect(() => {
+    let disposed = false;
+    let un: (() => void) | undefined;
+    void getCurrentWebview()
+      .onDragDropEvent((e) => {
+        if (disposed) return;
+        if (e.payload.type === "over") setDragOver(true);
+        else if (e.payload.type === "leave") setDragOver(false);
+        else if (e.payload.type === "drop") {
+          setDragOver(false);
+          void attachNativePaths(e.payload.paths);
+        }
+      })
+      .then((fn) => {
+        if (disposed) fn();
+        else un = fn;
+      });
+    return () => {
+      disposed = true;
+      un?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const doDownload = async () => {
     const name = modelName.trim();
@@ -290,9 +393,30 @@ export default function AgentPanel() {
   };
 
   // IA d'aquest xat: proveïdor ("" = el global de la configuració) i model
-  // d'Ollama ("" = el model global). El model només té sentit en local.
+  // d'Ollama ("" = el model global). El model local només té sentit en local.
   const chatProvider = sess.provider ?? "";
-  const isLocalChat = chatProvider === "" || chatProvider === "ollama";
+  // Proveïdor REAL que s'usarà: el triat al xat o, si no n'hi ha, el global.
+  const effectiveProvider = chatProvider || activeProvider;
+  const isLocalChat = effectiveProvider === "" || effectiveProvider === "ollama";
+  // Ollama Cloud: un (o més) proveïdors remots que serveixen models gratuïts al
+  // núvol. Cal mostrar-ne el model actiu i deixar triar-lo: els proveïdors
+  // remots ignoren el model per xat (el porten escrit a sobre), així que el
+  // canvi s'aplica al proveïdor.
+  const chatProviderEntry = providers.find((p) => p.id === effectiveProvider);
+  const isCloudChat = isOllamaCloudProvider(chatProviderEntry);
+  const cloudProvider = isCloudChat ? chatProviderEntry : undefined;
+  const pickCloudModel = (model: string) => {
+    if (!cloudProvider || cloudProvider.model === model) return;
+    void updateProvider({
+      id: cloudProvider.id,
+      name: cloudProvider.name,
+      baseUrl: cloudProvider.base_url,
+      model,
+      kind: (cloudProvider.kind || "openai") as ProviderKind,
+      auth: cloudProvider.auth,
+      enabled: true,
+    });
+  };
 
   return (
     <div className="agent-panel">
@@ -358,10 +482,38 @@ export default function AgentPanel() {
             .filter((p) => p.enabled && p.id !== "ollama")
             .map((p) => (
               <option key={p.id} value={p.id}>
+                {/* Mostra també el model: així es veu QUINA IA s'usarà. */}
                 {p.name}
+                {p.model ? ` · ${p.model}` : ""}
               </option>
             ))}
         </select>
+        {/* Ollama Cloud: un sol proveïdor amb diversos models gratuïts al núvol.
+            El selector mostra el model ACTIU i en permet triar un altre. */}
+        {isCloudChat && (
+          <select
+            className="ap-model-select ap-model-perchat"
+            value={cloudProvider?.model ?? ""}
+            disabled={!cloudProvider}
+            onChange={(e) => pickCloudModel(e.target.value)}
+            title={t("agent.cloudModelHint")}
+          >
+            {!cloudProvider?.model && (
+              <option value="">{t("agent.cloudModelNone")}</option>
+            )}
+            {/* Si el model actiu no és dels de la llista base, l'afegim perquè
+                es mostri sempre la tria real. */}
+            {cloudProvider?.model &&
+            !OLLAMA_CLOUD_MODELS.some((m) => m.name === cloudProvider.model) ? (
+              <option value={cloudProvider.model}>{cloudProvider.model}</option>
+            ) : null}
+            {OLLAMA_CLOUD_MODELS.map((m) => (
+              <option key={m.name} value={m.name}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+        )}
         {isLocalChat && (
           <select
             className="ap-model-select ap-model-perchat"
@@ -479,9 +631,22 @@ export default function AgentPanel() {
           </div>
         ))}
 
-      <div className="agent-prompt">
-        {/* Miniatures de les imatges adjuntes pendents (clic a la X les treu). */}
-        {(pendingImgs.length > 0 || attachErr) && (
+      <div
+        className={"agent-prompt" + (dragOver ? " drag-over" : "")}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={onDropInternal}
+      >
+        {dragOver && (
+          <div className="ap-dropzone">
+            <Paperclip size={14} /> Solta ací: imatges com a adjunts, fitxers com a context
+          </div>
+        )}
+        {/* Miniatures de les imatges + xips dels fitxers adjunts pendents. */}
+        {(pendingImgs.length > 0 || pendingFiles.length > 0 || attachErr) && (
           <div className="ap-attach-row">
             {pendingImgs.map((p) => (
               <ChatThumb
@@ -490,11 +655,23 @@ export default function AgentPanel() {
                 onRemove={() => setPendingImgs((x) => x.filter((y) => y !== p))}
               />
             ))}
+            {pendingFiles.map((f, i) => (
+              <span key={f.name + i} className="ap-file-chip" title={f.name}>
+                <Paperclip size={11} /> {f.name}
+                <button
+                  className="ap-thumb-x"
+                  onClick={() => setPendingFiles((x) => x.filter((_, k) => k !== i))}
+                  title="Treu aquest fitxer"
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            ))}
             {attachErr && <span className="ap-attach-err">{attachErr}</span>}
           </div>
         )}
         <textarea
-          placeholder={t("agent.promptPlaceholder") + " · enganxa-hi imatges amb ⌘V"}
+          placeholder={t("agent.promptPlaceholder") + " · ⌘V imatges · arrossega fitxers ací"}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onPaste={onPromptPaste}
@@ -509,18 +686,18 @@ export default function AgentPanel() {
           >
             <FolderTree size={13} /> {t("agent.ctxToggle")}
           </button>
-          {/* Adjuntar imatges des del disc (mateix efecte que enganxar-les). */}
+          {/* Adjuntar QUALSEVOL fitxer: imatges com a entrada visual; codi/docs
+              com a context de text. També es poden arrossegar des del Finder. */}
           <button
             className="btn sm ap-ctx"
             onClick={() => fileRef.current?.click()}
-            title="Adjunta imatges: es mostren al xat i els models amb visió les reben"
+            title="Adjunta un fitxer: imatges es mostren al xat; codi/documents s'envien com a context"
           >
-            <ImagePlus size={13} />
+            <Paperclip size={13} />
           </button>
           <input
             ref={fileRef}
             type="file"
-            accept="image/*"
             multiple
             hidden
             onChange={(e) => {
@@ -528,6 +705,18 @@ export default function AgentPanel() {
               e.target.value = "";
             }}
           />
+          {/* Exporta: obri la CARPETA del projecte obert amb el Finder/explorador. */}
+          <button
+            className="btn sm ap-ctx"
+            onClick={() => {
+              const root = useWorkspaceStore.getState().root;
+              if (root) void invoke("open_externally", { path: root }).catch(() => undefined);
+              else setAttachErr("No hi ha cap projecte obert.");
+            }}
+            title="Obri la carpeta del projecte amb l'aplicació per defecte"
+          >
+            <FolderOpen size={13} />
+          </button>
           {/* Què està veient realment la IA: nre. de fitxers o avís. */}
           {includeContext && contextInfo && (
             <span className="ap-ctx-info">{contextInfo}</span>
@@ -538,7 +727,7 @@ export default function AgentPanel() {
             <>
               <button
                 className="btn sm"
-                disabled={!hasText}
+                disabled={!canSend}
                 onClick={handleSend}
                 title={t("agent.enqueueHint")}
               >
@@ -553,7 +742,7 @@ export default function AgentPanel() {
             </>
           ) : (
             <>
-              <button className="btn primary sm" disabled={!hasText} onClick={handleSend}>
+              <button className="btn primary sm" disabled={!canSend} onClick={handleSend}>
                 <Send size={13} /> {t("agent.send")}
               </button>
               <button className="btn sm" disabled={disabled} onClick={() => plan(prompt, "text")}>
@@ -693,7 +882,10 @@ export default function AgentPanel() {
           ) : (
             <div key={i} className="chat-row assistant">
               {(m.thinking || (m.steps && m.steps.length > 0)) && (
-                <details className="chat-thought">
+                /* Obert PER DEFECTE: l'usuari vol veure el procés de
+                   pensament sense haver de clicar-hi; si el contingut no cap,
+                   el propi panell té barra de desplaçament. */
+                <details className="chat-thought" open>
                   <summary>
                     <Brain size={12} style={{ verticalAlign: -2, marginRight: 4 }} />
                     {t("agent.thinkingTitle")}
@@ -804,10 +996,12 @@ export default function AgentPanel() {
                   {ramChip}
                 </div>
               )}
-            {/* Si el stream ja anuncia una imatge generada, es mostra al moment. */}
-            {extractChatImagePaths(stream ?? "").length > 0 && (
+            {/* Imatges generades en este torn: les anunciades pel stream MÉS
+                les que arriben per «runtools://image» (apareixen a l'instant,
+                sense esperar que el model acabe la resposta). */}
+            {Array.from(new Set([...extractChatImagePaths(stream ?? ""), ...liveImgs])).length > 0 && (
               <div className="chat-imgs">
-                {extractChatImagePaths(stream ?? "").map((p) => (
+                {Array.from(new Set([...extractChatImagePaths(stream ?? ""), ...liveImgs])).map((p) => (
                   <ChatImage key={p} path={p} />
                 ))}
               </div>
@@ -976,6 +1170,13 @@ function ChatImage({ path }: { path: string }) {
           title="Mostra al Finder / explorador de fitxers"
         >
           <FolderOpen size={11} /> Mostra
+        </button>
+        <button
+          className="btn sm ghost"
+          onClick={() => void invoke("open_externally", { path }).catch(() => undefined)}
+          title="Obri amb l'aplicació per defecte (exportar a un altre programa)"
+        >
+          <ExternalLink size={11} /> Obri
         </button>
       </figcaption>
     </figure>

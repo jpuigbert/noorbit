@@ -6,6 +6,9 @@ import { useUnrealStore } from "./stores/unrealStore";
 import { useBlenderLiveStore } from "./stores/blenderLiveStore";
 import { registerProcessListener } from "./stores/processStore";
 import { registerTaskListeners } from "./stores/taskStore";
+import { useComputerStore } from "./stores/computerStore";
+import { installConsoleCapture, logBackend } from "./stores/consoleStore";
+import { listen } from "@tauri-apps/api/event";
 import { actions } from "./actions";
 import MenuBar from "./components/MenuBar";
 import StatusBar from "./components/StatusBar";
@@ -22,6 +25,8 @@ import CommandPalette from "./components/CommandPalette";
 import QuickOpen from "./components/QuickOpen";
 import SearchPalette from "./components/SearchPalette";
 import TerminalPanel from "./components/Terminal/TerminalPanel";
+import ReviewPill from "./components/Editor/ReviewPill";
+import { markForPath, resolveMark } from "./stores/editReviewStore";
 import NewProjectModal from "./components/NewProjectModal";
 import StartupScreen from "./components/StartupScreen";
 
@@ -89,6 +94,21 @@ export default function App() {
     // funcionen encara que el seu panell no estiga obert ara mateix.
     registerProcessListener();
     registerTaskListeners();
+    // El control de l'ordinador: els seus escoltadors (computer://confirm, 
+    // …/agent, …/executed) i permisos s'activen DES DE L'ARRANCAIDA, no només
+    // quan el panell «Ordinador» està obert. Si no, una comanda «RUN|» del xat
+    // que demane confirmació no trobaria cap listener: el modal no eixiria i
+    // l'execució caducaria (l'usuari es quedaria «sense accés a l'ordinador»).
+    void useComputerStore.getState().setupEvents();
+    void useComputerStore.getState().load();
+    // Consola de depuració: para els console.* i els errors del webview, i
+    // aboca els passos de l'agent (i els seus fallos) perquè l'usuari puga
+    // veure QUÈ ha fallat quan una comanda o generació no ix bé.
+    installConsoleCapture();
+    void listen<{ label: string; detail: string; ok: boolean }>("agent://progress", (e) => {
+      const { label, detail, ok } = e.payload;
+      logBackend(label, detail, ok ? "info" : "error");
+    });
     if (!useWorkspaceStore.getState().root) {
       useUIStore.getState().setShowStartup(true);
     }
@@ -132,6 +152,27 @@ export default function App() {
         e.preventDefault();
         void actions["goto.definition"]();
         return;
+      }
+
+      if (meta && k === "enter") {
+        // ⌘↵: accepta el canvi de la IA que s'està revisant (com a VS Code).
+        const path = useWorkspaceStore.getState().openFile?.path;
+        const mark = path ? markForPath(path) : undefined;
+        if (mark && !mark.streaming) {
+          e.preventDefault();
+          void resolveMark(mark.path, "accept");
+          return;
+        }
+      }
+      if (meta && (k === "backspace" || k === "delete")) {
+        // ⌘⌫: rebutja el canvi i torna el codi anterior de la IA.
+        const path = useWorkspaceStore.getState().openFile?.path;
+        const mark = path ? markForPath(path) : undefined;
+        if (mark) {
+          e.preventDefault();
+          void resolveMark(mark.path, "reject");
+          return;
+        }
       }
 
       if (meta && e.shiftKey && k === "p") {
@@ -214,6 +255,7 @@ export default function App() {
         {sidebarOpen && <Sidebar />}
         <div className="app-main">
           <EditorPane />
+          <ReviewPill />
         </div>
         {rightPanelOpen && <RightPanel />}
       </div>

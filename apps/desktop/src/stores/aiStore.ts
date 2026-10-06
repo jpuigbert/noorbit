@@ -70,6 +70,8 @@ interface AIState {
   pulling: Record<string, string>; // model -> missatge de progrés
   modelsDir: string;
   volumes: string[];
+  /// Progrés de la migració de models al disc extern (nu = no s'està movent).
+  migrating: string | null;
   /// Avís informatiu de l'última operació (p. ex. tria automàtica de model).
   lastMessage: string | null;
 
@@ -86,6 +88,7 @@ interface AIState {
   startComfy: () => Promise<void>;
   loadModelsDir: () => Promise<void>;
   setModelsDir: (path: string | null) => Promise<void>;
+  migrateModels: () => Promise<void>;
   selectModel: (name: string | null) => Promise<void>;
   pullModel: (name: string) => Promise<void>;
   deleteModel: (name: string) => Promise<void>;
@@ -127,6 +130,7 @@ export const useAIStore = create<AIState>((set, get) => ({
   pulling: {},
   modelsDir: "",
   volumes: [],
+  migrating: null,
   lastMessage: null,
 
   checkOllama: async () => {
@@ -278,10 +282,12 @@ export const useAIStore = create<AIState>((set, get) => ({
     await get().checkComfy();
   },
 
-  /// Arrenca el servei local i torna a comprobar l'estat.
+  /// Arrenca el servei local (aplicant la carpeta de models configurada,
+  /// si cal, reinicia Ollama) i torna a comprobar l'estat.
   startOllama: async () => {
     try {
-      await invoke("start_ollama");
+      const msg = await invoke<string>("start_ollama");
+      set({ lastMessage: msg });
     } catch {
       /* ignore */
     }
@@ -307,14 +313,36 @@ export const useAIStore = create<AIState>((set, get) => ({
     }
   },
 
-  /// Desa la carpeta on viuran els models (p. ex. un USB extern).
+  /// Desa la carpeta on viuran els models (p. ex. un USB extern) i l'aplica:
+  /// el backend reinicia Ollama amb OLLAMA_MODELS perquè les descàrregues
+  /// següents vagin al disc extern. El missatge de tornada ho confirma.
   setModelsDir: async (path) => {
     const dir = path ?? "";
     try {
-      await invoke("ollama_set_models_dir", { path: dir });
-      set({ modelsDir: dir });
+      const msg = await invoke<string>("ollama_set_models_dir", { path: dir });
+      set({ modelsDir: dir, lastMessage: msg });
     } catch {
-      /* ignore */
+      set({ modelsDir: dir });
+    }
+  },
+
+  /// Mou els models ja baixats al disc intern cap al disc extern triat,
+  /// amb progrés per l'event «ai://migrate».
+  migrateModels: async () => {
+    if (get().migrating) return;
+    set({ migrating: "Preparant la migració…" });
+    const { listen } = await import("@tauri-apps/api/event");
+    const unlisten = listen<{ message: string }>("ai://migrate", (evt) =>
+      set({ migrating: evt.payload.message })
+    );
+    try {
+      const msg = await invoke<string>("ollama_migrate_models");
+      set({ migrating: null, lastMessage: msg });
+      await get().loadModels();
+    } catch (e) {
+      set({ migrating: null, lastMessage: String(e) });
+    } finally {
+      (await unlisten)();
     }
   },
 

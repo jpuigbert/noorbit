@@ -186,6 +186,10 @@ pub struct WebIa {
 }
 
 pub const WEB_IAS: &[WebIa] = &[
+    // DeepSeek Harness (dsh): primer per id propi perquè «deepseek harness»
+    // no confonga amb el xat web de DeepSeek. Requereix que l'usuari haja
+    // arrancat el servei local (npx @deepseek-ai/dsh web, port 3080).
+    WebIa { id: "dsh", name: "DeepSeek Harness (local)", url: "http://127.0.0.1:3080/" },
     WebIa { id: "deepseek", name: "DeepSeek", url: "https://chat.deepseek.com/" },
     WebIa { id: "chatgpt", name: "ChatGPT (OpenAI)", url: "https://chatgpt.com/" },
     WebIa { id: "claude", name: "Claude", url: "https://claude.ai/new" },
@@ -195,9 +199,14 @@ pub const WEB_IAS: &[WebIa] = &[
 ];
 
 /// Troba la IA pel nom o id («deepseek», «ChatGPT», «openai», «google»…).
+/// «harness»/«dsh» tenen prioritat absoluta: són sempre el DeepSeek Harness
+/// local, encara que la frase continga també «deepseek».
 pub fn find_ia(name: &str) -> Option<&'static WebIa> {
     let n = name.to_lowercase();
-    WEB_IAS.iter().find(|w| {
+    if n.contains("harness") || n == "dsh" || n.contains("deepseek-harness") {
+        return WEB_IAS.iter().find(|w| w.id == "dsh");
+    }
+    WEB_IAS.iter().filter(|w| w.id != "dsh").find(|w| {
         w.id == n
             || w.name.to_lowercase().contains(&n)
             || n.contains(w.id)

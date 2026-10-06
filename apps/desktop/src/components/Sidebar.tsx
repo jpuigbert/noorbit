@@ -60,6 +60,12 @@ function TreeNode({
       <div
         className={"tree-node" + (active ? " active" : "")}
         style={{ paddingLeft: 8 + depth * 12 }}
+        draggable
+        onDragStart={(e) => {
+          // Arrossega este fitxer/carpeta fins al xat per adjuntar-lo.
+          e.dataTransfer.setData("application/noorbit-path", node.path);
+          e.dataTransfer.effectAllowed = "copy";
+        }}
         onClick={() => (node.is_dir ? toggleDir(node.path) : loadFile(node.path))}
         onContextMenu={(e) => {
           e.preventDefault();

@@ -93,6 +93,85 @@ pub async fn image_import(
     imgen::import_base64(&data_base64, name.as_deref()).map_err(|e| e.to_string())
 }
 
+/// Desa un fitxer QUALSIVOL adjuntat al xat (codi, documents, dades…) a la
+/// carpeta de dades «adjunts/» i en retorna la ruta absoluta. Serveix per al
+/// que l'usuari enganxa o tria des del disc, que no arriba amb ruta real.
+#[command]
+pub async fn file_import(data_base64: String, name: Option<String>) -> Result<String, String> {
+    imgen::attach_base64(&data_base64, name.as_deref().unwrap_or("fitxer"))
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct FileContext {
+    pub name: String,
+    pub path: String,
+    pub text: String,
+    pub truncated: bool,
+    pub is_binary: bool,
+}
+
+/// Llegeix un fitxer adjunt al xat perquè la IA en veja el contingut REAL.
+/// Els fitxers arrossegats des de fora del projecte no són accessibles amb
+/// l'eina «read_file» (limitada a l'arrel); ací el contingut s'envia directament
+/// dins del missatge. Màx. 2 MB / 60.000 caràcters; els binaris només fan
+/// constar la ruta.
+#[command]
+pub async fn file_context_read(path: String) -> Result<FileContext, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let p = std::path::Path::new(&path);
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.clone());
+        if !p.exists() {
+            return Err(format!("El fitxer no existeix: {}", path));
+        }
+        if p.is_dir() {
+            return Ok(FileContext {
+                name,
+                path,
+                text: "És una CARPETA, no un fitxer. Adjunta els fitxers individuals per veure'n el contingut.".into(),
+                truncated: false,
+                is_binary: false,
+            });
+        }
+        let bytes = std::fs::read(p).map_err(|e| format!("No s'ha pogut llegir: {}", e))?;
+        if bytes.len() > 2_000_000 {
+            return Ok(FileContext {
+                name,
+                path,
+                text: "(fitxer de més de 2 MB: no s'ha inclòs el contingut; la IA pot copiar-lo al projecte amb una comanda RUN| si cal)".into(),
+                truncated: true,
+                is_binary: false,
+            });
+        }
+        let is_binary = bytes.iter().take(8192).any(|b| *b == 0);
+        if is_binary {
+            return Ok(FileContext {
+                name,
+                path,
+                text: "(fitxer BINARI: contingut no llegível com a text; la ruta és disponible per a les eines)".into(),
+                truncated: false,
+                is_binary: true,
+            });
+        }
+        let lossy = String::from_utf8_lossy(&bytes).to_string();
+        let max = 60_000usize;
+        let count = lossy.chars().count();
+        let text: String = lossy.chars().take(max).collect();
+        Ok(FileContext {
+            name,
+            path,
+            text,
+            truncated: count > max,
+            is_binary: false,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Llegeix una imatge local i la retorna com a data-URL, per que la UI la
 /// mostri sense activar el protocol d'assets (menys superfície d'atac).
 /// Només imatges conegudes i fins a 25 MB.

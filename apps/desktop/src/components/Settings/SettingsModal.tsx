@@ -1,14 +1,56 @@
 import { useEffect, useState } from "react";
-import { X, Globe, Info, SlidersHorizontal, Plug } from "lucide-react";
+import { X, Globe, Info, SlidersHorizontal, Plug, RefreshCw, Download } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
 import { useT } from "../../i18n";
 import { useUIStore } from "../../stores/uiStore";
+import { useUpdateStore } from "../../stores/updateStore";
 import LanguagePanel from "../Language/LanguagePanel";
 import IntegrationsPanel from "./IntegrationsPanel";
 
 type Tab = "general" | "integracions" | "language" | "about";
 
 const DELAYS = [500, 1000, 2000, 5000];
+
+/// Secció «Actualitzacions» del panell Informació: pregunta a GitHub si hi ha
+/// una versió nova publicada (releases del repo) i, si n'hi ha, oferix la
+/// descàrrega directa de l'instal·ador per al nostre sistema. NoOrbit NO
+/// s'autoinsta·la mai: descarrega/obri i l'usuari decidix.
+function UpdateSection() {
+  const { info, checking, error, check } = useUpdateStore();
+  return (
+    <div className="setting-row setting-row-col update-section">
+      <span>Actualitzacions</span>
+      <div className="lp-hint">
+        {checking
+          ? "Comprovant GitHub…"
+          : error
+          ? error
+          : info
+          ? info.available
+            ? `Hi ha una versió nova: ${info.latest} (tu tens la ${info.current}).`
+            : `Ja tens l'última versió publicada (${info.current}).`
+          : "Compara la teua versió amb l'últim release publicat a GitHub."}
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <button className="btn sm" disabled={checking} onClick={() => void check(true)}>
+          <RefreshCw size={12} className={checking ? "spin" : undefined} /> Comprova ara
+        </button>
+        {info?.available && (
+          <button
+            className="btn sm primary"
+            title="Obri la descàrrega de la versió nova"
+            onClick={() =>
+              void invoke("open_externally", { path: info.asset ?? info.url }).catch(() => undefined)
+            }
+          >
+            <Download size={12} /> Descarregar {info.latest}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function SettingsModal() {
   const show = useUIStore((s) => s.showSettings);
@@ -154,6 +196,7 @@ export default function SettingsModal() {
               <p className="lp-hint">
                 Editor creatiu amb IA local (Ollama), connectors, Blender i Unreal Engine 5.
               </p>
+              <UpdateSection />
             </div>
           )}
         </div>

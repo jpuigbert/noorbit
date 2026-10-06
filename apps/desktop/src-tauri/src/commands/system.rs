@@ -138,3 +138,24 @@ pub async fn reveal_in_finder(path: String) -> Result<(), String> {
     };
     result.map(|_| ()).map_err(|e| format!("No s'ha pogut mostrar al Finder: {}", e))
 }
+
+/// Obre un fitxer (o carpeta) amb l'aplicació per defecte del sistema: «open»
+/// a macOS, «start» a Windows, «xdg-open» a Linux. Serveix per a que l'usuari
+/// EXPORTE un fitxer generat (imatge, PDF…) cap a un altre programa des del
+/// xat, i per obrir la carpeta del projecte.
+#[command]
+pub async fn open_externally(path: String) -> Result<(), String> {
+    if path.is_empty() {
+        return Err("Ruta buida".into());
+    }
+    let result = if cfg!(target_os = "macos") {
+        std::process::Command::new("open").arg(&path).spawn()
+    } else if cfg!(target_os = "windows") {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path])
+            .spawn()
+    } else {
+        std::process::Command::new("xdg-open").arg(&path).spawn()
+    };
+    result.map(|_| ()).map_err(|e| format!("No s'ha pogut obrir: {}", e))
+}

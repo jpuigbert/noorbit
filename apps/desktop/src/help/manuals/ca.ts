@@ -82,9 +82,12 @@ export const manual: Manual = {
         "Aplica a Blender / Unreal: escript el que vols fer al xat i prem la barra «Aplica a» per executar-ho dins l'aplicació (seccions 9 i 10).",
         "Atura: prem «Atura» per avortar una generació en curs.",
         "Pensament profund: si una pàgina necessita JavaScript, la IA obre el navegador web intern i la llegeix ja renderitzada. Si el lloc demana iniciar sessió o un captcha, la finestra apareix en pantalla perquè la completes TU, amb el teu compte: la IA mai supla identitats.",
-        "Navegador intern per a TOTES les IAs — sense cap botó: totes les IAs del xat (local, en línia o expert) poden navegar soles. La IA escriu una directriu «NB|OBRIR|url», «NB|LLEGIR|» o «NB|PREGUNTA_IA|deepseek|pregunta» al xat, NoOrbit l'executa i li'n torna el resultat perquè acabe la resposta. Si no tens cap clau d'API, la IA pot preguntar a una IA web (DeepSeek, ChatGPT, Claude, Gemini, Perplexity o Grok): s'obre el navegador intern, TU hi inicies sessió amb el teu compte, i NoOrbit escriu la pregunta al xat web (ho veus tot) i en llegeix la resposta visible en pantalla, guardant-la amb l'origen etiquetat. Totalment legal: mai galetes, tokens ni sessions alienes. I si la IA web dona CODI, NoOrbit l'extreu en blocs (amb el llenguatge) i la IA del xat l'integra: l'adapta i l'escriu com a fitxers reals del projecte (format @file), sense cap clic teu.",
+        "Navegador intern per a TOTES les IAs — sense cap botó: totes les IAs del xat (local, en línia o expert) poden navegar soles. La IA escriu una directriu «NB|OBRIR|url», «NB|LLEGIR|» o «NB|PREGUNTA_IA|deepseek|pregunta» al xat, NoOrbit l'executa i li'n torna el resultat perquè acabe la resposta. Si no tens cap clau d'API, la IA pot preguntar a una IA web (DeepSeek, DeepSeek Harness local amb «dsh web» en marxa, ChatGPT, Claude, Gemini, Perplexity o Grok): s'obre el navegador intern, TU hi inicies sessió amb el teu compte, i NoOrbit escriu la pregunta al xat web (ho veus tot) i en llegeix la resposta visible en pantalla, guardant-la amb l'origen etiquetat. Totalment legal: mai galetes, tokens ni sessions alienes. I si la IA web dona CODI, NoOrbit l'extreu en blocs (amb el llenguatge) i la IA del xat l'integra: l'adapta i l'escriu com a fitxers reals del projecte (format @file), sense cap clic teu.",
         "Generació d'imatges: amb ComfyUI en marxa i prou RAM lliure, es genera en local; si no, amb els proveïdors en línia que hagis registrat amb clau teva (p. ex. OpenAI «dall-e-3»). Les imatges es desen a la carpeta generated de NoOrbitData.",
         "Imatges al xat: qualsevol imatge generada o esmentada amb la seva ruta apareix previsualitzada dins la conversa, amb botons «Copiar» (al porta-retalls, com a PNG) i «Mostra» (al Finder/explorador).",
+        "Revisió dels canvis de la IA (com a Qoder o VS Code): quan la IA escriu o modifica un fitxer, l'editor mostra el codi NOU en verd i el VELL en roig al mateix editor. Prem «Accepta» per deixar el nou i esborrar el vell, o «Rebutja» per tornar exactament al que hi havia abans. Si no fas res, al cap de 35 segons el canvi s'accepta sol i la barra de revisió desapareix.",
+        "Mentre la IA encara està escrivint, l'editor en va mostrant el codi en directe com a previsualització; el compte enrere de 35 s arrenca quan la IA acaba aquell fitxer. Si la IA ha tocat varis fitxers que no tens oberts, una pastilla a la cantonada de l'editor els llista (amb el temps que queda) i permet «Accepta tot», «Rebutja tot» o saltar a cada fitxer.",
+        "Desar un fitxer a mà (⌘S) mentre es revisa un canvi el dona per acceptat: mana la teva edició, igual que fa VS Code.",
         "Enganxar imatges al xat: prem ⌘V sobre l'entrada de text o usa el botó «Adjunta imatges» per triar fitxers. Es desen a NoOrbitData i els models amb visió (llava, gemma3, llama3.2-vision…) les reben com a entrada.",
       ],
     },
@@ -96,7 +99,8 @@ export const manual: Manual = {
       items: [
         "Ollama (local, gratuït): instal·la'l des de https://ollama.com i engega'l (escolta a localhost:11434). Els models es baixen al teu disc.",
         "Catàleg d'IAs (menú IA › Catàleg d'IAs): abans de descarregar res, consulta la mida aproximada de cada model, si és sense censura, si accepta imatges (visió), si en genera (imatges o vídeo) i si ja el tens instal·lat. Els botons «Baixa» descàrreguen directament.",
-        "Models gratuïts al núvol d'Ollama (Ollama Cloud): a la secció de models veuràs una llista de models allotjats (gpt-oss, qwen3, deepseek-r1…). Cal una clau gratuïta de https://ollama.com/settings/keys; no cal baixar res.",
+        "Models gratuïts al núvol d'Ollama (Ollama Cloud): a la secció de models veuràs una llista de models allotjats (gpt-oss, qwen3, deepseek-r1…) i un camp per escriure qualsevol altre nom del catàleg. Cal una clau gratuïta de https://ollama.com/settings/keys; no cal baixar res i l'ordinador no treballa: es resol remotament.",
+        "Compte amb els noms semblants: la secció «Biblioteca d'Ollama (models per BAIXAR al disc)» descarrega el model i l'executa a la teva màquina; només la secció «Models gratuïts al núvol» treballa remotament. Si un model local triga minuts a respondre, el visor del procés t'ho explica (mida del model, RAM de l'equip i si encara el carrega o ja està generant).",
         "OpenAI: menú IA › Proveïdors › premeu el preset «OpenAI», enganxa la teva clau (sk-…) i tria el model (p. ex. gpt-4o-mini).",
         "Claude (Anthropic): premeu el preset «Claude», posa la teva clau (sk-ant-…) i el model (p. ex. claude-sonnet). El tipus (kind) ja ve com a «Anthropic».",
         "DeepSeek i Perplexity: presets d'un sol clic al mateix menú; només cal enganxar la clau del teu compte (api.deepseek.com / perplexity.ai). Sense clau registrada, NoOrbit mai consulta aquests serveis.",
@@ -104,6 +108,7 @@ export const manual: Manual = {
         "Cada proveïdor té un «Tipus» (OpenAI-compatible o Anthropic); deixa'l com ve ve donat pels presets. Pots provar la connexió amb el botó de test.",
         "Selecciona el proveïdor actiu: l'agent, els especialistes i el control de l'ordinador l'usaran a partir d'ara.",
         "Els models en USB extern: si tens Ollama amb models en un volum extern, NoOrbit el detecta (vegeu secció 14).",
+        "DeepSeek Harness (dsh): el harness d'agents de codi obert de DeepSeek (github.com/deepseek-ai/deepseek-harness) NO és una API: és un agent complet, i per això té un menú APART al Gestor de proveïdors (secció «IAs harness»). Premeu «Instal·la DeepSeek Harness» i NoOrbit instal·la automàticament el Node.js LTS oficial (si no en tens) i el paquet «dsh» dins de les seves dades (o de NoOrbitData/ en mode portàtil/USB): sense permisos d'administrador, sense tocar res del sistema. Des d'ací també podeu «Arrenca la seva interfície» (la UI web de dsh, al port 3080) i «Obre la interfície» al navegador intern. Un cop instal·lat, NoOrbit el descobreix com a IA local externa, li delega tasques en mode headless quan la IA principal no les resol, i la IA li pot preguntar amb la directriu «NB|PREGUNTA_IA|dsh|pregunta». Cal tenir-hi configurat un proveïdor de model (a la seva interfície: Settings ▸ Models accepta DeepSeek o qualsevol API compatible amb OpenAI). Per xatejar amb la API de DeepSeek, en canvi, usa el preset «DeepSeek» dels proveïdors.",
       ],
     },
     {
@@ -124,8 +129,9 @@ export const manual: Manual = {
     {
       title: "8. Especialistes i treball en equip",
       intro:
-        "Els especialistes són agents d'IA que crees tu, amb un rol, unes instruccions i (opcionalment) un model propi. Pots treballar sempre amb un especialista o fer que diversos experts treballin a la vegada sobre un mateix objectiu.",
+        "Els especialistes són agents d'IA que crees tu (o la mateixa IA), amb un rol, unes instruccions i (opcionalment) un model propi. Pots treballar sempre amb un especialista o fer que diversos experts treballin a la vegada sobre un mateix objectiu.",
       items: [
+"La IA crea agents sola quan la tasca ho mereix: si li demanes alguna cosa complexa que barreja dominis (p. ex. una app amb base de dades i proves), la IA pot emetre la directriu «@agent: Nom | Rol | Instruccions» i NoOrbit crearà a l'instant aquest especialista al panell, com un expert real. Després l'usuari el pot triar, llançar en solitari o posar-lo en equip. No es dupliquen mai: si el nom ja existeix, es reutilitza.",
         "Obre la pestanya Especialistes al panell dret i prem Nou especialista.",
         "Dona-li un nom, un rol curt (p. ex. Desenvolupador front-end, Artista 3D, Redactor) i unes instruccions de sistema que defineixen com ha de treballar.",
         "Tria el model que usarà, o deixa «Usa el model actiu» perquè sigui el que hi hagi seleccionat al xat.",
@@ -205,6 +211,7 @@ export const manual: Manual = {
         "⌘B: barra lateral. ⌘J: panell dret. ⌥Z: ajust de línia.",
         "⌘= / ⌘- / ⌘0: amplia / redueix / restableix el zoom. ⌘,: Configuració.",
         "⌃⌘`: terminal nou. ⌘R: executa la vista prèvia. ⌘⌥R: reobre l'últim projecte.",
+        "⌘↵: accepta el canvi de la IA que tens obert. ⌘⌫: el rebutja i restaura el codi anterior.",
       ],
     },
     {

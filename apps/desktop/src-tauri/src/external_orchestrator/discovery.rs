@@ -1,5 +1,5 @@
 //! Descobriment d'altres IAs locals presents al sistema, fora de NoOrbit
-//! (Ollama, LM Studio, Jan, llama.cpp, vLLM…). S'usen tres mètodes com el pla
+//! (Ollama, LM Studio, Jan, llama.cpp, vLLM, DeepSeek Harness…). S'usen tres mètodes com el pla
 //! original: processos en execució, binaris al PATH i endpoints HTTP que
 //! responen. Els duplicats es resolden: cada IA només es reporta una vegada,
 //! amb l'estat més favorable (en marxa > instal·lat).
@@ -75,6 +75,20 @@ const CANDIDATES: &[Candidate] = &[
         port: 8000,
         api: "openai",
     },
+    // DeepSeek Harness (dsh): harness d'agents open-source de DeepSeek
+    // (github.com/deepseek-ai/deepseek-harness). La seva UI web
+    // (npx @deepseek-ai/dsh web) escolta al port 3080. No exposa una
+    // API OpenAI-compatible: la delegació es fa llançant el mode
+    // headless («dsh --profile headless …») des de l'adaptador "dsh".
+    Candidate {
+        name: "deepseek-harness",
+        // Claus prou específiques: el procés arrenca via node amb el paquet
+        // @deepseek-ai/dsh al camí de comanda.
+        process_keys: &["@deepseek-ai/dsh", "dsh web", "dsh --profile", "bin/dsh"],
+        binaries: &["dsh"],
+        port: 3080,
+        api: "dsh",
+    },
 ];
 
 /// Bolcat de la taula de processos en minúscules, per buscar-hi les claus.
@@ -125,7 +139,10 @@ pub async fn discover_all(http: &reqwest::Client) -> Vec<ExternalIa> {
             .any(|k| table.contains(&k.to_lowercase()));
         // El port escolta i l'API respon (processos i rutes dels binaris).
         let endpoint_alive = port_open(c.port) && probe_api(http, &base_url, c.api).await;
-        let installed = c.binaries.iter().any(|b| which::which(b).is_ok());
+        // Per a dsh també compta la instal·lació AUTOGESTIONADA dins de les
+        // dades de NoOrbit (sempre fora del PATH de la app gràfica).
+        let installed = c.binaries.iter().any(|b| which::which(b).is_ok())
+            || (c.api == "dsh" && crate::external_orchestrator::dsh::dsh_installed());
 
         if endpoint_alive {
             out.push(ExternalIa {
@@ -159,7 +176,12 @@ pub async fn discover_all(http: &reqwest::Client) -> Vec<ExternalIa> {
 /// Prova ràpida que l'endpoint és realment l'API esperada: Ollama amb
 /// /api/tags, les compatibles amb OpenAI amb /v1/models.
 async fn probe_api(http: &reqwest::Client, base_url: &str, api: &str) -> bool {
-    let path = if api == "ollama" { "/api/tags" } else { "/v1/models" };
+    let path = match api {
+        "ollama" => "/api/tags",
+        // dsh no té API de models: la seva UI web serveix l'arrel.
+        "dsh" => "/",
+        _ => "/v1/models",
+    };
     http.get(format!("{}{}", base_url, path))
         .timeout(Duration::from_millis(1500))
         .send()
