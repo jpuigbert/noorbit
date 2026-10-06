@@ -16,6 +16,6 @@
     "app:build:mac:universal": "pnpm --filter desktop tauri build --target universal-apple-darwin --bundles app,dmg",
     "app:build:deb": "pnpm --filter desktop tauri build --bundles deb",
     "app:build:linux": "pnpm --filter desktop tauri build --bundles deb,rpm,appimage",
-    "app:build:win": "pnpm --filter desktop tauri build --bundles nsis,msi"
+    "app:build:win": "pnpm --filter desktop tauri build --bundles nsis"
   }
 }

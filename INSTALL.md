@@ -155,15 +155,18 @@ pnpm app:build:win
 
 ```
 apps\desktop\src-tauri\target\release\bundle\
-├── nsis\NoOrbit_0.61.2-alpha_x64-setup.exe   ← instal·lador clàssic (recomanat)
-└── msi\NoOrbit_0.61.2-alpha_x64_en-US.msi     ← paquet per a desplegaments empresarials
+└── nsis\NoOrbit_0.61.2-alpha_x64-setup.exe   ← instal·lador clàssic (doble clic)
 ```
+
+> L'`.msi` no es genera en versions alfa: el format MSI exige un identificador
+> de prepublicació **només numèric** (≤ 65535) i rebutja `0.61.2-alpha`. Per a
+> desplegaments empresarials, compila una versió sense sufix alfa:
+> `pnpm tauri build --bundles msi`.
 
 ### Instal·lar (usuari final)
 
 **Doble clic** al `*-setup.exe`; segueix l'assistent. S'instal·la **per a l'usuari
-actual** (sense drets d'administrador). El `.msi` serveix per a desplegaments
-massius (GPO/SCCM).
+actual** (sense drets d'administrador).
 
 ---
 
