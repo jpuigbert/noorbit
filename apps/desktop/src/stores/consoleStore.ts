@@ -75,7 +75,16 @@ export function installConsoleCapture() {
   console.error = hook("error", orig.error);
 
   // 2) Errors no capturats del webview.
+  //    Hi ha missatges coneguts que són soroll inofensiu i no han d'espantar
+  //    l'usuari: «TextModel got disposed before DiffEditorWidget model got
+  //    reset» és un defecte conegut de @monaco-editor/react 4.7 en desmuntar
+  //    un diff (Monaco es recupera sol). El pegat de monacoSetup.sol eliminar-lo
+  //    a l'origen; ací el filtreig també per si acaso el rellançament arriba
+  //    fins ací (p. ex. si el bundle no comparteix la mateixa instància del
+  //    maneig d'errors de Monaco).
+  const HARMLESS = ["TextModel got disposed before DiffEditorWidget model got reset"];
   window.addEventListener("error", (e) => {
+    if (HARMLESS.some((m) => (e.message ?? "").includes(m))) return;
     push("error", "sistema", `${e.message} (${e.filename ?? "?"}:${e.lineno ?? 0})`);
   });
   window.addEventListener("unhandledrejection", (e) => {

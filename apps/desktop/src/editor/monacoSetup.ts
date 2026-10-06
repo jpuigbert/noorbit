@@ -42,3 +42,31 @@ import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker"
 
 // Força @monaco-editor/react a usar la instància local en lloc del CDN.
 loader.config({ monaco });
+
+/// Pegat per un error conegut de @monaco-editor/react 4.7 amb Monaco ≥ 0.52:
+/// en desmuntar un DiffEditor (la revisió verd/roig dels canvis de la IA o el
+/// diff del Git), la llibreria allibera els models de text ABANS de tancar el
+/// widget i Monaco ho comunica com a error («TextModel got disposed before
+/// DiffEditorWidget model got reset»). El widget ja es recupera sol (fa
+/// `setModel(null)` i tot seguit es tanca), així que el missatge és soroll
+/// inofensiu. El maneig per defecte de Monaco el rellança en async i acabaria
+/// a la Consola de depuració espantant l'usuari; ací el filtreig a l'origen i
+/// la resta d'errors segueixen pel maneig habitual sense tocar-los.
+// @ts-expect-error — Monaco no publica tipus per a este mòdul intern, però
+// existeix en temps d'execució i és la mateixa instància que usa el bundle.
+// (Monaco 0.52 ja no exporta `setUnexpectedErrorHandler`: intercanviem el
+// maneig directament sobre l'objecte `errorHandler`.)
+import { errorHandler as monacoErrorHandler } from "monaco-editor/esm/vs/base/common/errors.js";
+
+const handlerOwner = monacoErrorHandler as {
+  unexpectedErrorHandler: (err: unknown) => void;
+};
+const previousHandler = handlerOwner.unexpectedErrorHandler;
+handlerOwner.unexpectedErrorHandler = (err: unknown) => {
+  const msg =
+    err instanceof Error ? err.message : typeof err === "string" ? err : String(err ?? "");
+  if (msg.includes("TextModel got disposed before DiffEditorWidget model got reset")) {
+    return;
+  }
+  previousHandler(err);
+};
