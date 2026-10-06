@@ -235,4 +235,4 @@ jobs:
               latest: .latest,
               assets: [.assets[] | {name: .name, url: .browser_download_url, size: .size}]
             }) | sort_by(.tag) | {updated: now|todate, versions: .}' > versions.json
-          gh release upload "$TAG" versions.json --clobber
+          gh release upload "$TAG" versions.json --clobber -R "${{ github.repository }}"
