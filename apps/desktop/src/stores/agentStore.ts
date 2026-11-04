@@ -2194,6 +2194,42 @@ export const useAgentStore = create<AgentState>((set, get) => {
       // Imatges adjuntes: les passades per la UI + les rutes que aparegin al
       // text (una ruta .png al prompt és tractada com a imatge per llegir).
       const imgs = Array.from(new Set([...(images ?? []), ...extractChatImagePaths(text)]));
+
+      // ── RUTES AUTOMÀTIQUES abans de res ────────────────────────────────
+      // El xat interpreta TRES tipus de missatge especials abans d'enviar
+      // la frase al model de text:
+      //  1. ORDRES D'ORDINADOR (@computer: o «obre Blender», «crea una
+      //     carpeta X»…): van a l'agent d'ordinador, que demana permís
+      //     cada comanda (panell Ordinador).
+      //  2. ORDRES DE BLENDER (@blender: o un verb d'edició +
+      //     menció explícita de Blender): van al pont 3D (`agent_apply_
+      //     blender`) — genera Python, ho aplica i arrenca Blender sol
+      //     si falta (amb el permís d'Ordinador).
+      //  3. Tot altre missatge segueix el flux normal de l'agent.
+      const dirComputer = text.match(/^@(?:computer|ordinador):\s*([\s\S]+)/i);
+      const goalComputer = dirComputer
+        ? dirComputer[1].trim()
+        : COMPUTER_ORDER_RE.test(text.trim())
+          ? text.trim()
+          : null;
+      const dirBlender = text.match(/^@(?:blender|b3d):\s*([\s\S]+)/i);
+      const mentionsBlender = /\bblender\b/i.test(text.trim());
+      const isAppOSVerb = /^(?:obri?m?\b|obre\b|arrenca\b|engega\b|tanca\b)/.test(text.trim());
+      // Les PREGUNTES («per què Blender es queda penjat?», «com ho faig?»)
+      // continuen al xat normal: només les ORDRES sense interrogació van al 3D.
+      const looksLikeQuestion = /\?|^\s*(?:per què|per què no|que és|què és|com\s)/i.test(text.trim());
+      if (goalComputer === null && (dirBlender || (mentionsBlender && !isAppOSVerb && !looksLikeQuestion))) {
+        // ── BLENDER: aplicar el demanat al pont 3D, sense retocs al xat ──
+        const goalBlender = (
+          dirBlender?.[1] ??
+          text.replace(/\b(?:in|a|en|dins|amb)\s+blender\b/gi, "")
+        )
+          .replace(/\bblender\b\s*/gi, "")
+          .replace(/\s{2,}/g, " ")
+          .replace(/^[\s,.]+/g, "")
+          .trim();
+        return get().apply("blender", goalBlender || text, id);
+      }
       get().beginTurn(sid, text, imgs);
 
       // ── ORDRES D'ORDINADOR: interpreta · pregunta permís · actua ──────
@@ -2202,12 +2238,6 @@ export const useAgentStore = create<AgentState>((set, get) => {
       // model de text: va a l'AGENT D'ORDINADOR, que tradueix l'objectiu en
       // comandes reals i demana CONFIRMACIÓ cada vegada (panell Ordinador).
       // Sense permís activat, el xat explica com activar-lo i no toca res.
-      const dirComputer = text.match(/^@(?:computer|ordinador):\s*([\s\S]+)/i);
-      const goalComputer = dirComputer
-        ? dirComputer[1].trim()
-        : COMPUTER_ORDER_RE.test(text.trim())
-          ? text.trim()
-          : null;
       if (goalComputer) {
         const t0c = Date.now();
         patch(sid, {
