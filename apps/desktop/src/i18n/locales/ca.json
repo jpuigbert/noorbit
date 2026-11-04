@@ -562,7 +562,7 @@
  "vscodeImport": "Importa extensions de VS Code",
  "vscodeBusy": "Examinant ~/.vscode/extensions…",
  "vscodeOk": "S'han importat {n} extensions de VS Code com a skills",
- "vscodeEmpty": "No s'ha trobat VS Code (ni Cursor) instal·lat en aquest Mac",
+ "vscodeEmpty": "No s'ha trobat cap IDE compatible (VS Code, Qoder, Cursor, Trae, Windsurf) instal·lat en aquest Mac",
     "builtinTitle": "Skills preinstal·lades (oficials de GitHub)",
     "builtinBadge": "integrada",
     "restore": "Recupera de fàbrica",

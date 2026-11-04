@@ -299,7 +299,7 @@ export default function SkillInstaller() {
             extensions cap a skills de NoOrbit (carpeta vscode/). */}
         <div className="si-export">
           <Code2 size={12} />
-          <span>VS Code</span>
+          <span>VS Code · Qoder</span>
           <button className="btn sm" disabled={vscodeBusy} onClick={() => void importVscode()}>
             {vscodeBusy ? t("skills.vscodeBusy") : t("skills.vscodeImport")}
           </button>

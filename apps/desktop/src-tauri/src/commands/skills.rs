@@ -206,7 +206,17 @@ pub async fn vscode_import_skills(state: State<'_, AppState>) -> Result<VsCodeRe
         let home = dirs::home_dir()
             .ok_or_else(|| anyhow::anyhow!("No s'ha trobat la carpeta d'usuari"))?;
         let mut roots = Vec::new();
-        for r in [".vscode/extensions", ".vscode-server/extensions", ".cursor/extensions"] {
+        // VS Code i totes les seves variants d'IDE (Qoder, Cursor, Trae…):
+        // totes tenen extensions amb `package.json` amb menys versions de
+        // VS Code — mateix format, una única instalació serveix.
+        for r in [
+            ".vscode/extensions",
+            ".vscode-server/extensions",
+            ".cursor/extensions",
+            ".qoder/extensions",
+            ".trae/extensions",
+            ".windsurf/extensions",
+        ] {
             let p = home.join(r);
             if p.is_dir() {
                 roots.push(p);
@@ -215,7 +225,7 @@ pub async fn vscode_import_skills(state: State<'_, AppState>) -> Result<VsCodeRe
         if roots.is_empty() {
             report
                 .details
-                .push("No hi ha VS Code (ni Cursor) instal·lat: cap carpeta ~/.vscode/extensions".into());
+                .push("No hi ha VS Code (ni Qoder, Cursor, Trae o Windsurf) instal·lat: cap carpeta ~/.vscode/extensions ni equivalents".into());
             return Ok(report);
         }
         for root in roots {
