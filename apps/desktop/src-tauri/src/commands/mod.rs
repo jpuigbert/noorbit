@@ -9,6 +9,7 @@ pub mod fs;
 pub mod git;
 pub mod image;
 pub mod plugins;
+pub mod portable;
 pub mod preview;
 pub mod skills;
 pub mod skills_store;

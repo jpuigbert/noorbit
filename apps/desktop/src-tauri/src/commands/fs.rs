@@ -228,8 +228,16 @@ fn looks_like_text(name: &str, ext: &str) -> bool {
 /// (context). Recorre recursivament, omet directoris ignorats (node_modules,
 /// .git, target…), ignora binaris (no són UTF-8) i limita el total de
 /// caràcters per no desbordar models petits.
+///
+/// `focus`: rutes (absolutes o relatives) a què es dona PRIORITAT. Estos
+/// fitxers NO es tallen (s'envien quasi sencers) i van PRIMERS al pressupost,
+/// perquè la IA puga REVISAR i MODIFICAR de veritat el codi al qual l'usuari
+/// es refereix, encara que siga llarg o alfabèticament posterior.
 #[tauri::command]
-pub async fn collect_project_files(limit: usize) -> Result<Vec<ProjectFile>, String> {
+pub async fn collect_project_files(
+    limit: usize,
+    focus: Option<Vec<String>>,
+) -> Result<Vec<ProjectFile>, String> {
     let root = super::workspace::current_root()
         .ok_or_else(|| "No hi ha cap projecte obert.".to_string())?;
     // Pressupost de CARÀCTERS de contingut. Encara que el contingut no hi
@@ -237,11 +245,25 @@ pub async fn collect_project_files(limit: usize) -> Result<Vec<ProjectFile>, Str
     // veu TOTA l'estructura (no només els pocs fitxers que cabien abans) i pot
     // referenciar o modificar qualsevol fitxer, encara que no en lisca el cos.
     let limit = limit.max(2000);
+    // Normatitzem el focus (rutes relatives, sense «./» inicial) per comparar.
+    let focus_set: Vec<String> = focus
+        .unwrap_or_default()
+        .into_iter()
+        .map(|f| f.trim().replace('\\', "/").trim_start_matches("./").trim_start_matches('/').to_string())
+        .filter(|f| !f.is_empty())
+        .collect();
     tauri::async_runtime::spawn_blocking(move || {
+        // Un fitxer està en focus si la seua ruta coincideix exactament, o bé
+        // alguna ruta de focus acaba en ell o n'és la cua (tolera rutes parcials).
+        let is_focus = |rel: &str| -> bool {
+            focus_set.iter().any(|f| {
+                rel == f || rel.ends_with(&format!("/{f}")) || f.ends_with(&format!("/{rel}"))
+            })
+        };
         // 1) Recull TOT el projecte: cada fitxer de text amb el seu cos
         //    (retallat per fitxer) i la seua ruta relativa. Ací NO tallem la
         //    caminada per pressupost: els NOMS importen tots, no només uns quants.
-        let mut cand: Vec<(String, String)> = Vec::new();
+        let mut cand: Vec<(String, String, bool)> = Vec::new();
         let mut stack: Vec<PathBuf> = vec![root.clone()];
         while let Some(dir) = stack.pop() {
             let entries = match std::fs::read_dir(&dir) {
@@ -273,22 +295,29 @@ pub async fn collect_project_files(limit: usize) -> Result<Vec<ProjectFile>, Str
                         .unwrap_or(&p)
                         .to_string_lossy()
                         .replace('\\', "/");
-                    let clipped: String = if content.chars().count() > 1500 {
-                        content.chars().take(1500).collect::<String>() + "\n… (contingut tallat)"
+                    let focused = is_focus(&rel);
+                    // Els fitxers en focus quasi NO es tallen (cap molt alt);
+                    // la resta conserven el límit curt d'abans (1500).
+                    let cap = if focused { 60_000 } else { 1500 };
+                    let clipped: String = if content.chars().count() > cap {
+                        content.chars().take(cap).collect::<String>() + "\n… (contingut tallat)"
                     } else {
                         content
                     };
-                    cand.push((rel, clipped));
+                    cand.push((rel, clipped, focused));
                 }
             }
         }
-        cand.sort_by(|a, b| a.0.cmp(&b.0));
-        // 2) Assigna contingut fins a esgotar el pressupost; la resta de
+        // 2) ORDRE: primer els fitxers EN FOCUS (perquè sempre caben al
+        //    pressupost i la IA els veja sencers), després la resta
+        //    alfabèticament. Dins de cada grup, també per nom.
+        cand.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
+        // 3) Assigna contingut fins a esgotar el pressupost; la resta de
         //    fitxers eixen amb el camí i el cos BUIT (només «existeixen» a
         //    l'arbre). Així la IA veu el projecte complet, no tres fitxers.
         let mut out: Vec<ProjectFile> = Vec::new();
         let mut total = 0usize;
-        for (path, clipped) in cand {
+        for (path, clipped, _focused) in cand {
             let n = clipped.chars().count();
             if total + n > limit {
                 out.push(ProjectFile { path, content: String::new() });

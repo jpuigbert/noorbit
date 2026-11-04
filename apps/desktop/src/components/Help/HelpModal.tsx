@@ -3,6 +3,7 @@ import { useI18n } from "../../i18n/store";
 import { useT } from "../../i18n";
 import { getManual } from "../../help";
 import { useUIStore } from "../../stores/uiStore";
+import VisualGuide from "./VisualGuide";
 
 export default function HelpModal() {
   const show = useUIStore((s) => s.showHelp);
@@ -26,6 +27,8 @@ export default function HelpModal() {
           </button>
         </div>
         <div className="modal-body help-body">
+          {/* GUIA VISUAL: com es fa cada cosa, amb dibuixos SVG parlants. */}
+          <VisualGuide />
           <p className="help-intro">{manual.intro}</p>
           {manual.sections.map((sec, i) => (
             <section key={i} className="help-section">

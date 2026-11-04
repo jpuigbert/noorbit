@@ -1,22 +1,32 @@
 /* 🎨 Tema fosc de NoOrbit — variables usades per tots els components */
+/* Paleta «high-end» estil Dark Modern (VS Code / Qoder): fons més profunds,
+   jerarquia clara en 4 nivells, acent amb degradat i ombres subtils. */
 :root {
-  --bg-0: #0d0d12;
-  --bg-1: #121218;
-  --bg-2: #17171f;
-  --bg-3: #1e1e28;
-  --bg-4: #262633;
+  --bg-0: #09090d;
+  --bg-1: #0f0f15;
+  --bg-2: #14141c;
+  --bg-3: #1b1b25;
+  --bg-4: #23232f;
 
-  --border: #23232e;
-  --border-2: #2e2e3d;
+  --border: #1e1e29;
+  --border-2: #2b2b3a;
 
-  --text-0: #e8e8f0;
-  --text-1: #b4b4c4;
-  --text-2: #8282a0;
-  --text-3: #5c5c76;
+  --text-0: #f0f0f7;
+  --text-1: #b8b8cb;
+  --text-2: #8686a2;
+  --text-3: #606080;
 
   --accent: #7c5cff;
   --accent-hover: #9880ff;
   --accent-2: #22d3ee;
+
+  /* Nous tokens premium (mantenen els antics intactes per compatibilitat) */
+  --accent-grad: linear-gradient(135deg, #7c5cff 0%, #5ea2ef 100%);
+  --accent-soft: rgba(124, 92, 255, 0.13);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 6px 24px rgba(0, 0, 0, 0.45);
+  --radius-lg: 12px;
+  --radius-xl: 16px;
 
   --success: #4ade80;
   --error: #f87171;
@@ -39,25 +49,29 @@ body {
   color: var(--text-0);
 }
 
-/* ---- Tema BLANC ---- */
+/* ---- Tema BLANC — remat final modern (ombres i accent suau) ---- */
 :root[data-theme="light"] {
-  --bg-0: #ffffff;
-  --bg-1: #f6f7f9;
-  --bg-2: #eef0f3;
-  --bg-3: #e4e7ec;
-  --bg-4: #d6dae1;
+  --bg-0: #fdfdfd;
+  --bg-1: #f5f6f8;
+  --bg-2: #eceef2;
+  --bg-3: #e2e5eb;
+  --bg-4: #d3d7e0;
 
-  --border: #e2e5ea;
-  --border-2: #cdd2da;
+  --border: #e0e3e9;
+  --border-2: #c9ced8;
 
-  --text-0: #1a1a22;
-  --text-1: #44464f;
+  --text-0: #14141c;
+  --text-1: #45474f;
   --text-2: #6b6e78;
   --text-3: #9a9daa;
 
   --accent: #6d4aff;
   --accent-hover: #5b3ae0;
   --accent-2: #0891b2;
+  --accent-grad: linear-gradient(135deg, #6d4aff 0%, #0891b2 100%);
+  --accent-soft: rgba(109, 74, 255, 0.09);
+  --shadow-sm: 0 1px 3px rgba(20, 20, 40, 0.08);
+  --shadow-md: 0 6px 24px rgba(20, 20, 40, 0.12);
 
   --success: #16a34a;
   --error: #dc2626;

@@ -39,6 +39,7 @@ interface UIState {
   showSearch: boolean;
   showNewProject: boolean;
   showStartup: boolean;
+  showAccount: boolean;
   terminalOpen: boolean;
 
   // Autodesat (com VS Code)
@@ -66,6 +67,7 @@ interface UIState {
   setShowSearch: (v: boolean) => void;
   setShowNewProject: (v: boolean) => void;
   setShowStartup: (v: boolean) => void;
+  setShowAccount: (v: boolean) => void;
   setTerminalOpen: (v: boolean) => void;
   toggleTerminal: () => void;
   setAutoSave: (v: boolean) => void;
@@ -109,6 +111,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   showSearch: false,
   showNewProject: false,
   showStartup: false,
+  showAccount: false,
   terminalOpen: false,
 
   autoSave: loadBool(LS_AUTOSAVE, true),
@@ -131,6 +134,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setShowSearch: (v) => set({ showSearch: v }),
   setShowNewProject: (v) => set({ showNewProject: v }),
   setShowStartup: (v) => set({ showStartup: v }),
+  setShowAccount: (v) => set({ showAccount: v }),
   setTerminalOpen: (v) => set({ terminalOpen: v }),
   toggleTerminal: () => set({ terminalOpen: !get().terminalOpen }),
 

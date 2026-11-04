@@ -8,6 +8,7 @@ import { useAIStore } from "../stores/aiStore";
 import { useAIActivity } from "../stores/activityStore";
 import { useSystemStatsStore, memPercent, formatBytes } from "../stores/systemStatsStore";
 import BackgroundTaskBadge from "./BackgroundTaskBadge";
+import AccountChip from "./Account/AccountChip";
 import { ProblemsBadge } from "./Problems/ProblemsPanel";
 import UpdateBadge from "./Update/UpdateBadge";
 
@@ -54,6 +55,7 @@ export default function StatusBar() {
       <ProblemsBadge />
       <UpdateBadge />
       <div className="spacer" />
+      <AccountChip />
       <BackgroundTaskBadge />
       {ramPct !== null && (
         <span

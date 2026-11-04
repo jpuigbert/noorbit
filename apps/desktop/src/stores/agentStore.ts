@@ -1,7 +1,9 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { DEFAULT_UNREAL_CONFIG } from "../core/unreal/client";
 import { useExpertStore } from "./expertStore";
+import { useTaskListStore } from "./taskListStore";
 import { useWorkspaceStore } from "./workspaceStore";
 import { lintOffline } from "../editor/diagnostics";
 import {
@@ -165,7 +167,21 @@ function toHistory(messages: ChatMessage[]): HistoryTurn[] {
 }
 
 /// Persistència dels xats oberts (conversa inclosa) a localStorage.
+/// ABANS era un calaix global («noorbit.chats»): en obrir un projecte nou
+/// apareixien els xats antics. Ara cada projecte té el seu propi calaix
+/// («noorbit.chats::<arrel>») i, en canviar de projecte, es desen i es
+/// carreguen els xats D'AQUELL projecte.
 const LS_KEY = "noorbit.chats";
+
+/// Clau del projecte obert ara mateix; sense projecte es fa servir un calaix
+/// propi (ja no és el clau global antic, que era compartit per a TODO).
+function chatLsKey(root: string | null): string {
+  return root ? `${LS_KEY}::${root}` : `${LS_KEY}::__no_project__`;
+}
+
+/// Bucket (projecte) dels xats que tenim en memòria. Només es canvia amb
+/// «switchChatBucket» — mai a mà.
+let currentBucket: string | null = null;
 
 /// Demana al backend l'últim raonament generat PER UN XAT (per mostrar-lo).
 async function fetchThinking(sid: string): Promise<string | null> {
@@ -290,6 +306,13 @@ const PLATFORM_IOS =
   "  • No generes .ipa, .xcarchive ni binaris. NOMÉS .swift/.plist/.json/.md.\n" +
   "  • No usis Flutter, React Native, Capacitor, Ionic ni cap altre embolcall.";
 
+/// ORDRES CLARes D'ORDINADOR, en llenguatge natural (català d'aquest Mac):
+/// comencen amb un verb del sistema, no tenen cap signe de pregunta i no
+/// s'enfilan massa. Tota altra frase segueix al model de text com sempre.
+/// El límit `@computer:? qualsevol cosa` engloba el cas general.
+const COMPUTER_ORDER_RE =
+  /^(?:obri?m?\b|obre\b|arrenca\b|engega\b|tanca\b|atura\b|mou\b|renomena\b|copia\b|esborra\b|elimina\b|mata\b|llista\b|repàs\b|fes\b[^?]{0,40}\bcaptura\b|crea\b[^?]{0,60}\bcarpeta\b)[^?]{0,160}$/i;
+
 /// Nota que ensenya a la IA la directriu «@agent:» — el mateix mecanisme que
 /// «@file:» però per CREAR agents especialistes (com els subagents de Qoder).
 /// S'inclou en tots els system prompts de xat perquè el model sàpigua que pot
@@ -305,7 +328,24 @@ const AGENT_CREATION_SYSTEM =
   "«Especialistes») que l'usuari podrà triar, llançar en solitari o posar en " +
   "equip. Crea'n NOMÉS si apporta valor real; reutilitza els que ja existeixen " +
   "(NoOrbit no en duplica cap pel nom). Pots omplir les 3 parts o només el " +
-  "nom: «@agent: Revisor de seguretat».\n\n";
+  "nom: «@agent: Revisor de seguretat».\n" +
+  "DELEGAR EN ELS AGENTS (AJUDA'T D'ELLS): quan ja hi hagi especialistes " +
+  "(els creats per tu o els de l'usuari), NO ho resolges tot tu sol. Emet una " +
+  "línia per cada subtasca que volguessis encarregar a un agent amb aquest " +
+  "format exacte:\n" +
+  "@use: NomAgent | tasca concreta que ha de resoldre\n" +
+  "NoOrbit llançarà ESE agent (un model local) perquè treballe en la seua " +
+  "part ARA MATEIX, i et retornarà la seua solució ací mateix perquè la " +
+  "CONSOLIDIS amb la resta del teu treball. Usa el NOM exacte de l'especialista. " +
+  "Pots delegar diverses subtasques en diversos agents al mateix missatge.\n\n" +
+  "LLISTA DE TASQUES (per no perdre't ni tu ni els agents): manté un checklist. " +
+  "Quan identifiques una tasca pendient, afegeix-la amb una línia:\n" +
+  "@todo: descripció curta de la tasca\n" +
+  "Quan en completes una, marca-la amb:\n" +
+  "@done: text exacte de la tasca completada\n" +
+  "NoOrbit mostra eixa llista a tot el xat i la manté visible per a tots els " +
+  "agents. Compleix-les abans de donar la tasca per acabada.\n\n" +
+  "Respon sempre en català.";
 
 /// Sistema base MÍNIM que s'aplica SEMPRE, encara que «Inclou el codi» estiga
 /// tancat: dos regles que l'usuari ha demanat expressament —
@@ -648,13 +688,20 @@ function parseAgentDirectives(raw: string): { name: string; role: string; system
 function stripAgentDirectiveLines(raw: string): string {
   return raw
     .split(/\r?\n/)
-    .filter((l) => !/^\s*@\s*(?:agent|subagent|expert|especialista)s?\s*:/i.test(l))
+    .filter(
+      (l) =>
+        !/^\s*@\s*(?:agent|subagent|expert|especialista)s?\s*:/i.test(l) &&
+        !/^\s*@\s*(?:use|delega|delegate|todo|done|feta|pendient)\w*\s*:/i.test(l)
+    )
     .join("\n");
 }
 
 /// Crea (o detecta com a existents) els agents que la IA ha demanat amb
 /// «@agent:». Retorna un resum llegible per al xat o null si no n'ha emés cap.
-async function applyAgentDirectives(raw: string): Promise<string | null> {
+/// Si el xat que els ha demanat treballa sense agent actiu, el primer agent
+/// creat es VINCULA a ell (a l'estil dels subagents especialitzats): així la
+/// directriu no acaba en un nom guardat — el següent missatge ja el fa servir.
+async function applyAgentDirectives(raw: string, sid?: string): Promise<string | null> {
   const reqs = parseAgentDirectives(raw);
   if (reqs.length === 0) return null;
   const store = useExpertStore.getState();
@@ -662,6 +709,7 @@ async function applyAgentDirectives(raw: string): Promise<string | null> {
   // des del disc abans de deduplicar, si no podria crear duplicats.
   if (store.experts.length === 0) await store.load();
   const created: string[] = [];
+  const createdNames: string[] = [];
   const existed: string[] = [];
   for (const r of reqs) {
     const norm = r.name.trim().toLowerCase();
@@ -675,19 +723,212 @@ async function applyAgentDirectives(raw: string): Promise<string | null> {
     // «create» no llença: confirma que ara és a la llista (després del «load»).
     if (useExpertStore.getState().experts.some((e) => e.name.trim().toLowerCase() === norm)) {
       created.push(`${r.name}${r.role ? ` (${r.role})` : ""}`);
+      createdNames.push(norm);
     }
   }
   if (created.length === 0 && existed.length === 0) return null;
+  // Vinculació automàtica (punt b): si aquest xat encara no té cap especialista
+  // actiu, agafa el primer agent acabat de crear. Si en crea diversos, l'usuari
+  // pot triar-ne un altre al selector o llançar l'equip.
+  let boundNote = "";
+  if (sid && createdNames.length > 0) {
+    const sess = useAgentStore.getState().sessions.find((s) => s.id === sid);
+    if (sess && !sess.expertId) {
+      const first = useExpertStore
+        .getState()
+        .experts.find((e) => createdNames.includes(e.name.trim().toLowerCase()));
+      if (first) {
+        useAgentStore.getState().setChatExpert(sid, first.id);
+        boundNote = `\n\n🎯 Ara aquest xat treballa amb «${first.name}» com a agent actiu (al selector de dalt del xat pots canviar-lo o treure'l).`;
+      }
+    }
+  }
   const lines: string[] = [];
   if (created.length > 0)
     lines.push(
       `🤖 Creats ${created.length} agent(s) especialista(s) — els trobaràs al panell «Especialistes» (i a la llista d'IA del xat):
 ` +
-        created.map((n) => `• ${n}`).join("\n")
+        created.map((n) => `• ${n}`).join("\n") +
+        boundNote
     );
   if (existed.length > 0)
     lines.push(`↩️ Ja existien, no s'han duplicat (${existed.length}): ` + existed.join(", "));
   return lines.join("\n\n");
+}
+
+// ── DELEGACIÓ SÍNCRONA EN AGENTS LOCALS («@use:») ────────────────────────────
+// La IA principal emet «@use: NomAgent | tasca». NoOrbit llança ESE especialista
+// (un model local) perresoldre la subtasca ARA MATEIX, recull la seua solució i la
+// torna a la IA principal (segona passada de consolidació) perquè l'integre en la
+// seua resposta. Tot dins del MATXEIX torn: cap esperà a un procés en segon pla.
+const CONSOLIDATION_SYSTEM =
+  "Ets la IA PRINCIPAL de NoOrbit. T'hem passat les solucions que els teus " +
+  "agents especialistes han produït per a les subtasques delegades. La teua " +
+  "feina és CONSOLIDAR-LES: integra-les en una única resposta final coherent, " +
+  "resol incoherències entre agents i completa el que els falti. No delegues " +
+  "de nou. Respon en català i, si generes codi, usa el format «@file: ruta».";
+
+function parseUseDirectives(
+  raw: string
+): { agent: string; task: string }[] {
+  const out: { agent: string; task: string }[] = [];
+  const seen = new Set<string>();
+  for (const line of raw.split(/\r?\n/)) {
+    const m = line.match(/^\s*@\s*(?:use|delega(?:te)?)\s*:\s*(.+?)\s*$/i);
+    if (!m) continue;
+    const v = m[1].replace(/^[`'"\s[]+/, "").trim();
+    if (!v) continue;
+    const parts = v.split(/\s*(?:\|{1,2}|·|\t)\s*/).map((p) => p.trim()).filter(Boolean);
+    const agent = parts[0] ?? "";
+    const task = parts.slice(1).join(" · ").trim();
+    if (!agent) continue;
+    const key = `${agent.toLowerCase()}::${task.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ agent, task });
+  }
+  return out;
+}
+
+/// Executa les delegacions «@use:» i torna un bloc llegible amb la solució de
+/// cada agent + la consolidació de la IA principal. Null si no n'hi havia cap.
+async function applyDelegateDirectives(raw: string, sid: string): Promise<string | null> {
+  const reqs = parseUseDirectives(raw);
+  if (reqs.length === 0) return null;
+  const store = useExpertStore.getState();
+  if (store.experts.length === 0) await store.load();
+  const sess = useAgentStore.getState().sessions.find((x) => x.id === sid);
+  // Els xats WEB («web:<ia>») no poden delegar: el qui parla és una IA de
+  // navegador, que no té accès a l'orquestració interna. Avisem amb claredat.
+  if (sess?.provider?.startsWith("web:")) {
+    return "(les IAs web del navegador no poden delegar subtasques en agents locals: els agents només treballen amb la IA principal de NoOrbit)";
+  }
+  const ia = { session: sid, provider: sess?.provider ?? null, model: sess?.model ?? null };
+
+  type Deleg = { agent: string; task: string; solution: string; ok: boolean };
+  const results: Deleg[] = [];
+  for (const r of reqs) {
+    const norm = r.agent.trim().toLowerCase();
+    const expert = useExpertStore
+      .getState()
+      .experts.find((e) => e.name.trim().toLowerCase() === norm);
+    if (!expert) {
+      results.push({
+        agent: r.agent,
+        task: r.task,
+        solution: `(no existeix cap especialista anomenat «${r.agent}»; crea'l amb «@agent:» o usa'n un altre)`,
+        ok: false,
+      });
+      continue;
+    }
+    useAgentStore.getState().pushStep(sid, {
+      label: `Delegació · ${expert.name}`,
+      detail: r.task ? `Treballant la subtasca: ${r.task.slice(0, 80)}…` : "Resolent la subtasca…",
+      ok: true,
+    });
+    // Se si la IA no va escriure tasca, li reenviem la petició original.
+    const baseTask =
+      r.task ||
+      (sess?.messages.filter((m: ChatMessage) => m.role === "user" && !m.error).slice(-1)[0]?.text ?? "");
+    // El agent també veu la llista de tasques: així NI la principal NI ell es
+    // perden cap punt del treball en comú.
+    const agentTaskCtx = useTaskListStore.getState().asContext();
+    const subTask = agentTaskCtx ? `${agentTaskCtx}TASCA QUE SE T'HA DELEGAT:\n${baseTask}` : baseTask;
+    // Sesión sintética: la solució de l'agent NO sobreescriu el raonament del xat.
+    const solution = await useExpertStore
+      .getState()
+      .runSolo(expert.id, subTask, { session: `${sid}#delegate` })
+      .catch(() => null);
+    if (solution && solution.trim()) {
+      results.push({ agent: expert.name, task: r.task, solution: solution.trim(), ok: true });
+    } else {
+      results.push({
+        agent: expert.name,
+        task: r.task,
+        solution: `(l'agent no ha pogut respondre: ${useExpertStore.getState().error ?? "error"})`,
+        ok: false,
+      });
+    }
+  }
+
+  const okOnes = results.filter((x) => x.ok);
+  const solsBlock = results
+    .map((x) => `### ${x.agent}${x.task ? ` — ${x.task}` : ""}\n${x.solution}`)
+    .join("\n\n");
+
+  // Consolida: torna les solucions a la IA principal perquè les integre.
+  let consolidated = "";
+  if (okOnes.length > 0) {
+    const originalUser =
+      sess?.messages.filter((m: ChatMessage) => m.role === "user" && !m.error).slice(-1)[0]?.text ?? "";
+    const hist = toHistory(sess?.messages ?? []);
+    try {
+      consolidated = await invoke<string>("send_prompt", {
+        prompt:
+          `TASCA DE L'USUARI:\n${originalUser}\n\n--- SOLUCIONS DELS AGENTS DELEGATS ---\n${solsBlock}\n\n` +
+          "Integra aquestes solucions en una RESPOSTA FINAL coherent en català. Si cal codi, " +
+          "emet cada fitxer amb «@file:». No tornes a delegar; només consolida.",
+        system: CONSOLIDATION_SYSTEM,
+        ...ia,
+        history: hist,
+      });
+    } catch {
+      consolidated = ""; // model incapaç de consolidar: ens quedem amb les solucions en brut
+    }
+  }
+
+  const head = `🤝 Delegades ${results.length} subtasca(es) en agents locals:`;
+  const status = results
+    .map((x) => `${x.ok ? "✅" : "⚠️"} ${x.agent}${x.task ? ` — ${x.task}` : ""}`)
+    .join("\n");
+  const body = consolidated && consolidated.trim()
+    ? consolidated.trim()
+    : solsBlock;
+  return `${head}\n${status}\n\n${body}`;
+}
+
+// ── LLISTA DE TASQUES («@todo:» / «@done:») ──────────────────────────────────
+function parseTodoDirectives(raw: string): { add: string[]; done: string[] } {
+  const add: string[] = [];
+  const done: string[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const a = line.match(/^\s*@\s*(?:todo|pendent|pendient|task)\s*:\s*(.+?)\s*$/i);
+    if (a) {
+      const t = a[1].replace(/^[`'"]+|[`'"]+$/g, "").trim();
+      if (t) add.push(t);
+      continue;
+    }
+    const d = line.match(/^\s*@\s*(?:done|feta|fet|completada)\s*:\s*(.+?)\s*$/i);
+    if (d) {
+      const t = d[1].replace(/^[`'"]+|[`'"]+$/g, "").trim();
+      if (t) done.push(t);
+    }
+  }
+  return { add, done };
+}
+
+/// Aplica les directrius de checklist als «taskListStore». Retorna un resum o null.
+function applyTodoDirectives(raw: string): string | null {
+  const { add, done } = parseTodoDirectives(raw);
+  if (add.length === 0 && done.length === 0) return null;
+  const store = useTaskListStore.getState();
+  const added: string[] = [];
+  for (const t of add) {
+    const before = useTaskListStore.getState().items.length;
+    store.add(t, "ia");
+    if (useTaskListStore.getState().items.length > before) added.push(t);
+  }
+  const completed: string[] = [];
+  for (const t of done) {
+    const pendBefore = useTaskListStore.getState().items.filter((i) => !i.done).length;
+    store.complete(t);
+    if (useTaskListStore.getState().items.filter((i) => !i.done).length < pendBefore) completed.push(t);
+  }
+  const lines: string[] = [];
+  if (added.length > 0) lines.push("📌 Tasques afegides a la llista:\n" + added.map((x) => `• ${x}`).join("\n"));
+  if (completed.length > 0)
+    lines.push("✔️ Tasques marcades com a fetes:\n" + completed.map((x) => `• ${x}`).join("\n"));
+  return lines.length > 0 ? lines.join("\n\n") : null;
 }
 
 /// Automaterialització: si la resposta de la IA conté codi amb NOMS de fitxers
@@ -958,7 +1199,7 @@ interface AgentState {
   /// Fragment de text en directe (event «ai://chunk» etiquetat amb el xat).
   /// A més d'acumular-lo al xat, materialitza EN VIU els fitxers ja completes.
   appendStream: (sessionId: string, chunk: string) => void;
-  buildContext: (id?: string, limit?: number) => Promise<string>;
+  buildContext: (id?: string, limit?: number, taskText?: string) => Promise<string>;
   beginTurn: (id: string, text: string, images?: string[]) => void;
   finalizeTurn: (id: string) => void;
   /// Afegeix al xat un missatge sense preguntar a cap model: notes del propi
@@ -971,10 +1212,11 @@ interface AgentState {
   clearTimeline: (id?: string) => void;
 }
 
-/// Carrega els xats desats; si no n'hi ha cap encara, obre el xat «main».
-function loadChats(): { sessions: ChatSession[]; activeId: string } {
+/// Carrega els xats d'UN PROJECTE (`key`); si no n'hi ha cap encara, obre el
+/// xat «main».
+function loadChats(key: string): { sessions: ChatSession[]; activeId: string } {
   try {
-    const raw = localStorage.getItem(LS_KEY);
+    const raw = localStorage.getItem(key);
     if (raw) {
       const data = JSON.parse(raw) as { activeId?: string; sessions?: PersistedChat[] };
       const list = (data.sessions ?? [])
@@ -1004,7 +1246,23 @@ function loadChats(): { sessions: ChatSession[]; activeId: string } {
   return { sessions: [blankSession(DEFAULT_ID)], activeId: DEFAULT_ID };
 }
 
-const initialChats = loadChats();
+const initialChats = (() => {
+  // MIGRACIÓ (una sola vegada): els xats globals antics passen al calaix
+  // «sense projecte». Així cap projecte futur hereta els xats d'un altre.
+  try {
+    const legacy = localStorage.getItem(LS_KEY);
+    if (legacy && !localStorage.getItem(chatLsKey(null))) {
+      localStorage.setItem(chatLsKey(null), legacy);
+      localStorage.removeItem(LS_KEY);
+    }
+  } catch {
+    /* si falla, els xats antics simplement es perdran d'estat visible */
+  }
+  return loadChats(chatLsKey(useWorkspaceStore.getState().root));
+})();
+
+/// Projecte del calaix de xats que es crearà just després amb «initialChats».
+currentBucket = useWorkspaceStore.getState().root;
 
 export const useAgentStore = create<AgentState>((set, get) => {
   /// Aplicar un canvi al xat `sid` (si ja no existeix, es ignora: pot haver
@@ -1229,7 +1487,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
             error: m.error ?? false,
           })),
         }));
-        localStorage.setItem(LS_KEY, JSON.stringify({ activeId: st.activeId, sessions }));
+        localStorage.setItem(chatLsKey(currentBucket), JSON.stringify({ activeId: st.activeId, sessions }));
       } catch {
         /* sense persistència */
       }
@@ -1359,7 +1617,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
             ok: true,
           });
         }
-        const ctx = sessOf(sid)?.includeContext ? await get().buildContext(sid) : "";
+        const ctx = sessOf(sid)?.includeContext ? await get().buildContext(sid, undefined, prompt) : "";
         get().pushStep(sid, {
           label: "ia",
           detail:
@@ -1377,7 +1635,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
           let h = history;
           let sy: string | null = ctx ? CONTEXT_SYSTEM : MEMORY_SYSTEM;
           if (level === 1) {
-            const small = sessOf(sid)?.includeContext ? await get().buildContext(sid, 1500) : "";
+            const small = sessOf(sid)?.includeContext ? await get().buildContext(sid, 1500, prompt) : "";
             m = small ? `${small}\n\n---\nPREGUNTA / TASCA:\n${prompt}` : prompt;
             sy = small ? CONTEXT_SYSTEM : MEMORY_SYSTEM;
           } else if (level === 2) {
@@ -1408,7 +1666,11 @@ export const useAgentStore = create<AgentState>((set, get) => {
         // I si ha emés «@agent:», NoOrbit crea els especialistes demanats.
         resetLiveMaterialize();
         const extra = await autoMaterialize(text);
-        const agents = await applyAgentDirectives(text);
+        const agents = await applyAgentDirectives(text, sid);
+        // Delegació «@use:» (després de crear-los, perquè els agents existiscan)
+        // i checklist «@todo/@done».
+        const delegated = await applyDelegateDirectives(text, sid);
+        const todos = applyTodoDirectives(text);
         patch(sid, {
           running: false,
           startedAt: null,
@@ -1416,8 +1678,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
           // Les línies «@agent:» ja s'han executat: no cal mostrar-les al xat
           // (el resum d'agents creats informa de la mateixa feina).
           lastResult:
-            [stripAgentDirectiveLines(text), extra, agents].filter(Boolean).join("\n\n") ||
-            stripAgentDirectiveLines(text),
+            [stripAgentDirectiveLines(text), delegated, extra, agents, todos]
+              .filter(Boolean)
+              .join("\n\n") || stripAgentDirectiveLines(text),
           lastThinking: thinking,
         });
         get().finalizeTurn(sid);
@@ -1842,13 +2105,17 @@ export const useAgentStore = create<AgentState>((set, get) => {
     // Llegeix els fitxers reals del projecte obert i en forma un bloc de context
     // per a la IA. Buit si no hi ha workspace o cap fitxer llegible.
     // `limit` (caràcters): 4.500 per defecte; 1.200-2.000 en reintents.
-    buildContext: async (id, limit) => {
+    buildContext: async (id, limit, taskText) => {
       const sid = target(id);
       const ws = useWorkspaceStore.getState();
       if (!ws.root) {
         patch(sid, { contextInfo: "⚠️ No hi ha cap projecte obert: la IA no està veient codi." });
         return "";
       }
+      // Rutes a les quals l'usuari ES REFERIX en el seu missatge: aquestes van
+      // PRIMERS i SENS TALLAR al context (argument «focus» del backend),
+      // perquè la IA puga REVISAR i MODIFICAR el codi real, no inventar-lo.
+      const focus = taskText ? extractRecommendedPaths(taskText) : [];
       try {
         // Pressupost de CONTINGUT. Abans només hi cabien ~3 fitxers (4500 ÷
         // 1500/caràcters per fitxer); ara n'adjuntem molts més. L'ARBRE de
@@ -1857,7 +2124,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
         // primera resposta pot trigar més; «runWithOOMRetry» el redueix si cal.
         const files = await invoke<{ path: string; content: string }[]>(
           "collect_project_files",
-          { limit: limit ?? 16000 }
+          { limit: limit ?? 16000, focus }
         );
         if (!files || files.length === 0) {
           patch(sid, { contextInfo: "⚠️ No he trobat fitxers de codi a la carpeta oberta." });
@@ -1929,6 +2196,196 @@ export const useAgentStore = create<AgentState>((set, get) => {
       const imgs = Array.from(new Set([...(images ?? []), ...extractChatImagePaths(text)]));
       get().beginTurn(sid, text, imgs);
 
+      // ── ORDRES D'ORDINADOR: interpreta · pregunta permís · actua ──────
+      // Si el missatge és una ordre del PC («obre Blender», «crea una carpeta
+      // X», «tanca el navegador») o porta el prefix @computer:, no va al
+      // model de text: va a l'AGENT D'ORDINADOR, que tradueix l'objectiu en
+      // comandes reals i demana CONFIRMACIÓ cada vegada (panell Ordinador).
+      // Sense permís activat, el xat explica com activar-lo i no toca res.
+      const dirComputer = text.match(/^@(?:computer|ordinador):\s*([\s\S]+)/i);
+      const goalComputer = dirComputer
+        ? dirComputer[1].trim()
+        : COMPUTER_ORDER_RE.test(text.trim())
+          ? text.trim()
+          : null;
+      if (goalComputer) {
+        const t0c = Date.now();
+        patch(sid, {
+          running: true,
+          error: null,
+          stopped: false,
+          lastThinking: null,
+          startedAt: t0c,
+          lastElapsedMs: null,
+          stream: null,
+        });
+        let perms: { enabled: boolean } | null = null;
+        try {
+          perms = await invoke<{ enabled: boolean }>("computer_permissions");
+        } catch {
+          perms = null;
+        }
+        if (!perms?.enabled) {
+          patch(sid, { running: false, lastElapsedMs: Date.now() - t0c });
+          get().addNote(
+            "Per executar ordres a l'ordinador necessito el teu permís: activa «Permet que la IA controli l'ordinador» al panell **Treball → Integracions → Ordinador**. Amb «Confirma cada comanda» activat et demanaré permís una a una a pantalla. Quan estigui activat, torna'm a fer l'ordre i jo la faré.",
+            { id: sid },
+          );
+          get().finalizeTurn(sid);
+          return goalComputer;
+        }
+        get().pushStep(sid, {
+          label: "Ordre d'ordinador",
+          detail: `Interpretant: «${goalComputer.slice(0, 80)}»…`,
+          ok: true,
+        });
+        let answer = "";
+        let unlistenAgent: (() => void) | null = null;
+        try {
+          unlistenAgent = await listen("computer://agent", (ev) => {
+            const d = (ev.payload ?? {}) as {
+              action?: string;
+              command?: string;
+              reason?: string;
+              answer?: string;
+            };
+            if (d.action === "run" && d.command) {
+              get().pushStep(sid, {
+                label: "Ordre d'ordinador",
+                detail: `$ ${d.command}`,
+                ok: true,
+              });
+            } else if (d.action === "done" && d.answer) {
+              answer = d.answer;
+            }
+          });
+          const out = await invoke<string>("computer_agent_run", { goal: goalComputer });
+          if (!answer && out) answer = out;
+        } catch (e) {
+          answer = `❌ ${String(e)}`;
+        } finally {
+          try {
+            unlistenAgent?.();
+          } catch {
+            /* ignore */
+          }
+        }
+        patch(sid, { running: false, lastElapsedMs: Date.now() - t0c });
+        get().addNote(answer || "Tasca finalitzada.", { id: sid });
+        get().finalizeTurn(sid);
+        return goalComputer;
+      }
+
+      // ── XAT WEB (proveïdor «web:<ia>»): parlar directes amb una IA de navegador ──
+      // El provider «web:deepseek»/«web:chatgpt»/… fa que aquest xat escrigui la
+      // pregunta al xat web oficial (finestra VISIBLE, compte de l'usuari) i llegeixi
+      // la resposta de la pantalla. Un sol camí, el mateix historial i la mateixa
+      // llista de xats que la resta: tots els xats queden UNIFICATS.
+      const webId = sess.provider?.startsWith("web:") ? sess.provider.slice(4) : null;
+      if (webId) {
+        const t0w = Date.now();
+        patch(sid, {
+          running: true,
+          error: null,
+          stopped: false,
+          lastThinking: null,
+          startedAt: t0w,
+          lastElapsedMs: null,
+          stream: null,
+        });
+        get().pushStep(sid, {
+          label: `Xat web · ${webId}`,
+          detail: "Escrivint la pregunta al navegador intern (finestra visible)…",
+          ok: true,
+        });
+        try {
+          const out = await invoke<string>("web_ia_ask", {
+            name: webId,
+            question: text,
+            waitSecs: 300,
+          });
+          get().pushStep(sid, {
+            label: `Xat web · ${webId}`,
+            detail: "Resposta rebuda; comprovant si cal crear fitxers al projecte…",
+            ok: true,
+          });
+          resetLiveMaterialize();
+          // INTEGRACIÓ AUTOMÀTICA DEL CODI WEB: si la resposta de la IA web porta
+          // blocs de codi però cap fitxer «@file:», la IA LOCAL del projecte fa una
+          // passada d'integració (revisa, adapta i emet «@file: ruta») i després
+          // autoMaterialize els escriu SOLS a l'estructura real del workspace.
+          // Resultat: el codi del xat web S'APLIQUA A LLOC, sense còpia i enganxa.
+          let integrated: string | null = null;
+          if (parseFileBlocks(out).length === 0 && /```/.test(out)) {
+            get().pushStep(sid, {
+              label: `Integració · codi web`,
+              detail: "Adaptant el codi rebut de la web a l'estructura del projecte…",
+              ok: true,
+            });
+            try {
+              const adapted = await invoke<string>("send_prompt", {
+                prompt:
+                  "AQUESTA ÉS LA RESPOSTA D'UNA IA WEB (ChatGPT, Gemini, DeepSeek…) sobre " +
+                  "una tasca de programació. INTEGRA-LA AL PROJECTE OBERT.\n\n" +
+                  `TASCA ORIGINAL DE L'USUARI:\n${text}\n\n` +
+                  `RESPUESTA AMB CODI DE LA IA WEB:\n${out.slice(0, 24000)}\n\n` +
+                  "Revisa el codi rebut (no el creguis cec): adapta-lo (imports, noms, " +
+                  "estructura i llenguatge del workspace) i després emet CADA fitxer com una " +
+                  "línia «@file: ruta/relativa» seguida del seu contingut COMPLET — igual que " +
+                  "en «Crea al projecte». No expliquis res més que una frase de resum per fitxer. " +
+                  "Si el codi de la web no serveix per al projecte actual, diu-ho i no escriguis res.",
+                system:
+                  "Ets l'instrument d'integració de NoOrbit: contingut de fitxers com a blocs " +
+                  "«@file: ruta» completes. Sense més prosa que el resum mínim.",
+                session: `${sid}#webintegrate`,
+                provider: null,
+                model: sess.model,
+              });
+              if (adapted && parseFileBlocks(adapted).length > 0) {
+                integrated = adapted;
+              }
+            } catch {
+              /* sense integració: ens quedem amb la resposta original */
+            }
+          }
+          const finalText = integrated ?? out;
+          const integratedNote = integrated
+            ? "🧩 Codi de la IA web integrat al projecte (revisat i adaptat pel model local)."
+            : null;
+          // La IA web pot haver generat codi: la integració és la mateixa que la
+          // de la IA local (blocs ``` extrets per autoMaterialize + @file:).
+          const extra = await autoMaterialize(finalText);
+          const agents = await applyAgentDirectives(out, sid);
+          const todos = applyTodoDirectives(out);
+          patch(sid, {
+            running: false,
+            startedAt: null,
+            lastElapsedMs: Date.now() - t0w,
+            lastResult:
+              [stripAgentDirectiveLines(out), integratedNote, extra, agents, todos]
+                .filter(Boolean)
+                .join("\n\n") ||
+              stripAgentDirectiveLines(out),
+            lastThinking: null,
+          });
+        } catch (e) {
+          patch(sid, {
+            running: false,
+            stopped: false,
+            startedAt: null,
+            lastElapsedMs: Date.now() - t0w,
+            error: toErrorText(e),
+          });
+        }
+        // Tanca del torn + cua, idèntic al camí normal (unificació real).
+        const curW = sessOf(sid);
+        const lastW = curW?.messages[curW.messages.length - 1];
+        if (!lastW || lastW.role !== "assistant") get().finalizeTurn(sid);
+        get().persistChats();
+        await drainQueue(sid);
+        return sessOf(sid)?.lastResult ?? null;
+      }
+
       let msg = text;
       let sys: string | null = null;
       // Pista de plataforma: s'afegeix al system prompt perquè els xats
@@ -1949,7 +2406,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
           detail: "Recol·lectant el codi del projecte per adjuntar-lo com a context…",
           ok: true,
         });
-        const ctx = await get().buildContext(sid);
+        const ctx = await get().buildContext(sid, undefined, text);
         if (ctx) {
           msg = `${ctx}\n\n---\nPREGUNTA / TASCA:\n${text}`;
           sys = platformPreamble + CONTEXT_SYSTEM;
@@ -1967,6 +2424,12 @@ export const useAgentStore = create<AgentState>((set, get) => {
       if (!sys && platformPreamble) sys = platformPreamble + CONTEXT_SYSTEM;
       if (!sys) sys = MEMORY_SYSTEM;
 
+      // Checklist compartida: si hi ha tasques a la llista, les posem DAMUNT
+      // del system prompt perquè la IA principal les veja i no se'n perga cap.
+      const taskCtx = useTaskListStore.getState().asContext();
+      const withTasks = (s: string | null): string | null => (taskCtx ? taskCtx + (s ?? "") : s);
+      if (taskCtx) sys = taskCtx + sys;
+
       // Reconstruïble: per cada nivell de reintent, munte el «prompt final»
       // amb MENYS context (o sense). S'usa dins «runWithOOMRetry».
       const rebuildForLevel = async (level: number): Promise<{ m: string; h: HistoryTurn[]; s: string | null }> => {
@@ -1974,16 +2437,16 @@ export const useAgentStore = create<AgentState>((set, get) => {
         const sysBase = platformPreamble ? platformPreamble + CONTEXT_SYSTEM : (sess.includeContext ? CONTEXT_SYSTEM : MEMORY_SYSTEM);
         if (level === 1) {
           // Context REDUÏT: limitem a ≈ 1.500 caràcters.
-          const small = sess.includeContext ? await get().buildContext(sid, 1500) : "";
+          const small = sess.includeContext ? await get().buildContext(sid, 1500, text) : "";
           const m = small ? `${small}\n\n---\nPREGUNTA / TASCA:\n${text}` : text;
-          return { m, h: history, s: sysBase };
+          return { m, h: history, s: withTasks(sysBase) };
         }
         if (level === 2) {
           // Sense context adjunt: només el text de l'usuari.
-          return { m: text, h: history, s: platformPreamble ? platformPreamble + CONTEXT_SYSTEM : MEMORY_SYSTEM };
+          return { m: text, h: history, s: withTasks(platformPreamble ? platformPreamble + CONTEXT_SYSTEM : MEMORY_SYSTEM) };
         }
         // Level 3: sense context I sense històrial.
-        return { m: text, h: [], s: platformPreamble ? platformPreamble + CONTEXT_SYSTEM : MEMORY_SYSTEM };
+        return { m: text, h: [], s: withTasks(platformPreamble ? platformPreamble + CONTEXT_SYSTEM : MEMORY_SYSTEM) };
       };
 
       const expert = sess.expertId
@@ -2020,14 +2483,17 @@ export const useAgentStore = create<AgentState>((set, get) => {
             });
             resetLiveMaterialize();
             const extra = await autoMaterialize(out);
-            const agents = await applyAgentDirectives(out);
+            const agents = await applyAgentDirectives(out, sid);
+            const delegated = await applyDelegateDirectives(out, sid);
+            const todos = applyTodoDirectives(out);
             patch(sid, {
               running: false,
               startedAt: null,
               lastElapsedMs: Date.now() - t0,
               lastResult:
-                [stripAgentDirectiveLines(out), extra, agents].filter(Boolean).join("\n\n") ||
-                stripAgentDirectiveLines(out),
+                [stripAgentDirectiveLines(out), delegated, extra, agents, todos]
+                  .filter(Boolean)
+                  .join("\n\n") || stripAgentDirectiveLines(out),
               lastThinking: thinking,
             });
           } else {
@@ -2076,14 +2542,17 @@ export const useAgentStore = create<AgentState>((set, get) => {
           });
           resetLiveMaterialize();
           const extra = await autoMaterialize(out);
-          const agents = await applyAgentDirectives(out);
+          const agents = await applyAgentDirectives(out, sid);
+          const delegated = await applyDelegateDirectives(out, sid);
+          const todos = applyTodoDirectives(out);
           patch(sid, {
             running: false,
             startedAt: null,
             lastElapsedMs: Date.now() - t0,
             lastResult:
-              [stripAgentDirectiveLines(out), extra, agents].filter(Boolean).join("\n\n") ||
-              stripAgentDirectiveLines(out),
+              [stripAgentDirectiveLines(out), delegated, extra, agents, todos]
+                .filter(Boolean)
+                .join("\n\n") || stripAgentDirectiveLines(out),
             lastThinking: thinking,
           });
         }
@@ -2218,6 +2687,57 @@ export const useAgentStore = create<AgentState>((set, get) => {
 export function useActiveChat(): ChatSession {
   return useAgentStore((s) => s.sessions.find((x) => x.id === s.activeId) ?? s.sessions[0]);
 }
+
+/// Canvia el calaix de xats al projecte `root`: desen els xats actuals al
+/// calaix del projecte d'origen i carreguen els del projecte nou (o un xat
+/// «main» buit si és el primer treball en aquesta carpeta).
+function switchChatBucket(root: string | null) {
+  if (root === currentBucket) return;
+  const store = useAgentStore.getState();
+  try {
+    localStorage.setItem(
+      chatLsKey(currentBucket),
+      JSON.stringify({
+        activeId: store.activeId,
+        sessions: store.sessions.map((s) => ({
+          id: s.id,
+          title: s.title,
+          createdAt: s.createdAt,
+          parentId: s.parentId,
+          originIndex: s.originIndex,
+          provider: s.provider,
+          model: s.model,
+          expertId: s.expertId,
+          platform: s.platform,
+          includeContext: s.includeContext,
+          messages: s.messages.slice(-30).map((m) => ({
+            role: m.role,
+            text: m.text.slice(0, 16000),
+            thinking: m.thinking ? String(m.thinking).slice(0, 10000) : null,
+            steps: (m.steps ?? []).slice(0, 8),
+            elapsedMs: m.elapsedMs ?? null,
+            at: m.at,
+            error: m.error ?? false,
+          })),
+        })),
+      })
+    );
+  } catch {
+    /* sense persistència: el canvi de projecte igualment ha de funcionar */
+  }
+  currentBucket = root;
+  const loaded = loadChats(chatLsKey(root));
+  useAgentStore.setState(loaded);
+  store.persistChats();
+}
+
+// Cada vegada que s'obre un altre projecte (o se'n tanca un), els xats que
+// es mostren són els D'AQUELL projecte: ja no queden els xats antics
+// barrejats ni en obrir un de nou ni en reiniciar l'app.
+useWorkspaceStore.subscribe((state, prev) => {
+  if (state.root === prev.root) return;
+  switchChatBucket(state.root);
+});
 
 /// Veritat si QUALSEVOL xat està generant ara mateix (per a indicadors
 /// globals com la barra d'estat).

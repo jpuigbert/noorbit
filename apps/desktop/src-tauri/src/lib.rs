@@ -137,6 +137,11 @@ pub fn run() {
             commands::system::open_externally,
             commands::system::system_total_memory,
             commands::system::system_memory_status,
+            // Mode portàtil (USB / disc extern)
+            commands::portable::portable_status,
+            commands::portable::portable_enable,
+            commands::portable::portable_copy_app_to,
+            commands::portable::portable_disable,
             // Actualitzacions (GitHub Releases)
             commands::update::check_update,
             // IA
@@ -211,6 +216,7 @@ pub fn run() {
             // Skills
             commands::skills::list_skills,
             commands::skills::reload_skills,
+            commands::skills::vscode_import_skills,
             commands::skills_store::skills_store_list,
             commands::skills_store::skills_install_github,
             commands::skills_store::skills_install_url,

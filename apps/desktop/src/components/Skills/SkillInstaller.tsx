@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import {
   Github,
   Link2,
@@ -9,10 +10,14 @@ import {
   RefreshCw,
   RotateCcw,
   Download,
+  Search,
+  Code2,
+  FolderPlus,
 } from "lucide-react";
 import { useT } from "../../i18n";
 import { useSkillStore } from "../../stores/skillStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { SKILL_CATALOG, searchSkillsGitHub, type SkillSearchResult } from "./skillCatalog";
 
 type Source = "github" | "url" | "zip" | "local";
 
@@ -38,6 +43,12 @@ export default function SkillInstaller() {
   const [repo, setRepo] = useState("");
   const [value, setValue] = useState("");
   const [info, setInfo] = useState<string | null>(null);
+  // ── Cercador de skills: recerca en viu a GitHub + catàleg fix ──
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SkillSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  // ── Importació de VS Code (comandes + fragments de les extensions) ──
+  const [vscodeBusy, setVscodeBusy] = useState(false);
 
   useEffect(() => {
     load();
@@ -79,6 +90,52 @@ export default function SkillInstaller() {
     setInfo(ok ? t("skills.restoreOk") : null);
   };
 
+  // Recerca de skills: GitHub en viu amb replieg al catàleg curat.
+  const doSearch = async (raw?: string) => {
+    const q = (raw ?? query).trim();
+    if (!q) return;
+    setSearching(true);
+    setResults([]);
+    try {
+      const found = await searchSkillsGitHub(q);
+      setResults(found.length > 0 ? found : SKILL_CATALOG);
+    } catch {
+      // Sense xarxa o límit d'API: el catàleg curt sempre respon alguna cosa.
+      const hay = q.toLowerCase();
+      setResults(SKILL_CATALOG.filter((c) => (c.name + c.description + c.repo).toLowerCase().includes(hay)));
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const installResult = async (r: SkillSearchResult) => {
+    setInfo(null);
+    const ok = await installGithub(r.repo);
+    setInfo(ok ? t("skills.installed_ok") : null);
+  };
+
+  // Importaquí les extensions instal·lades de VS Code com a skills: comandes
+  // i fragments dins `vscode/<ext>/SKILL.md`, disponibles a la IA immediat.
+  const importVscode = async () => {
+    setVscodeBusy(true);
+    setInfo(t("skills.vscodeBusy"));
+    try {
+      const rep = await invoke<{ scanned: number; imported: number; details: string[] }>(
+        "vscode_import_skills",
+      );
+      setInfo(
+        rep.imported > 0
+          ? t("skills.vscodeOk", { n: rep.imported })
+          : t("skills.vscodeEmpty"),
+      );
+      await reload();
+    } catch {
+      setInfo(t("skills.vscodeEmpty"));
+    } finally {
+      setVscodeBusy(false);
+    }
+  };
+
   const doExport = async (dir: string, okKey: string) => {
     setInfo(null);
     const n = await exportExternal(dir);
@@ -117,6 +174,40 @@ export default function SkillInstaller() {
           </button>
         ))}
       </div>
+
+      {/* ── CERCADOR: GitHub en viu + catàleg d'arrencada ── */}
+      <div className="field">
+        <label>{t("skills.searchTitle")}</label>
+        <div className="si-pick">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("skills.searchHint")}
+            onKeyDown={(e) => e.key === "Enter" && void doSearch()}
+          />
+          <button className="btn sm" disabled={searching} onClick={() => void doSearch()}>
+            <Search size={12} /> {searching ? t("common.loading") : t("skills.searchTitle")}
+          </button>
+        </div>
+      </div>
+      {results.length > 0 && (
+        <div className="si-results">
+          {results.map((r) => (
+            <div key={r.repo} className="si-result">
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div className="si-result-name">
+                  {r.name}
+                  {r.stars != null && r.stars > 0 ? ` · ★ ${r.stars}` : ""}
+                </div>
+                <div className="si-result-desc">{r.description}</div>
+              </div>
+              <button className="btn sm" disabled={busy} onClick={() => void installResult(r)}>
+                <FolderPlus size={12} /> {t("skills.install")}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="si-form">
         {source === "github" && (
@@ -203,6 +294,15 @@ export default function SkillInstaller() {
               {tg.label}
             </button>
           ))}
+        </div>
+        {/* COMPATIBILITAT VS CODE: porta les comandes i fragments de les seves
+            extensions cap a skills de NoOrbit (carpeta vscode/). */}
+        <div className="si-export">
+          <Code2 size={12} />
+          <span>VS Code</span>
+          <button className="btn sm" disabled={vscodeBusy} onClick={() => void importVscode()}>
+            {vscodeBusy ? t("skills.vscodeBusy") : t("skills.vscodeImport")}
+          </button>
         </div>
       </div>
 

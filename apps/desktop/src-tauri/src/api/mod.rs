@@ -180,8 +180,56 @@ impl ApiManager {
         // i només cal prémer l'editat (✏) i hi enganxar el token més tard.
         // Venice exposa una API compatible amb OpenAI, així que no cal cap
         // codi addicional: rebrà `POST {base}/chat/completions`.
+        // Reserva un lloc fixe per a Venice AI si encara no n'hi ha cap
+        // entrada: apareix a la llista com a «Venice AI · ⚠ sense token»
+        // i només cal prémer l'editat (✏) i hi enganxar el token més tard.
+        // Venice exposa una API compatible amb OpenAI, així que no cal cap
+        // codi addicional: rebrà `POST {base}/chat/completions`.
         let has_venice = providers.iter().any(|p| p.id == "venice");
-        let mut seeded = false;
+        // PROVEÏDORS EUROPEUS: s'assequen SI SEMPRE (idempotent) perquè siguin
+        // «connectar i enganxar el token». Tots exposen API compatible amb
+        // OpenAI («kind: openai»), així que reutilitzen tot el codi de xat
+        // existent — cap client nou cal.
+        // · Mistral AI (França)        — api.mistral.ai
+        // · Aleph Alpha (Alemanya)     — api.pharia-ai.aleph-alpha.com
+        // · OpenRouter (Països Baixos) — passarel·la amb models europeus
+        const EU_PROVIDERS: [(&str, &str, &str, &str); 3] = [
+            (
+                "mistral",
+                "Mistral AI 🇫🇷",
+                "https://api.mistral.ai/v1",
+                "mistral-small-latest",
+            ),
+            (
+                "aleph-alpha",
+                "Aleph Alpha 🇩🇪",
+                "https://api.pharia-ai.aleph-alpha.com/v1",
+                "pharia-1-7b-control",
+            ),
+            (
+                "openrouter-eu",
+                "OpenRouter 🇪🇺",
+                "https://openrouter.ai/api/v1",
+                "mistralai/mistral-small-3.1-24b-instruct",
+            ),
+        ];
+        let mut seeded = has_venice;
+        for (id, name, base_url, model) in EU_PROVIDERS {
+            if !providers.iter().any(|p| p.id == id) {
+                providers.push(AiProvider {
+                    id: id.into(),
+                    name: name.into(),
+                    base_url: base_url.into(),
+                    model: model.into(),
+                    kind: "openai".into(),
+                    auth: AuthScheme::Bearer,
+                    header_name: String::new(),
+                    token: String::new(),
+                    enabled: true,
+                });
+                seeded = true;
+            }
+        }
         if !has_venice {
             providers.push(AiProvider {
                 id: "venice".into(),

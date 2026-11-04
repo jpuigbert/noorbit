@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, Globe, Info, SlidersHorizontal, Plug, RefreshCw, Download } from "lucide-react";
+import { X, Globe, Info, SlidersHorizontal, Plug, RefreshCw, Download, HardDrive } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { useT } from "../../i18n";
@@ -7,8 +7,9 @@ import { useUIStore } from "../../stores/uiStore";
 import { useUpdateStore } from "../../stores/updateStore";
 import LanguagePanel from "../Language/LanguagePanel";
 import IntegrationsPanel from "./IntegrationsPanel";
+import PortablePanel from "./PortablePanel";
 
-type Tab = "general" | "integracions" | "language" | "about";
+type Tab = "general" | "integracions" | "language" | "about" | "usb";
 
 const DELAYS = [500, 1000, 2000, 5000];
 
@@ -110,6 +111,12 @@ export default function SettingsModal() {
             <Globe size={14} /> {t("settings.language")}
           </button>
           <button
+            className={"pm-tab" + (tab === "usb" ? " active" : "")}
+            onClick={() => setTab("usb")}
+          >
+            <HardDrive size={14} /> {t("settings.portable.tab")}
+          </button>
+          <button
             className={"pm-tab" + (tab === "about" ? " active" : "")}
             onClick={() => setTab("about")}
           >
@@ -186,6 +193,8 @@ export default function SettingsModal() {
           )}
 
           {tab === "language" && <LanguagePanel />}
+
+          {tab === "usb" && <PortablePanel />}
 
           {tab === "integracions" && <IntegrationsPanel />}
 

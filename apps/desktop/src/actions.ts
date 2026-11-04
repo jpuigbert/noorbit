@@ -47,6 +47,7 @@ export const actions: Record<string, () => void | Promise<void>> = {
   "view.zoomOut": () => useUIStore.getState().zoomOut(),
   "view.zoomReset": () => useUIStore.getState().zoomReset(),
   "view.settings": () => useUIStore.getState().setShowSettings(true),
+  "account.open": () => useUIStore.getState().setShowAccount(true),
 
   // Ves
   "goto.file": () => useUIStore.getState().setShowQuickOpen(true),
@@ -82,7 +83,7 @@ export const actions: Record<string, () => void | Promise<void>> = {
   // Git (obre la pestanya de control de canvis del panell dret)
   "git.open": () => {
     useUIStore.getState().setRightPanelOpen(true);
-    usePreviewStore.getState().setRightTab("git");
+    usePreviewStore.getState().setRightTab("dev");
   },
 
   // IA (pròpi de NoOrbit, com el xat de Qoder)
@@ -90,10 +91,10 @@ export const actions: Record<string, () => void | Promise<void>> = {
   "ai.catalog": () => useUIStore.getState().setShowIaCatalog(true),
   "ai.plugins": () => useUIStore.getState().setShowPlugins(true),
   "ai.agent": () => usePreviewStore.getState().setRightTab("agent"),
-  "ai.computer": () => usePreviewStore.getState().setRightTab("computer"),
-  "ai.experts": () => usePreviewStore.getState().setRightTab("experts"),
-  "ai.unreal": () => usePreviewStore.getState().setRightTab("unreal"),
-  "ai.blender": () => usePreviewStore.getState().setRightTab("blender"),
+  "ai.computer": () => usePreviewStore.getState().setRightTab("integra"),
+  "ai.experts": () => usePreviewStore.getState().setRightTab("integra"),
+  "ai.unreal": () => usePreviewStore.getState().setRightTab("integra"),
+  "ai.blender": () => usePreviewStore.getState().setRightTab("integra"),
 
   // Temes de colors (tota la pantalla + editor)
   "view.themeDark": () => useUIStore.getState().setTheme("dark"),
@@ -163,6 +164,7 @@ export const commandList: CommandDef[] = [
   { id: "ai.experts", labelKey: "rightPanel.experts" },
   { id: "ai.unreal", labelKey: "menu.unreal" },
   { id: "ai.blender", labelKey: "menu.blender" },
+  { id: "account.open", labelKey: "account.title" },
   { id: "view.themeDark", labelKey: "settings.themeDark" },
   { id: "view.themeLight", labelKey: "settings.themeLight" },
   { id: "view.themeGray", labelKey: "settings.themeGray" },

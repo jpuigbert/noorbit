@@ -111,7 +111,7 @@ export function ProblemsBadge() {
   return (
     <button
       className="status-problems"
-      onClick={() => setTab("problems")}
+      onClick={() => setTab("dev")}
       title="Severitat dels diagnòstics del projecte"
     >
       <AlertCircle size={12} color="var(--error)" /> {errors}

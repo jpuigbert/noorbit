@@ -38,9 +38,10 @@ impl SkillsManager {
         let dir = if !config.skills_dir.is_empty() {
             PathBuf::from(&config.skills_dir)
         } else {
-            dirs::data_dir()
-                .unwrap_or_else(|| std::env::temp_dir())
-                .join("no-orbit")
+            // Passen pel resoledor central de dades: en mode portàtil (USB)
+            // les skills viuen a `NoOrbitData/` i viatgen amb l'app.
+            crate::config::AppConfig::data_dir()
+                .unwrap_or_else(|| dirs::data_dir().unwrap_or_else(|| std::env::temp_dir()))
                 .join("skills")
         };
         let _ = std::fs::create_dir_all(&dir);

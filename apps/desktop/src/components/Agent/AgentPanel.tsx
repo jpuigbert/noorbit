@@ -15,7 +15,10 @@ import {
 import { usePreviewStore } from "../../stores/previewStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { useSystemStatsStore, memPercent, formatBytes } from "../../stores/systemStatsStore";
+import TaskChecklist from "./TaskChecklist";
 import { CopyButton, SaveButton } from "../CopyButton";
+import ChatMarkdown from "./ChatMarkdown";
+import { useWebAiStore } from "../../stores/webAiStore";
 
 export default function AgentPanel() {
   const { t } = useT();
@@ -70,7 +73,6 @@ export default function AgentPanel() {
   const sess = useActiveChat();
   const {
     messages,
-    timeline,
     lastResult,
     lastThinking,
     stream,
@@ -102,6 +104,11 @@ export default function AgentPanel() {
   // Proveïdors configurats (Venice, Claude, Ollama Cloud…) per triar la IA
   // d'aquest xat. `active` és el proveïdor global (el de la configuració).
   const providers = useProviderStore((s) => s.providers);
+  // Catàleg d'IAs de web (del backend: DeepSeek, ChatGPT, Claude, Gemini…).
+  const webIas = useWebAiStore((s) => s.ias);
+  useEffect(() => {
+    void useWebAiStore.getState().init();
+  }, []);
   const activeProvider = useProviderStore((s) => s.active);
   const loadProviders = useProviderStore((s) => s.load);
   const updateProvider = useProviderStore((s) => s.update);
@@ -117,7 +124,7 @@ export default function AgentPanel() {
   // el formulari de creació en muntar-se.
   const goCreateExpert = () => {
     useExpertStore.getState().requestCreate();
-    usePreviewStore.getState().setRightTab("experts");
+    usePreviewStore.getState().setRightTab("integra");
   };
 
   useEffect(() => {
@@ -179,7 +186,7 @@ export default function AgentPanel() {
   useEffect(() => {
     const el = bodyRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, running, timeline, lastResult, stream, activeId]);
+  }, [messages, running, lastResult, stream, activeId]);
 
   const hasText = prompt.trim().length > 0;
   // Es pot enviar amb text, amb imatges enganxades, amb fitxers adjunts, o
@@ -398,6 +405,9 @@ export default function AgentPanel() {
   // Proveïdor REAL que s'usarà: el triat al xat o, si no n'hi ha, el global.
   const effectiveProvider = chatProvider || activeProvider;
   const isLocalChat = effectiveProvider === "" || effectiveProvider === "ollama";
+  // Xat WEB: el proveïdor és una IA de navegador («web:deepseek»…). En aquest
+  // mode no hi ha models locals ni núvols: la pregunta viatja al navegador.
+  const isWebChat = chatProvider.startsWith("web:");
   // Ollama Cloud: un (o més) proveïdors remots que serveixen models gratuïts al
   // núvol. Cal mostrar-ne el model actiu i deixar triar-lo: els proveïdors
   // remots ignoren el model per xat (el porten escrit a sobre), així que el
@@ -487,7 +497,25 @@ export default function AgentPanel() {
                 {p.model ? ` · ${p.model}` : ""}
               </option>
             ))}
+          {/* IAs de WEB: parlen per Internet via el navegador intern, amb el
+              compte de l'usuari (maig tokens). Són proveïdors més del xat:
+              tot el flux (historial, passos, fitxers) és el mateix. */}
+          {webIas.length > 0 && (
+            <optgroup label={t("webAi.optgroup")}>
+              {webIas.map((w) => (
+                <option key={w.id} value={`web:${w.id}`}>
+                  {w.name} · web
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
+        {/* En xat web no cal cap selector de model ni botons d'Ollama. */}
+        {isWebChat && (
+          <span style={{ fontSize: 11, color: "var(--text-3)" }}>
+            {t("webAi.webChatNote")}
+          </span>
+        )}
         {/* Ollama Cloud: un sol proveïdor amb diversos models gratuïts al núvol.
             El selector mostra el model ACTIU i en permet triar un altre. */}
         {isCloudChat && (
@@ -536,8 +564,9 @@ export default function AgentPanel() {
             ))}
           </select>
         )}
-        {/* Botons de gestió de models d'Ollama: recarregar la llista i baixar
-            un model nou. Formen part d'AQUEST ÚNIC selector d'IA del xat. */}
+        {/* Botons de gestió de models d'Ollama (recarregar llista i baixar un
+            model nou): només tenen sentit en xats LOCALS, no en els web. */}
+        {isLocalChat && (
         <button
           className="icon-btn"
           title={t("common.refresh")}
@@ -545,6 +574,8 @@ export default function AgentPanel() {
         >
           <RefreshCw size={13} />
         </button>
+        )}
+        {isLocalChat && (
         <button
           className="icon-btn"
           title={t("agent.downloadModel")}
@@ -552,6 +583,7 @@ export default function AgentPanel() {
         >
           <Download size={13} />
         </button>
+        )}
       </div>
 
       {/* Selector de PLATAFORMA: condiciona el system prompt de la IA perquè
@@ -809,6 +841,10 @@ export default function AgentPanel() {
       </div>
 
       <div className="agent-body" ref={bodyRef}>
+        {/* Checklist compartida: tasques a complir que la IA (amb @todo/@done) i
+            l'usuari mantenen visible. S'injecta al context de la principal i dels
+            agents perquè ningú es perga cap punt del treball. */}
+        <TaskChecklist />
         {/* Capçalera discreta del xat amb l'opció de buidar-lo (només aquest). */}
         {messages.length > 0 && (
           <div className="chat-head">
@@ -859,8 +895,7 @@ export default function AgentPanel() {
           const msgImgs = Array.from(
             new Set([...(m.images ?? []), ...extractChatImagePaths(m.text)])
           );
-          return m.role === "user" ? (
-            <div key={i} className="chat-row user">
+          return m.role === "user" ? (            <div key={i} className="chat-row user">
               <div className="chat-bubble user">{m.text}</div>
               {msgImgs.length > 0 && (
                 <div className="chat-imgs">
@@ -881,40 +916,23 @@ export default function AgentPanel() {
             </div>
           ) : (
             <div key={i} className="chat-row assistant">
-              {(m.thinking || (m.steps && m.steps.length > 0)) && (
+              {m.thinking && (
                 /* Obert PER DEFECTE: l'usuari vol veure el procés de
                    pensament sense haver de clicar-hi; si el contingut no cap,
                    el propi panell té barra de desplaçament. */
-                <details className="chat-thought" open>
+                 <details className="chat-thought">
                   <summary>
                     <Brain size={12} style={{ verticalAlign: -2, marginRight: 4 }} />
                     {t("agent.thinkingTitle")}
                     {m.elapsedMs != null && ` · ${(m.elapsedMs / 1000).toFixed(1)} s`}
                   </summary>
-                  {m.steps && m.steps.length > 0 && (
-                    <div className="chat-steps">
-                      {m.steps.map((s, k) => (
-                        <div key={k} className={"timeline-step " + (s.ok ? "ok" : "fail")}>
-                          {s.ok ? (
-                            <CheckCircle2 size={12} color="var(--success)" />
-                          ) : (
-                            <XCircle size={12} color="var(--error)" />
-                          )}
-                          <div>
-                            <div style={{ color: "var(--text-0)" }}>{s.label}</div>
-                            <div style={{ color: "var(--text-2)" }}>{s.detail}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                   {m.thinking && (
                     <pre className="agent-thinking-body">{m.thinking}</pre>
                   )}
                 </details>
               )}
               <div className={"chat-bubble assistant" + (m.error ? " err" : "")}>
-                {m.text}
+                <ChatMarkdown text={m.text} />
               </div>
               {/* Imatges esmentades a la resposta: previsualització amb botons
                   de copiar al porta-retalls i mostrar al Finder. */}
@@ -981,7 +999,7 @@ export default function AgentPanel() {
           <div className="chat-row assistant">
               {stream ? (
                 <div className="chat-bubble assistant streaming">
-                  {stream}
+                  <ChatMarkdown text={stream} />
                   <span className="stream-caret">▋</span>
                   <div className="stream-meta">
                     <RefreshCw size={11} className="spin" /> {t("agent.running")}
@@ -1003,23 +1021,6 @@ export default function AgentPanel() {
               <div className="chat-imgs">
                 {Array.from(new Set([...extractChatImagePaths(stream ?? ""), ...liveImgs])).map((p) => (
                   <ChatImage key={p} path={p} />
-                ))}
-              </div>
-            )}
-            {timeline.length > 0 && (
-              <div className="chat-steps">
-                {timeline.map((s, k) => (
-                  <div key={k} className={"timeline-step " + (s.ok ? "ok" : "fail")}>
-                    {s.ok ? (
-                      <CheckCircle2 size={12} color="var(--success)" />
-                    ) : (
-                      <XCircle size={12} color="var(--error)" />
-                    )}
-                    <div>
-                      <div style={{ color: "var(--text-0)" }}>{s.label}</div>
-                      <div style={{ color: "var(--text-2)" }}>{s.detail}</div>
-                    </div>
-                  </div>
                 ))}
               </div>
             )}

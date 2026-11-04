@@ -422,6 +422,64 @@
   flex: 1;
 }
 
+/* ---- IAs de la web (llançador de xats web) ---- */
+.webai-launch {
+  overflow-y: auto;
+}
+.webai-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+  padding: 4px 12px;
+}
+.webai-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.webai-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-0);
+}
+.webai-card-url {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.webai-card-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ---- Barra d'estat: chip del compte (botó amb pinta d'etiqueta,
+   com els IDEs amb compte: avatar + correu, sense decoració extra). */
+.status-item.as-btn {
+  appearance: none;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 2px;
+  max-height: 20px;
+}
+.status-item.as-btn:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+
 /* ---- Botons i controls compartits ---- */
 .btn {
   display: inline-flex;
@@ -962,6 +1020,36 @@
   margin-top: 8px;
   color: var(--success, var(--accent));
   font-size: 12px;
+}
+/* ── Cercador de skills: resultats (GitHub en viu + catàleg) ── */
+.si-results {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  max-height: 190px;
+  overflow: auto;
+}
+.si-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.si-result:last-child {
+  border-bottom: none;
+}
+.si-result-name {
+  font-size: 12.5px;
+  color: var(--text-0);
+  font-weight: 600;
+}
+.si-result-desc {
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .si-builtin {
   margin-top: 12px;
@@ -3001,4 +3089,422 @@
 .c-system .dc-text {
   color: #b6b6c0;
   font-style: italic;
+}
+
+/* ── GUIA VISUAL (HelpModal): cartes SVG + passos numerats ─────────────── */
+.vg-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 4px;
+  background: none;
+  color: var(--text-0);
+  font-size: 13px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+.vg-toggle:hover {
+  color: var(--accent-hover);
+}
+.vg-intro {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+.vg-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.vg-card {
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-lg);
+  background: var(--bg-2);
+  padding: 10px 12px;
+  overflow: hidden;
+}
+.vg-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-0);
+  margin-bottom: 6px;
+}
+.vg-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.vg-svg {
+  display: block;
+  border-radius: 8px;
+}
+.vg-steps {
+  margin: 6px 0 0 16px;
+  padding: 0;
+  font-size: 11px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+.vg-steps li {
+  margin-bottom: 2px;
+}
+
+/* ── PESTANYES AGRUPADES: subpestanyes dins grups ─────────────────────── */
+.rp-group {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.rp-subtabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.rp-subtab {
+  appearance: none;
+  border: none;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.rp-subtab:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+.rp-subtab.active {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+.rp-group-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.rp-group-body > * {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ✨ PREMIUM UI — remat visual d'alta gamma (estil VS Code/Qoder).
+   Aquestes regles van AL FINAL per guanyar la cascada sobre els estils
+   antics dels mateixos components: només «poliment», cap canvi estructural. */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ---- Bombolles del xat: cartes modernes amb capçalera, codi amb marc ---- */
+.chat-row {
+  margin-bottom: 12px;
+}
+/* El text de la IA ara ve renderitzat per ChatMarkdown (blocs, llistes i
+   enllaços): la bombolla per coat normal (el <pre> fa el seu treball). */
+.chat-bubble.assistant,
+.chat-bubble.assistant.streaming {
+  white-space: normal;
+}
+/* Markdown dins les bombolles */
+.chat-md > p {
+  margin: 0 0 6px;
+}
+.chat-md > p:last-child {
+  margin-bottom: 0;
+}
+.chat-md h4, .chat-md h5, .chat-md h6 {
+  margin: 8px 0 4px;
+  font-size: 13px;
+  color: var(--text-0);
+  font-weight: 600;
+}
+.chat-md ul, .chat-md ol {
+  margin: 4px 0 8px 18px;
+  padding: 0;
+}
+.chat-md li {
+  margin-bottom: 3px;
+}
+.chat-md a {
+  color: var(--accent-2);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--accent-2);
+}
+.chat-md blockquote {
+  margin: 4px 0;
+  padding: 3px 10px;
+  border-left: 2px solid var(--accent);
+  color: var(--text-1);
+}
+.chat-md hr {
+  border: none;
+  border-top: 1px solid var(--border-2);
+  margin: 8px 0;
+}
+/* Bloc de codi AMB CAPÇALERA (llenguatge + còpia): com els xats d'IDE. */
+.cmd-code {
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  margin: 8px 0;
+  overflow: hidden;
+}
+.cmd-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: color-mix(in srgb, var(--bg-3) 70%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+.cmd-code-lang {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--accent-2);
+}
+.cmd-code-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-2);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: color 0.12s, background 0.12s;
+}
+.cmd-code-copy:hover {
+  color: var(--text-0);
+  background: var(--bg-4);
+}
+.cmd-code pre {
+  margin: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 10px 12px !important;
+  max-height: 340px;
+  overflow: auto;
+}
+/* Cursor d'escriptura en directe: pols suau */
+.stream-caret {
+  animation: caretPulse 1s step-end infinite;
+  color: var(--accent-hover);
+}
+@keyframes caretPulse {
+  50% { opacity: 0.25; }
+}
+.chat-bubble {
+  max-width: 88%;
+  padding: 10px 13px;
+  border-radius: var(--radius-lg) !important;
+  font-size: 13px;
+  line-height: 1.6;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.15s ease;
+}
+.chat-bubble.user {
+  background: var(--accent-grad) !important;
+  color: #fff !important;
+  border: none !important;
+  border-bottom-right-radius: 4px !important;
+  font-weight: 400;
+}
+.chat-bubble.assistant {
+  background: var(--bg-2) !important;
+  border: 1px solid var(--border-2) !important;
+  color: var(--text-0) !important;
+  border-bottom-left-radius: 4px !important;
+  max-height: 62vh;
+}
+.chat-bubble.assistant:hover {
+  box-shadow: var(--shadow-md);
+}
+.chat-bubble.assistant.err {
+  border-color: var(--error) !important;
+  background: rgba(248, 113, 113, 0.07) !important;
+  color: var(--error) !important;
+}
+/* Codi DINS les bombolles: bloc amb marc i font mono autèntica. */
+.chat-bubble code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 5px;
+  color: var(--accent-2);
+}
+.chat-bubble pre {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.chat-bubble pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-0);
+}
+
+/* ---- Barra de pestanyes de xats: pilles elegants ---- */
+.ap-chats-bar {
+  padding: 6px 8px 4px;
+}
+.ap-chat-tab {
+  border-radius: 999px !important;
+  padding: 3px 10px !important;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.ap-chat-tab.active {
+  background: var(--accent-soft) !important;
+  color: var(--accent-hover) !important;
+  box-shadow: inset 0 0 0 1px rgba(124, 92, 255, 0.35);
+}
+.ap-chat-tab:hover:not(.active) {
+  background: var(--bg-3) !important;
+}
+.ap-chat-add {
+  border-radius: 999px;
+}
+
+/* ---- Barra d'IA del xat: vidre suau amb focus rodó ---- */
+.ap-ia-bar,
+.ap-expert-bar,
+.ap-platform-bar {
+  background: color-mix(in srgb, var(--bg-2) 72%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  margin: 6px 8px !important;
+  padding: 5px 8px;
+  backdrop-filter: blur(8px);
+}
+.ap-model-select {
+  background: var(--bg-2) !important;
+  border: 1px solid var(--border-2) !important;
+  border-radius: 999px !important;
+  padding: 4px 10px !important;
+  color: var(--text-0) !important;
+  max-width: 46%;
+}
+.ap-model-select:hover {
+  border-color: var(--accent) !important;
+}
+
+/* ---- Caixa d'entrada de l'agent: targeta elevada amb focus ring ---- */
+.agent-prompt {
+  background: var(--bg-2) !important;
+  border: 1.5px solid var(--border-2) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.15s ease, box-shadow 0.2s ease;
+  margin: 8px !important;
+}
+.agent-prompt:focus-within {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-md);
+}
+.agent-prompt textarea {
+  font-size: 13.5px !important;
+}
+
+/* ---- Botons: primari amb degradat, secundaris nets ---- */
+.btn.primary {
+  background: var(--accent-grad) !important;
+  border: none !important;
+  color: #fff !important;
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(124, 92, 255, 0.35);
+}
+.btn.primary:hover:not(:disabled) {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+}
+.btn {
+  transition: all 0.15s ease;
+  border-radius: var(--radius) !important;
+}
+.btn:hover {
+  filter: brightness(1.08);
+}
+
+/* ---- Passos de l'agent (timeline) més calents ---- */
+.step-line, .ap-queue-item {
+  border-radius: var(--radius) !important;
+}
+
+/* ---- Barra d'estat: treball amb filferro d'accent ---- */
+.statusbar {
+  background: var(--bg-2) !important;
+}
+.status-item.working {
+  color: var(--accent-hover) !important;
+}
+.status-dot.on {
+  background: var(--success);
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.55);
+}
+.status-dot.off {
+  background: var(--text-3);
+  opacity: 0.5;
+}
+
+/* ---- Panell dret: pestanyes tipus pílvola ---- */
+.rp-tab {
+  border-radius: 8px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.rp-tab.active {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+/* ---- Modals: overlay amb blur + targeta flotant ---- */
+.modal-overlay {
+  background: rgba(0, 0, 0, 0.45) !important;
+  backdrop-filter: blur(3px);
+}
+.modal {
+  border-radius: var(--radius-xl) !important;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border-2);
+}
+
+/* ---- Mòduls del navegador web: el seu estil viu al costat de la resta ---- */
+/* (les classes .webai-* tenen el seu bloc definit més amunt) */
+
+/* ---- Scrollbar amb accent (fins el "flux" se nota premium) ---- */
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--bg-4) 72%, var(--accent) 28%);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
 }

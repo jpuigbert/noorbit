@@ -29,6 +29,7 @@ import ReviewPill from "./components/Editor/ReviewPill";
 import { markForPath, resolveMark } from "./stores/editReviewStore";
 import NewProjectModal from "./components/NewProjectModal";
 import StartupScreen from "./components/StartupScreen";
+import AccountModal from "./components/Account/AccountModal";
 
 /// Autodesat (com l'«Auto Save» de VS Code): desa el fitxer obert poc
 /// després de l'últim canvi i també quan la finestra perd el focus.
@@ -273,6 +274,7 @@ export default function App() {
       <SearchPalette />
       <NewProjectModal />
       <StartupScreen />
+      <AccountModal />
     </div>
   );
 }
