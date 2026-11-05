@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ClipboardEvent, t
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { ListChecks, Zap, CheckCircle2, XCircle, Server, Download, RefreshCw, Cpu, UserCog, Send, Square, Brain, Boxes, X, Plus, Trash2, FolderPlus, FileDown, FolderTree, GitFork, Smartphone, Apple, Monitor, Copy, FolderOpen, ImageOff, Paperclip, ExternalLink } from "lucide-react";
+import { ListChecks, Zap, CheckCircle2, XCircle, Server, Download, RefreshCw, Cpu, UserCog, Send, Square, Brain, Boxes, X, Plus, Trash2, FolderPlus, FileDown, FolderTree, GitFork, Smartphone, Apple, Monitor, Copy, FolderOpen, ImageOff, Paperclip, ExternalLink, ChevronDown } from "lucide-react";
 import { useT } from "../../i18n";
 import { useAgentStore, useActiveChat, extractRecommendedPaths, extractChatImagePaths } from "../../stores/agentStore";
 import { useAIStore, OLLAMA_CLOUD_MODELS } from "../../stores/aiStore";
@@ -37,6 +37,8 @@ export default function AgentPanel() {
   const [liveImgs, setLiveImgs] = useState<string[]>([]);
   // Arrossegament d'OS/arbres: posa l'entrada en estat «solta ací».
   const [dragOver, setDragOver] = useState(false);
+  // Botó «salt al final» del xat: apareix si l'usuari ha navegat amunt a llegir.
+  const [showJump, setShowJump] = useState(false);
 
   const {
     backends,
@@ -66,6 +68,12 @@ export default function AgentPanel() {
     clearChat,
     stop,
   } = useAgentStore();
+
+  // ── Història de xats: NOMÉS es mostren els del projecte actual ─────────
+  // Els chats d'altres projectes no es barregen aquí (simplicitat: el calaix
+  // és per projecte, i així el panell d'Agent no es mostra res d'altres).
+  const bucket = useWorkspaceStore((s) => s.root);
+  const visibleSessions = sessions.filter((s) => s.bucket === bucket);
 
   // El xat visible: cadascun té la seva conversa, la seva cua, la seva IA i
   // la seva generació en curs. Tots els botons d'aquest panell actuen SOBRE
@@ -433,7 +441,7 @@ export default function AgentPanel() {
       {/* Barra de xats: cadascun treballa en paral·lel. «+» en obre un de nou
           (amb la mateixa o una altra IA) mentre la IA està ocupada en un altre. */}
       <div className="ap-chats-bar">
-        {sessions.map((s) => (
+        {visibleSessions.map((s) => (
           <div
             key={s.id}
             className={
@@ -451,9 +459,9 @@ export default function AgentPanel() {
               <GitFork size={10} />
             ) : null}
             <span className="ap-chat-tab-title">
-              {s.title || `${t("agent.chat")} ${sessions.findIndex((x) => x.id === s.id) + 1}`}
+              {s.title || `${t("agent.chat")} ${visibleSessions.findIndex((x) => x.id === s.id) + 1}`}
             </span>
-            {sessions.length > 1 && (
+            {visibleSessions.length > 1 && (
               <button
                 className="ap-chat-tab-close"
                 onClick={(e) => {
@@ -840,7 +848,15 @@ export default function AgentPanel() {
         </button>
       </div>
 
-      <div className="agent-body" ref={bodyRef}>
+      <div
+        className="agent-body"
+        ref={bodyRef}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 90;
+          setShowJump(!nearBottom);
+        }}
+      >
         {/* Checklist compartida: tasques a complir que la IA (amb @todo/@done) i
             l'usuari mantenen visible. S'injecta al context de la principal i dels
             agents perquè ningú es perga cap punt del treball. */}
@@ -895,6 +911,11 @@ export default function AgentPanel() {
           const msgImgs = Array.from(
             new Set([...(m.images ?? []), ...extractChatImagePaths(m.text)])
           );
+          // Xats d'IA moderns: si dos missatges d'usuari van per sèrie (sense
+          // resposta de la IA entre ells), es fusionen en UN sol bubble.
+          if (m.role === "user" && i > 0 && messages[i - 1]?.role === "user") {
+            return null;
+          }
           return m.role === "user" ? (            <div key={i} className="chat-row user">
               <div className="chat-bubble user">{m.text}</div>
               {msgImgs.length > 0 && (
@@ -1028,6 +1049,19 @@ export default function AgentPanel() {
         )}
 
         {error && !running && <div className="si-error">{error}</div>}
+
+        {/* Botó «salt al final»: apareix només si l'usuari ha scrollat amunt. */}
+        {showJump && (
+          <button
+            className="chat-jump"
+            onClick={() => {
+              const el = bodyRef.current;
+              if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+            }}
+          >
+            <ChevronDown size={13} /> {t("agent.jumpToBottom")}
+          </button>
+        )}
       </div>
 
       {/* Diàleg de creació manual d'estructura (rutes editables línia a línia). */}

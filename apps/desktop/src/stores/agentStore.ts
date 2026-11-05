@@ -72,6 +72,10 @@ export interface HistoryTurn {
 /// o la remota configurada— per continuar el treball en paral·lel, i fer
 /// forks d'una conversa per provar un altre camí sense perdre l'original.
 export interface ChatSession {
+  /// Projecte (bucket) a l'ambit d'aquest xat: els historials d'altres
+  /// projectes no es mostren així aquí. Es posa al crear el xat i es
+  /// reescriu en canviar de projecte.
+  bucket: string;
   id: string;
   title: string;
   createdAt: number;
@@ -126,6 +130,7 @@ function defaultCtx(): boolean {
 
 function blankSession(id: string, over: Partial<ChatSession> = {}): ChatSession {
   return {
+    bucket: useWorkspaceStore.getState().root ?? "",
     id,
     title: "",
     createdAt: Date.now(),
@@ -1162,6 +1167,8 @@ interface AgentState {
   checking: boolean;
   /// Tots els xats oberts: cadascun treballa en paral·lel, amb la seva IA.
   sessions: ChatSession[];
+  /// Projecte (bucket) de l'últim xat obert: només es mostren els del projecte actual.
+  bucket: string | null;
   activeId: string;
 
   refreshBackends: () => Promise<void>;
@@ -1354,6 +1361,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
     checking: false,
     sessions: initialChats.sessions,
     activeId: initialChats.activeId,
+    bucket: currentBucket,
 
     refreshBackends: async () => {
       set({ checking: true });

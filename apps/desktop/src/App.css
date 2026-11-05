@@ -712,6 +712,14 @@
   flex: 1;
   overflow: auto;
   padding: 10px;
+  position: relative;
+}
+/* Botó «salt al final» del xat (visible si l'usuari ha scrollat amunt). */
+.chat-jump {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 5;
 }
 .timeline-step {
   display: flex;
