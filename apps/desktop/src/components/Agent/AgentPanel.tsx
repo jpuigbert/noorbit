@@ -30,6 +30,7 @@ export default function AgentPanel() {
   const [pendingImgs, setPendingImgs] = useState<string[]>([]);
   const [attachErr, setAttachErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
   // Fitxers NO-imatge adjuntats com a CONTEXT (codi, docs…): nom + text.
   const [pendingFiles, setPendingFiles] = useState<{ name: string; text: string }[]>([]);
   // Imatges generades pel xat que arriben per «runtools://image»: es mostren
@@ -206,6 +207,12 @@ export default function AgentPanel() {
   // Amb expert seleccionat en aquest xat, la tasca la resol ell.
   const activeExpert = experts.find((e) => e.id === sess.expertId) ?? null;
 
+  // Auto-resize: el composer es reinicia a min-height quan s'envia.
+  const resetGrow = () => {
+    const el = promptRef.current;
+    if (el) el.style.height = "auto";
+  };
+
   // Acció principal del xat. Si la IA ja treballa AQUÍ, el text s'afegeix a la
   // cua d'aquest xat; si no, s'envia ara. Les imatges adjuntes viatgen com a
   // entrada visual pels models amb visió; a la cua es posen les seves rutes
@@ -216,6 +223,7 @@ export default function AgentPanel() {
     const files = pendingFiles;
     if (!text && imgs.length === 0 && files.length === 0) return;
     setPrompt("");
+    resetGrow();
     setPendingImgs([]);
     setPendingFiles([]);
     setAttachErr(null);
@@ -239,6 +247,7 @@ export default function AgentPanel() {
     const text = prompt.trim();
     if (!text || running) return;
     setPrompt("");
+    resetGrow();
     if (activeExpert) void send(text);
     else void quick(text);
   };
@@ -248,6 +257,7 @@ export default function AgentPanel() {
     const text = prompt.trim();
     if (!text || running) return;
     setPrompt("");
+    resetGrow();
     void scaffold(text);
   };
 
@@ -711,9 +721,16 @@ export default function AgentPanel() {
           </div>
         )}
         <textarea
+          ref={promptRef}
           placeholder={t("agent.promptPlaceholder") + " · ⌘V imatges · arrossega fitxers ací"}
           value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
+          onChange={(e) => {
+            setPrompt(e.target.value);
+            // Auto-resize: el composer creix amb el text (màxim 140 px).
+            const el = e.target;
+            el.style.height = "auto";
+            el.style.height = Math.min(el.scrollHeight, 140) + "px";
+          }}
           onPaste={onPromptPaste}
           onKeyDown={onPromptKey}
         />
