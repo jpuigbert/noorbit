@@ -836,6 +836,70 @@ bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 0))
 bpy.context.active_object.name = "NoOrbit_Cub"
 print("Creat el cub NoOrbit_Cub")
 ```
+RECEPTES SIMILARS (codis provats que funcionen — imita el més semblant a la
+taska demanada i adapta noms, mides i colors; NO inventis sintaxis que no vist a baix):
+- CREAR una forma:
+```python
+import bpy
+bpy.ops.mesh.primitive_uv_sphere_add(radius=1.5, location=(0, 0, 0))
+ob = bpy.context.view_layer.objects.active; ob.name = "NoOrbit_Esfera"
+print("Creat NoOrbit_Esfera")
+```
+- MATERIAL amb color (bpy.data.materials, metallic):
+```python
+import bpy
+mat = bpy.data.materials.new("NoOrbit_Mat"); mat.use_nodes = True
+bsdf = mat.node_tree.nodes["Principled BSDF"]
+bsdf.inputs["Base Color"].default_value = (0.8, 0.2, 0.1, 1.0)
+bsdf.inputs["Metallic"].default_value = 0.6
+ob.material_slots.clear(); ob.material_slot_add(); ob.material_slots[0].material = mat
+```
+- TRIAR un objecte Ja EXISTENT i mou-lo/escalar/girar-lo:
+```python
+import bpy
+if "NoOrbit_Cub" in bpy.data.objects:
+    ob = bpy.data.objects["NoOrbit_Cub"]
+    ob.location = (1.0, 0.0, 0.5)
+    ob.scale = (1.5, 1.5, 1.0)
+    ob.rotation_euler = (0.0, 0.0, 0.3)
+    print("Deformat NoOrbit_Cub")
+```
+- LLUM i CÀMERA orientades cap a l'escena:
+```python
+import bpy
+bpy.ops.object.light_add(type='SUN', location=(5, -5, 10))
+lam = bpy.context.view_layer.objects.active; lam.data.energy = 3.0
+bpy.ops.object.camera_add(location=(7, -6, 5),
+    rotation=(1.1, 0.0, 0.8))
+bpy.context.scene.camera = bpy.context.view_layer.objects.active
+print("Afegida llum i càmera")
+```
+- ANIMAR (moure location → dues keyframes):
+```python
+import bpy
+ob = bpy.data.objects["NoOrbit_Esfera"]
+ob.location = (0, 0, 0); ob.keyframe_insert(data_path="location", frame=1)
+ob.location = (0, 0, 3); ob.keyframe_insert(data_path="location", frame=60)
+print("Animat l'esfera (1..60)")
+```
+- ESBORRAR per nom (només si se't demana):
+```python
+import bpy
+if "NoOrbit_Esfera" in bpy.data.objects:
+    bpy.data.objects.remove(bpy.data.objects["NoOrbit_Esfera"], do_unlink=True)
+    print("Esborrat NoOrbit_Esfera")
+```
+- MODIFICADORS (bevel + subdivision en un objecte JA creat):
+```python
+import bpy
+ob = bpy.data.objects["NoOrbit_Cub"]
+if "Bevel" not in ob.modifiers:
+    ob.modifiers.new("Bevel", "BEVEL")
+    ob.modifiers["Bevel"].width = 0.05
+    ob.modifiers.new("Subsurf", "SUBSURF")
+    ob.modifiers["Subsurf"].levels = 2
+print("Aplicats modificadors a NoOrbit_Cub")
+```
 REGLS PER QUE NO FALLI (errors típics a Blender):
 - Després de crear un objecte amb un operator, NO depengues de bpy.context.active_object;
   agafa'l amb ob = bpy.context.view_layer.objects.active o crea'l amb bpy.data.objects.new +
