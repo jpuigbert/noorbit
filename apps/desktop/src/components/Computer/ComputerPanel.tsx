@@ -54,6 +54,18 @@ export default function ComputerPanel() {
           />
           <span>{t("computer.confirmEach")}</span>
         </label>
+        {/* Botó INDEPENDENT: sol·licita l'accés al sistema (macOS TCC + mode IA)
+            sense necessitat de passar per instruccions ni per l'agent. */}
+        <button
+          className="btn sm"
+          disabled={s.perms.enabled}
+          onClick={() => {
+            s.setPerms(true, s.perms.confirmEach);
+            s.runCommand('osascript -e \'tell application "System Events" to get name of processes\'');
+          }}
+        >
+          <ShieldCheck size={13} /> {t("computer.requestAccess")}
+        </button>
       </div>
 
       {!s.perms.enabled && <div className="cp-warn">{t("computer.disabledWarn")}</div>}

@@ -1326,10 +1326,11 @@ export const useAgentStore = create<AgentState>((set, get) => {
   /// el traduisca amb «toErrorText».
   const runWithOOMRetry = async <T,>(
     sid: string,
-    invokeFn: (level: number) => Promise<T>
+    invokeFn: (level: number) => Promise<T>,
+    startLevel = 0,
   ): Promise<T> => {
     let lastErr: unknown = null;
-    for (let level = 0; level <= 3; level++) {
+    for (let level = startLevel; level <= 3; level++) {
       try {
         if (level > 0) {
           // Netegem el stream acumulat i afegim un pas explicatiu.
@@ -1638,6 +1639,13 @@ export const useAgentStore = create<AgentState>((set, get) => {
         // DEFINITIVA un cop acabat el text (netega blocs sense tancar).
         // Si l'intent falla per OOM/tall de context, NOORBIT reintenta
         // AUTOMÀTICAMENT: context REDUÏT → sense context → sense històrial.
+        const quickStart =
+          (sessOf(sid)?.provider ?? "").toLowerCase() === "" ||
+          (sessOf(sid)?.provider ?? "").toLowerCase() === "ollama"
+            ? finalPrompt.length > 1500
+              ? 1
+              : 0
+            : 0;
         const text = await runWithOOMRetry(sid, async (level) => {
           let m = finalPrompt;
           let h = history;
@@ -1662,7 +1670,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
             model: s0.model,
             history: h,
           });
-        });
+        }, quickStart);
         const thinking = await fetchThinking(sid);
         get().pushStep(sid, {
           label: "ia",
@@ -2468,6 +2476,19 @@ export const useAgentStore = create<AgentState>((set, get) => {
       const withTasks = (s: string | null): string | null => (taskCtx ? taskCtx + (s ?? "") : s);
       if (taskCtx) sys = taskCtx + sys;
 
+      // Millora de consum de memòria/tokens: si el proveïdor és local i el
+      // context (amb codi del projecte) és gran, COMMENÇA amb context REDUÏT
+      // per això no esperar al primer intent que falli per OOM.
+      const sendStart = (() => {
+        const sp = sessOf(sid);
+        const prov = (sp?.provider ?? "").toLowerCase();
+        const local = prov === "" || prov === "ollama";
+        // Context adjunt actiu (l'usuari va activar «inclou el codi») →
+        // per a models locals COMMENÇA amb context REDUÏT per ahorrar RAM.
+        const bigCtx = sess.includeContext ?? false;
+        return local && bigCtx ? 1 : 0;
+      })();
+
       // Reconstruïble: per cada nivell de reintent, munte el «prompt final»
       // amb MENYS context (o sense). S'usa dins «runWithOOMRetry».
       const rebuildForLevel = async (level: number): Promise<{ m: string; h: HistoryTurn[]; s: string | null }> => {
@@ -2571,7 +2592,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
               history: built.h,
               images: imgs.length > 0 ? imgs : undefined,
             });
-          });
+          }, sendStart);
           const thinking = await fetchThinking(sid);
           get().pushStep(sid, {
             label: "ia",
