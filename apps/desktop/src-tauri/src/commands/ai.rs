@@ -355,6 +355,49 @@ pub async fn ollama_delete_model(state: State<'_, AppState>, name: String) -> Re
     ai.delete_model(&name).await.map_err(|e| e.to_string())
 }
 
+/// Models que Ollama té carregats a la RAM ara mateix (per poder alliberar-los).
+#[command]
+pub async fn ollama_loaded_models(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::ai::LoadedModel>, String> {
+    let ai = state.ai_manager.clone();
+    ai.loaded_models().await.map_err(|e| e.to_string())
+}
+
+/// Allibera de la RAM un model concret (o tots els carregats si no se'n tria cap).
+#[command]
+pub async fn ollama_unload_models(
+    state: State<'_, AppState>,
+    model: Option<String>,
+) -> Result<usize, String> {
+    let ai = state.ai_manager.clone();
+    ai.unload_models(model.as_deref())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Quant de temps Ollama manté els models a la memòria (buit = per defecte).
+#[command]
+pub async fn ollama_get_keep_alive(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state.ai_manager.keep_alive().await.unwrap_or_default())
+}
+
+/// Canvia el temps que els models romanen a la RAM i ho desa a la configuració.
+#[command]
+pub async fn ollama_set_keep_alive(
+    state: State<'_, AppState>,
+    value: Option<String>,
+) -> Result<(), String> {
+    let clean = value
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    let mut cfg = crate::config::AppConfig::load().map_err(|e| e.to_string())?;
+    cfg.ai.keep_alive = clean.clone().unwrap_or_default();
+    cfg.save().map_err(|e| e.to_string())?;
+    state.ai_manager.set_keep_alive(clean).await;
+    Ok(())
+}
+
 #[command]
 pub async fn ollama_suggested_models() -> Result<Vec<serde_json::Value>, String> {
     Ok(AiManager::suggested_models())

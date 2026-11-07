@@ -50,6 +50,45 @@ pub struct ExpertManager {
     experts: Mutex<Vec<Expert>>,
 }
 
+/// Control d'una execució d'equip: evita dos equips alhora i permet aturar-lo
+/// des de la interfície (botó «Atura») encara que el model siga lent.
+#[derive(Default)]
+pub struct TeamControl {
+    running: std::sync::atomic::AtomicBool,
+    cancel: std::sync::atomic::AtomicBool,
+}
+
+impl TeamControl {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Reserva el torn. Retorna false si ja hi ha un equip treballant.
+    pub fn begin(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        if self.running.swap(true, Ordering::SeqCst) {
+            false
+        } else {
+            self.cancel.store(false, Ordering::SeqCst);
+            true
+        }
+    }
+
+    pub fn finish(&self) {
+        use std::sync::atomic::Ordering;
+        self.running.store(false, Ordering::SeqCst);
+        self.cancel.store(false, Ordering::SeqCst);
+    }
+
+    pub fn cancel(&self) {
+        self.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
 impl ExpertManager {
     pub fn new(data_dir: PathBuf) -> Self {
         let path = data_dir.join("experts.json");

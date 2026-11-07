@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { X, Download, Trash2, RefreshCw, Check, Search, Cloud, Play, HardDrive, Zap, Globe } from "lucide-react";
+import { X, Download, Trash2, RefreshCw, Check, Search, Cloud, Play, HardDrive, Zap, Globe, MemoryStick } from "lucide-react";
 import { useT } from "../../i18n";
 import { useUIStore } from "../../stores/uiStore";
 import { useAIStore, OLLAMA_CLOUD_MODELS, OLLAMA_CLOUD_URL } from "../../stores/aiStore";
@@ -50,12 +50,18 @@ export default function ModelManagerModal() {
     modelsDir,
     volumes,
     migrating,
+    loaded,
+    keepAlive,
     loadModelsDir,
     setModelsDir,
     migrateModels,
+    loadLoaded,
+    unloadModels,
+    setKeepAlive,
   } = useAIStore();
 
   const [custom, setCustom] = useState("");
+  const [ramMsg, setRamMsg] = useState("");
   const [cloudQuery, setCloudQuery] = useState("");
   // Cerca a INTERNET (Hugging Face) per a models que NO són a Ollama.
   const [internetQuery, setInternetQuery] = useState("");
@@ -86,6 +92,7 @@ export default function ModelManagerModal() {
       checkComfy();
       loadModels();
       loadModelsDir();
+      loadLoaded();
       loadProviders();
       // Carrega el catàleg de models recomanats (opcions instal·lables).
       refreshProviders();
@@ -387,6 +394,77 @@ export default function ModelManagerModal() {
                 })}
               </div>
             )}
+          </div>
+
+          {/* Memòria RAM: quins models té Ollama carregats ARA mateix i quanta
+              memòria ocupen. Es poden alliberar d'un clic, i es pot triar quant
+              de temps romanen carregats després de respondre (menys = menys
+              RAM en repòs, útil en equips de 8 GB). */}
+          <div className="field">
+            <label>
+              <MemoryStick size={13} style={{ verticalAlign: -2, marginRight: 5 }} />
+              {t("ai.ramTitle")}
+            </label>
+            <p className="lp-hint">{t("ai.ramHint")}</p>
+            {loaded.length === 0 ? (
+              <div className="empty-hint">{t("ai.ramNone")}</div>
+            ) : (
+              <div className="mm-list">
+                {loaded.map((m) => (
+                  <div key={m.name} className="mm-row">
+                    <span className="mm-name-static">{m.name}</span>
+                    <span className="mm-size">{fmtSize(m.size)}</span>
+                    <button
+                      className="btn sm"
+                      title={t("ai.ramUnloadOne")}
+                      onClick={() => void unloadModels(m.name)}
+                    >
+                      {t("ai.ramUnloadOne")}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {loaded.length > 0 && (
+              <div className="mm-ollama-actions" style={{ marginTop: 8 }}>
+                <span className="lp-hint">
+                  {fmtSize(loaded.reduce((a, m) => a + m.size, 0))} {t("ai.ramInUse")}
+                </span>
+                <button
+                  className="btn sm primary"
+                  onClick={async () => {
+                    const n = await unloadModels(null);
+                    setRamMsg(
+                      n > 0
+                        ? t("ai.ramUnloaded").replace("{n}", String(n))
+                        : t("ai.ramNone")
+                    );
+                  }}
+                >
+                  {t("ai.ramUnloadAll")}
+                </button>
+              </div>
+            )}
+            {ramMsg && (
+              <p className="lp-hint" style={{ marginTop: 6 }}>
+                {ramMsg}
+              </p>
+            )}
+            <div style={{ marginTop: 10 }}>
+              <label>{t("ai.keepAliveTitle")}</label>
+              <p className="lp-hint">{t("ai.keepAliveHint")}</p>
+              <select
+                className="ex-input"
+                value={keepAlive}
+                onChange={(e) => void setKeepAlive(e.target.value)}
+              >
+                <option value="">{t("ai.keepAliveDefault")}</option>
+                <option value="5m">5 min</option>
+                <option value="2m">2 min</option>
+                <option value="1m">1 min</option>
+                <option value="0">{t("ai.keepAliveZero")}</option>
+              </select>
+            </div>
           </div>
 
           {/* Catàleg recomanat: opcions instal·lables (NO es baixen sols).

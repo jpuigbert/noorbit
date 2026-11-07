@@ -2,20 +2,25 @@
 //! i per al treball múltiple: diversos experts executant subtasques en
 //! paral·lel sobre un mateix objectiu.
 
-use crate::ai::AiManager;
+use crate::ai::{AiManager, ChatOpts};
 use crate::experts::{Expert, ExpertInput, ExpertManager};
 use crate::AppState;
 use serde::Serialize;
 use std::sync::Arc;
 use tauri::{command, AppHandle, Emitter, State};
 
+/// Xat intern (aïllat de la conversa de l'usuari) on treballa l'equip.
+const TEAM_SESSION: &str = "__team__";
+
 /// Progrés del treball en equip (es mostra al fil de l'agent).
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Progress {
-    stage: String, // planing | running | done
+    stage: String, // planing | running | done | cancelled
     expert: Option<String>,
     detail: String,
+    /// Mil·lisegons des de l'inici de l'equip (per mostrar el temps).
+    elapsed_ms: u64,
 }
 
 #[derive(Clone, Serialize)]
@@ -35,7 +40,7 @@ pub struct TeamReport {
     pub answer: String,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PlanItem {
     expert_id: String,
@@ -110,14 +115,30 @@ pub async fn expert_run(
     .map_err(|e| e.to_string())
 }
 
-/// Treball múltiple en equip: planifica, executa les subtasques en paral·lel i
-/// consolida una resposta final.
+/// Atura el treball en equip en curs (botó «Atura» de la interfície).
+#[command]
+pub async fn experts_team_stop(state: State<'_, AppState>) -> Result<(), String> {
+    state.team.cancel();
+    // A més de la bandera pròpia, atura la generació del xat intern de l'equip.
+    state.ai_manager.request_stop(Some(TEAM_SESSION));
+    Ok(())
+}
+
+/// Treball múltiple en equip: planifica, executa les subtasques i consolida
+/// una resposta final.
+///
+/// Pensat per a equips amb poca RAM: si el proveïdor és local (`ollama`), les
+/// subtasques s'executen D'UNA EN UNA (no totes alhora); amb proveïdors
+/// remots se'n fan fins a 3 en paral·lel. Així s'evita carregar diversos
+/// models a la memòria al mateix temps i que l'equip es quede penjat.
 #[command]
 pub async fn experts_team_run(
     app: AppHandle,
     state: State<'_, AppState>,
     goal: String,
     expert_ids: Option<Vec<String>>,
+    provider: Option<String>,
+    session: Option<String>,
 ) -> Result<TeamReport, String> {
     let ai: Arc<AiManager> = state.ai_manager.clone();
     let mgr: Arc<ExpertManager> = state.experts.clone();
@@ -134,6 +155,39 @@ pub async fn experts_team_run(
         return Err("Cap especialista seleccionat.".into());
     }
 
+    // Només un equip alhora: dos equips competirien per la mateixa RAM i
+    // l'usuari no sabria quin està responent.
+    if !state.team.begin() {
+        return Err("Ja hi ha un equip treballant. Atura'l abans de llançar-ne un altre.".into());
+    }
+
+    // Proveïdor: el del xat que ha llançat l'equip o, si no n'hi ha, el global.
+    let provider = match provider.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()) {
+        Some(p) => p,
+        None => {
+            let sid = session.unwrap_or_else(|| crate::ai::DEFAULT_SESSION.to_string());
+            ai.session_labels(&sid).await.0
+        }
+    };
+    let local = provider.eq_ignore_ascii_case("ollama");
+
+    let out = run_team(&app, &ai, team, goal, provider, local, &state.team).await;
+    state.team.finish();
+    out
+}
+
+/// Cos del treball en equip (separat perquè el control sempre es tanca, tant
+/// si acaba bé com si falla).
+async fn run_team(
+    app: &AppHandle,
+    ai: &Arc<AiManager>,
+    team: Vec<Expert>,
+    goal: String,
+    provider: String,
+    local: bool,
+    ctl: &crate::experts::TeamControl,
+) -> Result<TeamReport, String> {
+    let started = std::time::Instant::now();
     let emit = |stage: &str, expert: Option<String>, detail: String| {
         let _ = app.emit(
             "experts://progress",
@@ -141,101 +195,181 @@ pub async fn experts_team_run(
                 stage: stage.into(),
                 expert,
                 detail,
+                elapsed_ms: started.elapsed().as_millis() as u64,
             },
         );
     };
 
-    // 1) Planificació: el model reparteix l'objectiu entre els especialistes.
-    emit("planing", None, "Repartint l'objectiu entre l'equip…".into());
-    let roster: String = team
-        .iter()
-        .map(|e| format!("- id={} · {} ({})", e.id, e.name, e.role))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let plan_prompt = format!(
-        "Especialistes disponibles:\n{}\n\nObjectiu de l'usuari: {}\n\nReparteix el treball en subtasques.",
-        roster, goal
-    );
-    let plan = match ai.chat_with(&plan_prompt, Some(PLANNER_SYSTEM), None).await {
-        Ok(text) => parse_plan(&text, &team),
-        Err(_) => None,
-    }
-    // Si la planificació falla, cada especialista rep l'objectiu sencer.
-    .unwrap_or_else(|| {
-        team.iter()
-            .map(|e| PlanItem {
-                expert_id: e.id.clone(),
-                task: goal.clone(),
-            })
-            .collect()
-    });
+    // 1) Planificació. Amb un sol especialista no cal: estalvia tokens i RAM.
+    let plan: Vec<PlanItem> = if team.len() == 1 {
+        vec![PlanItem {
+            expert_id: team[0].id.clone(),
+            task: goal.clone(),
+        }]
+    } else {
+        emit("planing", None, "Repartint l'objectiu entre l'equip…".into());
+        let roster: String = team
+            .iter()
+            .map(|e| format!("- id={} · {} ({})", e.id, e.name, e.role))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let plan_prompt = format!(
+            "Especialistes disponibles:\n{}\n\nObjectiu de l'usuari: {}\n\nReparteix el treball en subtasques.",
+            roster, goal
+        );
+        let opts = ChatOpts {
+            provider: Some(provider.clone()),
+            ..Default::default()
+        };
+        match crate::ai::in_session(
+            TEAM_SESSION,
+            ai.chat_opts(&plan_prompt, Some(PLANNER_SYSTEM), &opts),
+        )
+        .await
+        {
+            Ok(text) => parse_plan(&text, &team),
+            Err(_) => None,
+        }
+        // Si la planificació falla, cada especialista rep l'objectiu sencer.
+        .unwrap_or_else(|| {
+            team.iter()
+                .map(|e| PlanItem {
+                    expert_id: e.id.clone(),
+                    task: goal.clone(),
+                })
+                .collect()
+        })
+    };
 
-    // 2) Execució en paral·lel de totes les subtasques.
-    let futures = plan.into_iter().map(|item| {
-        let ai = ai.clone();
-        let expert = team.iter().find(|e| e.id == item.expert_id).cloned();
-        let emit_clone = app.clone();
-        async move {
-            let expert = match expert {
-                Some(e) => e,
-                None => {
+    // 2) Execució. Local: d'un en un (menys RAM). Remot: fins a 3 alhora.
+    let batch = if local { 1 } else { 3 };
+    let mut subtasks: Vec<SubtaskResult> = Vec::new();
+    let mut cancelled = false;
+
+    for chunk in plan.chunks(batch) {
+        if ctl.is_cancelled() {
+            cancelled = true;
+            break;
+        }
+        let futures = chunk.iter().map(|item| {
+            let ai = ai.clone();
+            let app2 = app.clone();
+            let provider = provider.clone();
+            let item = item.clone();
+            let expert = team.iter().find(|e| e.id == item.expert_id).cloned();
+            async move {
+                let Some(expert) = expert else {
                     return SubtaskResult {
                         expert_id: item.expert_id,
                         expert_name: "(desconegut)".into(),
                         task: item.task,
                         result: "Especialista no trobat".into(),
                         ok: false,
-                    }
-                }
-            };
-            let _ = emit_clone.emit(
-                "experts://progress",
-                Progress {
-                    stage: "running".into(),
-                    expert: Some(expert.name.clone()),
-                    detail: format!("Treballant: {}", truncate(&item.task)),
-                },
-            );
-            let outcome = ai
-                .chat_with(&item.task, Some(&expert.system_prompt), expert.model.as_deref())
+                    };
+                };
+                let _ = app2.emit(
+                    "experts://progress",
+                    Progress {
+                        stage: "running".into(),
+                        expert: Some(expert.name.clone()),
+                        detail: format!("Treballant: {}", truncate(&item.task)),
+                        elapsed_ms: started.elapsed().as_millis() as u64,
+                    },
+                );
+                let opts = ChatOpts {
+                    provider: Some(provider),
+                    model: expert.model.clone(),
+                    ..Default::default()
+                };
+                // Temps màxim per especialista: si un model es penja, l'equip
+                // continua amb els altres en lloc de quedar-se bloquejat.
+                let limit = if local {
+                    std::time::Duration::from_secs(600)
+                } else {
+                    std::time::Duration::from_secs(300)
+                };
+                let outcome = tokio::time::timeout(
+                    limit,
+                    crate::ai::in_session(
+                        TEAM_SESSION,
+                        ai.chat_opts(&item.task, Some(&expert.system_prompt), &opts),
+                    ),
+                )
                 .await;
-            let (result, ok) = match outcome {
-                Ok(text) => (text, true),
-                Err(e) => (e.to_string(), false),
-            };
-            let _ = emit_clone.emit(
-                "experts://progress",
-                Progress {
-                    stage: "running".into(),
-                    expert: Some(expert.name.clone()),
-                    detail: if ok { "Ha acabat".into() } else { "Ha fallat".into() },
-                },
-            );
-            SubtaskResult {
-                expert_id: expert.id,
-                expert_name: expert.name,
-                task: item.task,
-                result,
-                ok,
+                let (result, ok) = match outcome {
+                    Ok(Ok(text)) => (text, true),
+                    Ok(Err(e)) => (e.to_string(), false),
+                    Err(_) => (
+                        "Temps exhaurit sense resposta del model. Prova un model més lleuger o un proveïdor al núvol."
+                            .to_string(),
+                        false,
+                    ),
+                };
+                let _ = app2.emit(
+                    "experts://progress",
+                    Progress {
+                        stage: "running".into(),
+                        expert: Some(expert.name.clone()),
+                        detail: if ok {
+                            "Ha acabat".into()
+                        } else {
+                            "Ha fallat".into()
+                        },
+                        elapsed_ms: started.elapsed().as_millis() as u64,
+                    },
+                );
+                SubtaskResult {
+                    expert_id: expert.id,
+                    expert_name: expert.name,
+                    task: item.task,
+                    result,
+                    ok,
+                }
             }
-        }
-    });
-    let subtasks = futures::future::join_all(futures).await;
+        });
+        let mut got = futures::future::join_all(futures).await;
+        subtasks.append(&mut got);
+    }
 
-    // 3) Consolidar la resposta final.
-    emit("running", None, "Integrant els resultats de l'equip…".into());
-    let digest: String = subtasks
-        .iter()
-        .map(|s| format!("## {} — {}\n{}", s.expert_name, truncate(&s.task), s.result))
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    let merge_prompt = format!(
-        "Objectiu original: {}\n\nResultats de l'equip:\n\n{}",
-        goal, digest
-    );
-    let answer = match ai.chat_with(&merge_prompt, Some(MERGER_SYSTEM), None).await {
-        Ok(text) => text,
-        Err(_) => digest, // si no pot consolidar, mostra els resultats en brut
+    if cancelled || ctl.is_cancelled() {
+        emit("cancelled", None, "Aturat per l'usuari.".into());
+        return Ok(TeamReport {
+            subtasks,
+            answer: "Treball en equip aturat per l'usuari. Els resultats que ja havien acabat es mostren a dalt.".into(),
+        });
+    }
+
+    // 3) Consolidar només els resultats bons (estalvia tokens i evita que els
+    // errors es colen a la resposta final).
+    let good: Vec<&SubtaskResult> = subtasks.iter().filter(|s| s.ok).collect();
+    let answer = if good.is_empty() {
+        "Cap especialista ha pogut completar la seua part. Revisa el proveïdor i el model actiu (o tria un model més lleuger) i torna-ho a provar.".to_string()
+    } else if subtasks.len() == 1 {
+        good[0].result.clone()
+    } else {
+        emit("running", None, "Integrant els resultats de l'equip…".into());
+        let digest: String = good
+            .iter()
+            .map(|s| format!("## {} — {}\n{}", s.expert_name, truncate(&s.task), s.result))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let merge_prompt = format!(
+            "Objectiu original: {}\n\nResultats de l'equip:\n\n{}",
+            goal, digest
+        );
+        let opts = ChatOpts {
+            provider: Some(provider),
+            ..Default::default()
+        };
+        match crate::ai::in_session(
+            TEAM_SESSION,
+            ai.chat_opts(&merge_prompt, Some(MERGER_SYSTEM), &opts),
+        )
+        .await
+        {
+            Ok(text) => text,
+            Err(_) => digest, // si no pot consolidar, mostra els resultats en brut
+        }
     };
     emit("done", None, "Treball en equip acabat".into());
 

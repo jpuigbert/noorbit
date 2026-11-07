@@ -26,9 +26,10 @@ export interface SubtaskResult {
 }
 
 export interface ProgressEvent {
-  stage: "planing" | "running" | "done";
+  stage: "planing" | "running" | "done" | "cancelled";
   expert: string | null;
   detail: string;
+  elapsedMs?: number;
 }
 
 interface ExpertState {
@@ -37,6 +38,8 @@ interface ExpertState {
   teamRunning: boolean;
   teamProgress: ProgressEvent[];
   teamResult: { subtasks: SubtaskResult[]; answer: string } | null;
+  /// Instant en què va començar l'equip (per mostrar el temps transcorregut).
+  teamStartedAt: number | null;
   soloResult: string | null;
   error: string | null;
   eventsReady: boolean;
@@ -54,7 +57,12 @@ interface ExpertState {
     prompt: string,
     opts?: { session?: string; history?: { role: string; content: string }[] }
   ) => Promise<string | null>;
-  runTeam: (goal: string, expertIds: string[]) => Promise<void>;
+  runTeam: (
+    goal: string,
+    expertIds: string[],
+    opts?: { provider?: string | null; session?: string | null }
+  ) => Promise<void>;
+  stopTeam: () => Promise<void>;
   clearTeam: () => void;
 }
 
@@ -64,6 +72,7 @@ export const useExpertStore = create<ExpertState>((set, get) => ({
   teamRunning: false,
   teamProgress: [],
   teamResult: null,
+  teamStartedAt: null,
   soloResult: null,
   error: null,
   eventsReady: false,
@@ -147,19 +156,26 @@ export const useExpertStore = create<ExpertState>((set, get) => ({
     }
   },
 
-  /// Treball múltiple: l'equip reparteix l'objectiu i treballa en paral·lel.
-  runTeam: async (goal, expertIds) => {
+  /// Treball múltiple: l'equip reparteix l'objectiu i treballa (en sèrie si
+  /// el model és local, per estalviar RAM; en paral·lel si és al núvol).
+  runTeam: async (goal, expertIds, opts) => {
     if (!goal.trim()) return;
     set({
       teamRunning: true,
       teamProgress: [],
       teamResult: null,
+      teamStartedAt: Date.now(),
       error: null,
     });
     try {
       const report = await invoke<{ subtasks: SubtaskResult[]; answer: string }>(
         "experts_team_run",
-        { goal, expertIds }
+        {
+          goal,
+          expertIds,
+          provider: opts?.provider ?? null,
+          session: opts?.session ?? null,
+        }
       );
       set({ teamResult: report });
     } catch (e) {
@@ -169,5 +185,16 @@ export const useExpertStore = create<ExpertState>((set, get) => ({
     }
   },
 
-  clearTeam: () => set({ teamProgress: [], teamResult: null, soloResult: null }),
+  /// Atura l'equip en curs: el backend cancel·la la generació i retorna els
+  /// resultats que ja havien acabat.
+  stopTeam: async () => {
+    try {
+      await invoke("experts_team_stop");
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  clearTeam: () =>
+    set({ teamProgress: [], teamResult: null, teamStartedAt: null, soloResult: null }),
 }));

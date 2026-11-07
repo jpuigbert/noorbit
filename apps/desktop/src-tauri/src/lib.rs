@@ -34,6 +34,8 @@ pub struct AppState {
     pub agent_orchestrator: Arc<agent::AgentOrchestrator>,
     /// Feines autònomes persistents (especialistes forjats en segon pla).
     pub autonomous: Arc<autonomous::AutonomousStore>,
+    /// Control del treball en equip (evita dos equips alhora i permet aturar-lo).
+    pub team: Arc<experts::TeamControl>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -84,6 +86,7 @@ pub fn run() {
         experts,
         agent_orchestrator: orchestrator,
         autonomous,
+        team: Arc::new(experts::TeamControl::new()),
     };
 
     tauri::Builder::default()
@@ -153,6 +156,10 @@ pub fn run() {
             commands::ai::ollama_list_models,
             commands::ai::ollama_pull_model,
             commands::ai::ollama_delete_model,
+            commands::ai::ollama_loaded_models,
+            commands::ai::ollama_unload_models,
+            commands::ai::ollama_get_keep_alive,
+            commands::ai::ollama_set_keep_alive,
             commands::ai::ollama_suggested_models,
             commands::ai::ollama_search_cloud,
             commands::ai::ollama_search_huggingface,
@@ -269,6 +276,7 @@ pub fn run() {
             commands::experts::expert_delete,
             commands::experts::expert_run,
             commands::experts::experts_team_run,
+            commands::experts::experts_team_stop,
             // Blender
             blender::commands::blender_ping,
             blender::commands::blender_info,

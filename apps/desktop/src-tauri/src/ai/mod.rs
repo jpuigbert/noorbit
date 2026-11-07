@@ -416,6 +416,18 @@ pub struct OllamaModel {
     pub modified_at: String,
 }
 
+/// Un model que Ollama té carregat ARA MATEIX a la memòria (RAM/VRAM).
+/// Es llegeix amb «/api/ps» i es pot alliberar amb `unload_models`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadedModel {
+    pub name: String,
+    /// Pes del model a la memòria (bytes).
+    pub size: u64,
+    /// Part que ocupa VRAM (0 en un Mac sense GPU dedicada).
+    pub size_vram: u64,
+}
+
 /// Model disponible al núvol d'Ollama (ollama.com), per navegar-lo i baixar-lo.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CloudModel {
@@ -481,6 +493,10 @@ struct ChatRequest {
     /// Ollama retorna un error 400 i el torn moriria sense resposta.
     #[serde(skip_serializing_if = "Option::is_none")]
     think: Option<bool>,
+    /// Quant de temps Ollama manté el model a la memòria després de respondre.
+    /// «0» l'allibera de seguida (útil en equips amb poca RAM).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    keep_alive: Option<String>,
     /// Opcions d'Ollama (p. ex. «num_ctx»). Absent = valors per defecte.
     #[serde(skip_serializing_if = "Option::is_none")]
     options: Option<serde_json::Value>,
@@ -502,6 +518,10 @@ pub struct AiManager {
     active_provider: Arc<RwLock<String>>,
     /// Model d'Ollama triat per l'usuari (si és None, s'usa default_model).
     selected_model: Arc<RwLock<Option<String>>>,
+    /// Temps que Ollama manté el model carregat a la RAM («5m», «1m», «0»…).
+    /// Buit = no s'envia i s'usa el valor per defecte d'Ollama. Un valor
+    /// curt allibera RAM quan l'usuari no està treballant.
+    keep_alive: Arc<RwLock<Option<String>>>,
     /// Proveïdors d'IA en línia alternatius (composables mitjançant active_provider).
     remote: Option<Arc<Mutex<ApiManager>>>,
     /// Un `SessionCtl` per xat obert: cadascú amb la seua bandera d'aturada,
@@ -1515,6 +1535,9 @@ impl AiManager {
             default_model: config.ai.default_model.clone(),
             active_provider: Arc::new(RwLock::new("ollama".into())),
             selected_model: Arc::new(RwLock::new(None)),
+            keep_alive: Arc::new(RwLock::new(
+                Some(config.ai.keep_alive.trim().to_string()).filter(|v| !v.is_empty()),
+            )),
             remote: None,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             background: Arc::new(AtomicBool::new(false)),
@@ -1645,6 +1668,79 @@ impl AiManager {
                         .any(|n| Self::ps_key(n) == want)
                 }),
         )
+    }
+
+    /// Models que Ollama té ARA carregats a la memòria. Permet ensenyar a
+    /// l'usuari quanta RAM ocupen i alliberar-la d'un clic.
+    pub async fn loaded_models(&self) -> Result<Vec<LoadedModel>> {
+        let value = self
+            .http
+            .get(self.url("/api/ps"))
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await
+            .map_err(|e| anyhow!("Ollama no respon: {}", e))?
+            .json::<serde_json::Value>()
+            .await?;
+        let out = value
+            .get("models")
+            .and_then(|m| m.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|m| {
+                        let name = ["model", "name"]
+                            .iter()
+                            .filter_map(|k| m.get(*k).and_then(|s| s.as_str()))
+                            .next()?
+                            .to_string();
+                        Some(LoadedModel {
+                            name,
+                            size: m.get("size").and_then(|v| v.as_u64()).unwrap_or(0),
+                            size_vram: m.get("size_vram").and_then(|v| v.as_u64()).unwrap_or(0),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        Ok(out)
+    }
+
+    /// Allibera de la memòria un model (o TOTS els carregats) amb
+    /// `keep_alive: 0`. Retorna quants models s'han descarregat.
+    pub async fn unload_models(&self, model: Option<&str>) -> Result<usize> {
+        let names: Vec<String> = match model.map(str::trim).filter(|m| !m.is_empty()) {
+            Some(m) => vec![m.to_string()],
+            None => self
+                .loaded_models()
+                .await?
+                .into_iter()
+                .map(|m| m.name)
+                .collect(),
+        };
+        for name in &names {
+            // /api/generate amb keep_alive 0 i sense prompt = descarrega.
+            let _ = self
+                .http
+                .post(self.url("/api/generate"))
+                .timeout(std::time::Duration::from_secs(20))
+                .json(&serde_json::json!({ "model": name, "keep_alive": 0 }))
+                .send()
+                .await;
+        }
+        Ok(names.len())
+    }
+
+    /// Defineix quant de temps Ollama manté els models a la RAM.
+    /// Buit = valor per defecte d'Ollama.
+    pub async fn set_keep_alive(&self, value: Option<String>) {
+        let v = value
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        *self.keep_alive.write().await = v;
+    }
+
+    pub async fn keep_alive(&self) -> Option<String> {
+        self.keep_alive.read().await.clone()
     }
 
     /// descarrega un model amb streaming de progrés (event "ai://pull").
@@ -2179,6 +2275,7 @@ impl AiManager {
             stream: true,
             system: system.map(|s| s.to_string()),
             think,
+            keep_alive: self.keep_alive.read().await.clone(),
             options,
         };
         // Arrencada del procés: el visor explica QUÈ està fent NoOrbit en lloc
@@ -2547,6 +2644,7 @@ impl AiManager {
             stream: false,
             system: system.map(|s| s.to_string()),
             think,
+            keep_alive: self.keep_alive.read().await.clone(),
             options: Self::ctx_options(prompt_chars, system.map_or(0, |s| s.len())),
         };
         let chat_url = self.url("/api/chat");
@@ -2630,6 +2728,16 @@ impl AiManager {
         let mut n = 2048usize;
         while n < 16384 && n < approx_tokens {
             n *= 2;
+        }
+        // En equips amb poca RAM, limitem la finestra de context: el KV cache
+        // ocupa memòria proporcional a «num_ctx» i, en un Mac de 8 GB, un
+        // context de 16k pot provocar swap i frenar-ho tot.
+        if let Some(ram) = Self::total_memory_bytes() {
+            if ram <= 6_500_000_000 {
+                n = n.min(4096);
+            } else if ram <= 10_500_000_000 {
+                n = n.min(8192);
+            }
         }
         Some(serde_json::json!({ "num_ctx": n, "num_predict": -1 }))
     }

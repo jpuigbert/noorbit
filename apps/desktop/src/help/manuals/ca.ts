@@ -138,7 +138,7 @@ export const manual: Manual = {
         "Pots editar o eliminar qualsevol especialista amb les icones de llapis i paperera.",
         "Per treballar sempre amb un agent: a la pestanya Agent, al selector «Agent multimodal (per defecte)» tria un especialista; d'ara endavant Executa i Resposta ràpida els resoldrà ell. La tria es recorda.",
         "Treball múltiple en equip: a la pestanya Especialistes escriu un objectiu, marca quins hi participaran (o cap, per usar-los tots) i prem Treballa en equip.",
-        "L'equip repartirà l'objectiu en subtasques, les executarà en paral·lel i després consolidarà una resposta final única.",
+        "L'equip repartirà l'objectiu en subtasques i consolidarà una resposta final única. Amb models locals les subtasques es fan d'una en una per no esgotar la RAM; amb models del núvol, fins a tres alhora. Pots aturar-lo quan vulguis amb «Atura l'equip»: es mostren els resultats que ja havien acabat.",
       ],
     },
     {

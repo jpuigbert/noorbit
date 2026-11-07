@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2, Plus, Trash2, Pencil, Users, X } from "lucide-react";
+import { Loader2, Plus, Trash2, Pencil, Users, X, Square } from "lucide-react";
 import { useT } from "../../i18n";
 import { useExpertStore, type ExpertInput } from "../../stores/expertStore";
 import { useAIStore } from "../../stores/aiStore";
@@ -172,6 +172,11 @@ export default function ExpertsPanel() {
         >
           {s.teamRunning && <Loader2 size={12} className="spin" />} {t("experts.teamRun")}
         </button>
+        {s.teamRunning && (
+          <button className="btn sm" onClick={() => void s.stopTeam()}>
+            <Square size={11} /> {t("experts.teamStop")}
+          </button>
+        )}
         {picked.length > 0 && (
           <div className="ex-team-picked">
             {t("experts.workingWith")}{" "}
@@ -184,6 +189,22 @@ export default function ExpertsPanel() {
 
         {s.teamProgress.length > 0 && (
           <div className="ex-progress">
+            <div className="ex-progress-row" style={{ opacity: 0.7 }}>
+              {s.teamRunning
+                ? t("experts.teamElapsed").replace(
+                    "{s}",
+                    String(
+                      Math.max(
+                        0,
+                        Math.round(
+                          ((s.teamProgress[s.teamProgress.length - 1]?.elapsedMs ?? 0) ||
+                            (s.teamStartedAt ? Date.now() - s.teamStartedAt : 0)) / 1000
+                        )
+                      )
+                    )
+                  )
+                : t("experts.teamFinished")}
+            </div>
             {s.teamProgress.map((p, i) => (
               <div key={i} className="ex-progress-row">
                 {p.expert ? `${p.expert}: ${p.detail}` : p.detail}

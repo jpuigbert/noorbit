@@ -51,12 +51,23 @@ export const OLLAMA_CLOUD_MODELS: CloudModel[] = [
   { name: "qwen3-coder:30b", description: "Especialista en codi." },
 ];
 
+/// Un model que Ollama té carregat a la memòria (RAM/VRAM) ara mateix.
+export interface LoadedModel {
+  name: string;
+  size: number;
+  sizeVram: number;
+}
+
 interface AIState {
   ollamaRunning: boolean;
   ollamaInstalled: boolean;
   comfyRunning: boolean;
   comfyInstalled: boolean;
   models: OllamaModel[];
+  /// Models carregats ARA a la RAM (per poder-los alliberar).
+  loaded: LoadedModel[];
+  /// Quant de temps Ollama manté els models carregats (buit = per defecte).
+  keepAlive: string;
   suggested: SuggestedModel[];
   cloud: CloudModel[];
   cloudLoading: boolean;
@@ -79,6 +90,12 @@ interface AIState {
   checkInstalled: () => Promise<void>;
   checkComfy: () => Promise<void>;
   loadModels: () => Promise<void>;
+  /// Llegeix els models carregats a la RAM i el temps de permanència configurat.
+  loadLoaded: () => Promise<void>;
+  /// Allibera de la RAM un model concret (o tots els carregats).
+  unloadModels: (model?: string | null) => Promise<number>;
+  /// Canvia quant de temps Ollama manté els models a la memòria.
+  setKeepAlive: (value: string) => Promise<void>;
   refreshProviders: () => Promise<void>;
   searchCloud: (query: string) => Promise<void>;
   searchInternet: (query: string) => Promise<void>;
@@ -119,6 +136,8 @@ export const useAIStore = create<AIState>((set, get) => ({
   comfyRunning: false,
   comfyInstalled: false,
   models: [],
+  loaded: [],
+  keepAlive: "",
   suggested: [],
   cloud: CLOUD_FALLBACK,
   cloudLoading: false,
@@ -204,6 +223,40 @@ export const useAIStore = create<AIState>((set, get) => ({
       }
     } catch {
       set({ models: [] });
+    }
+  },
+
+  /// Llegeix quins models té Ollama carregats a la RAM i el temps de
+  /// permanència configurat. Amb això l'usuari veu quanta memòria ocupa i la
+  /// pot alliberar d'un clic.
+  loadLoaded: async () => {
+    try {
+      const [loaded, keepAlive] = await Promise.all([
+        invoke<LoadedModel[]>("ollama_loaded_models"),
+        invoke<string>("ollama_get_keep_alive"),
+      ]);
+      set({ loaded, keepAlive: keepAlive ?? "" });
+    } catch {
+      set({ loaded: [] });
+    }
+  },
+
+  unloadModels: async (model) => {
+    try {
+      const n = await invoke<number>("ollama_unload_models", { model: model ?? null });
+      await get().loadLoaded();
+      return n;
+    } catch {
+      return 0;
+    }
+  },
+
+  setKeepAlive: async (value) => {
+    set({ keepAlive: value });
+    try {
+      await invoke("ollama_set_keep_alive", { value: value || null });
+    } catch {
+      /* sense persistència */
     }
   },
 
