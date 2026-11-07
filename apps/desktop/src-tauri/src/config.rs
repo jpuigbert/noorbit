@@ -205,6 +205,32 @@ impl AppConfig {
         }
     }
 
+    /// Carrega la configuració sense poder fer caure l'aplicació. Si el fitxer
+    /// és inaccessible o està corrupte (p. ex. un USB desendollat a mitges),
+    /// el desa com a `config.toml.trencat-<marca>` i arrenca amb els valors per
+    /// defecte. Així NoOrbit SEMPRE obri, encara que les dades vinguen d'un
+    /// disc extern en mal estat.
+    pub fn load_or_default() -> Self {
+        match Self::load() {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                eprintln!(
+                    "NoOrbit: no s'ha pogut llegir la configuració ({e}); s'usa la per defecte."
+                );
+                if let Ok(path) = Self::config_path() {
+                    if path.exists() {
+                        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+                        let backup = path.with_extension(format!("toml.trencat-{stamp}"));
+                        let _ = std::fs::rename(&path, &backup);
+                    }
+                }
+                let cfg = Self::default();
+                let _ = cfg.save();
+                cfg
+            }
+        }
+    }
+
     pub fn save(&self) -> Result<()> {
         let path = Self::config_path()?;
         std::fs::write(path, toml::to_string_pretty(self)?)?;

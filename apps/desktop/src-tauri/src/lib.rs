@@ -40,7 +40,34 @@ pub struct AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let config = config::AppConfig::load().expect("Configuració NoOrbit");
+    // Registra els panics en un fitxer dins de les dades de NoOrbit. Si l'app
+    // mor a l'arrencada (p. ex. executada des d'un USB), queda una pista en
+    // lloc d'un tancament sense cap informació.
+    let crash_dir = config::AppConfig::data_dir();
+    std::panic::set_hook(Box::new(move |info| {
+        eprintln!("NoOrbit: error fatal: {info}");
+        if let Some(dir) = &crash_dir {
+            let _ = std::fs::create_dir_all(dir);
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(dir.join("crash.log"))
+            {
+                use std::io::Write;
+                let _ = writeln!(
+                    f,
+                    "[{}] {}",
+                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                    info
+                );
+                if let Some(loc) = info.location() {
+                    let _ = writeln!(f, "  a {}:{}:{}", loc.file(), loc.line(), loc.column());
+                }
+            }
+        }
+    }));
+
+    let config = config::AppConfig::load_or_default();
     let skills_manager = skills::SkillsManager::new(&config);
 
     // Carpeta de dades: respecta el mode portàtil (USB) perquè configuració,
