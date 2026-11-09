@@ -41,6 +41,32 @@ Tota la documentació ampliada és a la **wiki**: <https://github.com/jpuigbert/
 
 ---
 
+## Novetats recents (0.62 → 0.68)
+
+- **Servidor d'IA remot** (Proveïdors › «Servidor d'IA remot»): la GPU treballa fora del Mac. NoOrbit puja dos fitxers al teu servidor per **SFTP/FTPS/FTP** (amb `curl`, sense dependències noves): l'script d'instal·lació `noorbit-ai-server.sh` i una **API OpenAI-compatible en Python/FastAPI** que va davant del motor **DeepInfer** (DeepSeek, SM100/Ascend) o **vLLM**. Un cop executat l'script via SSH, el botó «Comprova» diagnostica la connexió des del Mac i sempre diu EL MOTIU exacte (servidor aturat, clau dolenta, URL 404, model encara carregant…), i «Connecta» afegeix el servidor com a proveïdor normal: les IAs descarregades al servidor treballen allà i **només les respostes i els canvis tornen al local per HTTP** (zero RAM d'inferència al Mac).
+- **DeepInfer com a opció preparada** (github.com/deepseek-ai/DeepInfer, Apache 2.0): proveïdor «DeepInfer (servidor GPU)» + «DeepSeek API (núvol)» creats per defecte, detecció automàtica del procés com a IA externa i skill builtin amb tota la guia (Linux + CUDA 13 o CANN 9.2, Python 3.12, `./build.sh`, sortides estructurades).
+- **Diagnòstic pas a pas de serveis d'IA** (`ai_endpoint_check`): cinc fases (connexió → autenticació → URL → models → llest) i els codis d'error traduits a accions concretes (accés denegat, temps esgotat, connexió refusada…). Al Mac/Windows avisa que la versió oficial de DeepInfer corre a Linux.
+- **Treball en equip més robust**: especialistes en **sèrie** amb models locals (fins a 3 en paral·lel amb remots), botó «Atura l'equip», cronòmetre en temps real i xat intern aïllat; els resultats fallits no es consoliden mai com a resposta final.
+- **Gestió de RAM dels models**: secció «Memòria RAM dels models» al gestor — allibera models carregats amb un clic, `keep_alive` configurable (5 min per defecte) i `num_ctx` limitat automàticament per la RAM disponible (p. ex. 8 GB → context 4096).
+- **Arrencada robusta**: la configuració corrupta (pendrive, apagada sobtada) **no atura l'app**: es renomena a `config.toml.trencat-<hora>` i es continua amb valors de fàbrica; tots els panics queden registrats al **`crash.log`** de la carpeta de dades (`~/Library/Application Support/no-orbit/…`).
+
+---
+
+## Seguretat i claus API (important)
+
+**Aquest repositori NO conté cap clau API, token ni credencial personal**, i així es manté:
+
+- Els tokens dels proveïdors que enganxes a l'app es desen a la **carpeta de dades del sistema** (`~/Library/Application Support/no-orbit/…`, o `NoOrbitData/` en mode portàtil/USB) — **mai dins el codi del projecte**, i aquesta carpeta no forma part del repo mai.
+- No hi ha fitxers `.env` reals (gitignored) ni claus escrites al codi font. NoOrbit no apuja mai res del disc de l'usuari a cap servidor sense la teva acció explícita.
+- Si algú clona aquest repo en una altra màquina (o un altre Mac), l'app **funciona igual sense cap clau**: models locals amb Ollama i tota la resta. Les claus API es queden només a la màquina on es van guardar i no se sincronitzen mai amb el repo ni amb cap servei remot.
+- Auditoria pròpia ràpida:
+  ```bash
+  git grep -lI -E "sk-[a-zA-Z0-9]{20,}|gho_[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{20,}|AKIA[A-Z0-9]{16}"
+  ```
+  (hauria de no tornar res; si n'apareix, és un accident — obre un *issue*, si us plau).
+
+---
+
 ## Novetats de la 0.6.0
 
 - **Navegador intern controlat per totes les IAs, sense botons**: qualsevol IA del xat (local, remota o experta) pot obrir pàgines, llegir-ne el contingut i consultar IAs web (DeepSeek, ChatGPT, Claude, Gemini, Perplexity, Grok…) escrivint directrius de text `NB|OBRIR|`, `NB|LLEGIR|`, `NB|PREGUNTA_IA|` que NoOrbit executa. Abans de preguntar a una IA web es demana **permís a l'usuari** i la finestra sempre és visible (el login el fa sempre la persona).
