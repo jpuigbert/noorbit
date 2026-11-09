@@ -230,6 +230,50 @@ impl ApiManager {
                 seeded = true;
             }
         }
+        // DEEPSEEK / DEEPINFER: dos llocs fixos per al motor d'inferència
+        // alliberat per DeepSeek (github.com/deepseek-ai/DeepInfer, Apache 2.0).
+        // · «deepseek»    — API oficial al núvol (OpenAI-compatible, amb token).
+        // · «deepinfer»   — el motor DEEPINFER executat en una màquina Linux
+        //   amb GPU NVIDIA SM100 o NPU Ascend 950 (la versió oficial només és
+        //   inferència offline: es exposa per HTTP quan es fa servir un servei
+        //   vLLM/SGLang davant; per defecte porta al port 8000 de vLLM).
+        //   Desactiu per defecte: només s'activa quan l'usuari té el servidor.
+        const GOLD: (&str, &str, &str, &str) = (
+            "deepseek",
+            "DeepSeek API (núvol)",
+            "https://api.deepseek.com/v1",
+            "deepseek-chat",
+        );
+        if !providers.iter().any(|p| p.id == GOLD.0) {
+            providers.push(AiProvider {
+                id: GOLD.0.into(),
+                name: GOLD.1.into(),
+                base_url: GOLD.2.into(),
+                model: GOLD.3.into(),
+                kind: "openai".into(),
+                auth: AuthScheme::Bearer,
+                header_name: String::new(),
+                token: String::new(),
+                enabled: true,
+            });
+            seeded = true;
+        }
+        if !providers.iter().any(|p| p.id == "deepinfer") {
+            providers.push(AiProvider {
+                id: "deepinfer".into(),
+                name: "DeepInfer (servidor GPU)".into(),
+                base_url: "http://127.0.0.1:8000/v1".into(),
+                model: "deepseek-ai/DeepSeek-V4.1-Flash-1017".into(),
+                kind: "openai".into(),
+                auth: AuthScheme::Bearer,
+                header_name: String::new(),
+                token: String::new(),
+                // Desactiu: no té sentit enviar peticions si l'usuari encara
+                // no té DeepInfer executant-se en una GPU compatible.
+                enabled: false,
+            });
+            seeded = true;
+        }
         if !has_venice {
             providers.push(AiProvider {
                 id: "venice".into(),

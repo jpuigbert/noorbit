@@ -32,6 +32,8 @@ struct Candidate {
     name: &'static str,
     process_keys: &'static [&'static str],
     binaries: &'static [&'static str],
+    /// Port local que escolta la seva API. 0 = no exposa cap (només es
+    /// detecta pel procés o el binari).
     port: u16,
     api: &'static str,
 }
@@ -73,6 +75,18 @@ const CANDIDATES: &[Candidate] = &[
         process_keys: &["vllm"],
         binaries: &["vllm"],
         port: 8000,
+        api: "openai",
+    },
+    // DeepInfer (github.com/deepseek-ai/DeepInfer): el motor d'inferència de
+    // producció de DeepSeek, alliberat sota Apache 2.0. Només ofereix
+    // inferència OFFLINE (Linux + GPU SM100 o Ascend 950): no exposa cap port
+    // propi, així que es detecta pel procés/binari (port 0). Si se'n fa un
+    // servei HTTP (vLLM…), el detectarà l'entrada «vllm» del port 8000.
+    Candidate {
+        name: "deepinfer",
+        process_keys: &["deepinfer", "offline_inference.py"],
+        binaries: &["deepinfer"],
+        port: 0,
         api: "openai",
     },
     // DeepSeek Harness (dsh): harness d'agents open-source de DeepSeek
@@ -138,7 +152,8 @@ pub async fn discover_all(http: &reqwest::Client) -> Vec<ExternalIa> {
             .iter()
             .any(|k| table.contains(&k.to_lowercase()));
         // El port escolta i l'API respon (processos i rutes dels binaris).
-        let endpoint_alive = port_open(c.port) && probe_api(http, &base_url, c.api).await;
+        // Un candidat sense port (deepinfer) no fa prova d'endpoint.
+        let endpoint_alive = c.port != 0 && port_open(c.port) && probe_api(http, &base_url, c.api).await;
         // Per a dsh també compta la instal·lació AUTOGESTIONADA dins de les
         // dades de NoOrbit (sempre fora del PATH de la app gràfica).
         let installed = c.binaries.iter().any(|b| which::which(b).is_ok())

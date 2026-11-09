@@ -62,6 +62,21 @@ const PRESETS: { key: string; label: string; data: Partial<ProviderInput> }[] = 
     label: "Perplexity",
     data: { name: "Perplexity", baseUrl: "https://api.perplexity.ai", model: "sonar", kind: "openai", auth: "bearer" },
   },
+  {
+    // DeepInfer (github.com/deepseek-ai/DeepInfer): motor d'inferència de
+    // DeepSeek per a servidors Linux amb GPU SM100 / Ascend 950. No demana
+    // token: l'usuari només ha de posar la URL del seu servei (per defecte,
+    // el port 8000 de vLLM a la mateixa màquina).
+    key: "deepinfer",
+    label: "DeepInfer (servidor GPU)",
+    data: {
+      name: "DeepInfer (servidor GPU)",
+      baseUrl: "http://127.0.0.1:8000/v1",
+      model: "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      kind: "openai",
+      auth: "bearer",
+    },
+  },
 ];
 
 export default function ProviderManager() {
