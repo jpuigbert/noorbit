@@ -37,6 +37,9 @@ interface ProviderState {
   loading: boolean;
   testingId: string | null;
   lastTest: Record<string, { ok: boolean; msg: string }>;
+  /// Darrer diagnòstic del formulari (botó «Comprova»).
+  checking: boolean;
+  lastCheck: EndpointCheck | null;
 
   load: () => Promise<void>;
   add: (p: ProviderInput) => Promise<void>;
@@ -44,6 +47,10 @@ interface ProviderState {
   remove: (id: string) => Promise<void>;
   test: (id: string) => Promise<void>;
   select: (id: string) => Promise<void>;
+  /** Diagnòstic prèviament a desar: verifica subre servidor, clau, URL i model. */
+  checkEndpoint: (
+    input: Pick<ProviderInput, "baseUrl" | "model" | "token" | "kind">
+  ) => Promise<EndpointCheck | null>;
 }
 
 /// Diu si un proveïdor és el NÚVOL d'Ollama (models gratuïts a ollama.com).
@@ -55,12 +62,25 @@ export function isOllamaCloudProvider(p?: ProviderPublic | null): boolean {
   return p.id === "ollama-cloud" || base(p.base_url) === base(OLLAMA_CLOUD_URL);
 }
 
+/// Diagnòstic pas a pas d'un servei d'IA (comanda `ai_endpoint_check`):
+/// ok=false sempre ve amb EL MOTIU — servidor aturat, clau dolenta, URL
+/// errònia o model inexistent — i la llista de models que oferece el servei.
+export interface EndpointCheck {
+  ok: boolean;
+  stage: "connexio" | "auth" | "url" | "model" | "llest";
+  title: string;
+  detail: string;
+  models: string[];
+}
+
 export const useProviderStore = create<ProviderState>((set, get) => ({
   providers: [],
   active: "ollama",
   loading: false,
   testingId: null,
   lastTest: {},
+  checking: false,
+  lastCheck: null,
 
   load: async () => {
     set({ loading: true });
@@ -105,5 +125,24 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   select: async (id) => {
     await invoke("ai_select_provider", { id });
     set({ active: id });
+  },
+
+  /// Diagnòstic de la connexió ABANS de desar el proveïdor: prova el
+  /// llistat de models del servidor i classifica l'error amb motiu clar.
+  checkEndpoint: async ({ baseUrl, model, token, kind }) => {
+    set({ checking: true, lastCheck: null });
+    try {
+      const check = await invoke<EndpointCheck>("ai_endpoint_check", {
+        baseUrl,
+        model,
+        token: token || null,
+        kind: kind ?? "openai",
+      });
+      set({ checking: false, lastCheck: check });
+      return check;
+    } catch {
+      set({ checking: false });
+      return null;
+    }
   },
 }));

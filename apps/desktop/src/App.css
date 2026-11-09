@@ -948,6 +948,28 @@
   gap: 8px;
 }
 
+/* Xips de models oferts pel servidor (resultat de «Comprova»: un clic els
+   posa al formulari d'usuari). */
+.prov-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+/* Panell del servidor d'IA remot (pujada per SFTP/FTP + connectar la API). */
+.remote-ai {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  margin-top: 14px;
+}
+.remote-ai h4 {
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.remote-ai .prov-form-2 {
+  align-items: flex-end;
+}
+
 /* ---- Skills ---- */
 .si-tabs {
   display: flex;

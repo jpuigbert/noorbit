@@ -552,7 +552,10 @@
     "startDsh": "Arrenca la seva interfície",
     "openDsh": "Obre la interfície",
     "harnessDeepSeekNote": "Recorda: per xatejar amb la API de DeepSeek (api.deepseek.com) fes servir el preset «DeepSeek» del formulari de proveïdors de dalt — dsh no és una API, és un agent que fa servir els seus propis models (els configuràs a la seva interfície).",
-    "baseUrlHint": "P. ex. https://api.openai.com/v1"
+    "baseUrlHint": "P. ex. https://api.openai.com/v1",
+    "check": "Comprova",
+    "checking": "Comprovant…",
+    "useModel": "Posa aquest model al formulari"
   },
   "skills": {
     "title": "Skills i connectors",
@@ -810,5 +813,28 @@
       "title": "Codi 100% natiu",
       "body": "La IA escriu fitxers Kotlin + Jetpack Compose (Android) i Swift + SwiftUI (iOS) dins l'estructura oficial de Gradle/Xcode. Sense frameworks creuats ni embolcalls web: per construir i executar, obri el projecte amb Android Studio o Xcode. Les modificacions es veuen en viu al xat i a l'editor mentre la IA les genera."
     }
+  },
+  "remote": {
+    "title": "Servidor d'IA remot (la GPU treballa fora del Mac)",
+    "desc": "Puja el servei d'IA a un servidor extern per SFTP/FTPS/FTP i connecta NoOrbit a la seva API: les IAs descarregades allà treballen al servidor i només les respostes i els canvis tornen al teu ordinador per HTTP (zero RAM d'inferència al local).",
+    "host": "Host o IP del servidor",
+    "hostHint": "p. ex. 192.168.1.20 o ia.elmeuservidor.com",
+    "protocol": "Protocol de pujada",
+    "port": "Port de pujada",
+    "user": "Usuari",
+    "password": "Contrasenya",
+    "passwordHint": "Deixa-ho buit si entra sense clau",
+    "ftpWarn": "El protocol FTP transmet la contrasenya sense xifrar. Si pots, fes servir SFTP (port 22).",
+    "remoteDir": "Carpeta remota (es crea si no hi és)",
+    "apiPort": "Port de la API al servidor",
+    "backend": "Motor d'inferència",
+    "model": "Model (buit = el de rigor)",
+    "deploy": "Puja al servidor",
+    "deploying": "Pujant…",
+    "check": "Comprova",
+    "checking": "Verificant…",
+    "connect": "Connecta",
+    "connectHint": "Verifica la API i afegeix el servidor com a proveïdor de NoOrbit",
+    "useModel": "Posa aquest model al formulari"
   }
 }

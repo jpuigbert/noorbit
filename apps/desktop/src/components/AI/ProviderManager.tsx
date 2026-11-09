@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Plus, Trash2, Zap, Star, Pencil } from "lucide-react";
+import { Plus, Trash2, Zap, Star, Pencil, Loader2 } from "lucide-react";
 import { useT } from "../../i18n";
 import HarnessSection from "./HarnessSection";
+import RemoteAiServerPanel from "./RemoteAiServerPanel";
 import { OLLAMA_CLOUD_MODELS } from "../../stores/aiStore";
 import {
   useProviderStore,
@@ -92,6 +93,9 @@ export default function ProviderManager() {
     remove,
     test,
     select,
+    checkEndpoint,
+    checking,
+    lastCheck,
   } = useProviderStore();
 
   const [form, setForm] = useState<ProviderInput>(emptyForm());
@@ -296,6 +300,17 @@ export default function ProviderManager() {
           />
         </div>
         <div className="prov-form-actions">
+          {/* Comprova ABANS de desar: si falla, mostra el MOTIU exacte
+              (servidor aturat, clau dolenta, URL errònia…) i, si el servidor
+              contesta amb una llista, els models que ofereix (clicables). */}
+          <button
+            className="btn sm"
+            disabled={checking || !form.baseUrl}
+            onClick={() => void checkEndpoint(form)}
+          >
+            {checking ? <Loader2 size={12} className="spin" /> : <Zap size={12} />}
+            {checking ? t("providers.checking") : t("providers.check")}
+          </button>
           <button className="btn primary sm" onClick={save} disabled={saving || !form.name || !form.baseUrl}>
             <Plus size={13} /> {t("providers.save")}
           </button>
@@ -305,7 +320,41 @@ export default function ProviderManager() {
             </button>
           )}
         </div>
+        {/* Resultat del diagnòstic: sempre marca ✓/✗ i, si falla, DIU EL
+            MOTIU (servidor aturat, clau dolenta, URL errònia, model que no
+            hi és) amb les pistes per arreglar-ho. El models que ofereix el
+            servei surten en xips: clicar-ne un el posa al formulari. */}
+        {lastCheck && (
+          <div
+            className={"prov-test" + (lastCheck.ok ? " ok" : " fail")}
+            style={{ marginTop: 8, whiteSpace: "pre-wrap" }}
+          >
+            {lastCheck.ok ? "✓ " : "✗ "}
+            <b>{lastCheck.title}</b>
+            {"\n"}
+            {lastCheck.detail}
+            {lastCheck.models.length > 0 && (
+              <div className="prov-chips">
+                {lastCheck.models.slice(0, 16).map((m) => (
+                  <button
+                    key={m}
+                    className="btn sm"
+                    onClick={() => set({ model: m })}
+                    title={t("providers.useModel")}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Servidor d'IA remot: puja el servei per SFTP/FTP a una màquina amb
+          GPU (DeepInfer/vLLM) i connecta NoOrbit a la seva API OpenAI. Les
+          IAs treballen fora del Mac; respostes i canvis tornen per HTTP. */}
+      <RemoteAiServerPanel />
 
       {/* Menú APART per a harnessos d'agents (DeepSeek Harness/dsh): no són
           proveïdors d'API i per això no figuren a la llista de dalt. Ací es
