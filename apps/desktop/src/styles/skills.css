@@ -1,0 +1,146 @@
+/* NoOrbit · estils «skills» — extrets d'App.css en el mateix ordre de cascada. */
+
+/* ---- Skills ---- */
+.si-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.si-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  color: var(--text-1);
+}
+.si-tab.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: transparent;
+}
+.si-pick {
+  display: flex;
+  gap: 6px;
+}
+.si-pick input,
+.si-pick select {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-size: 12.5px;
+}
+.si-error {
+  margin-top: 8px;
+  color: var(--error);
+  font-size: 12px;
+}
+.si-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 16px 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-2);
+}
+.si-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.si-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.si-row:last-child {
+  border-bottom: none;
+}
+.si-name {
+  font-size: 12.5px;
+  color: var(--text-0);
+}
+.si-desc {
+  font-size: 11px;
+  color: var(--text-2);
+}
+.si-info {
+  margin-top: 8px;
+  color: var(--success, var(--accent));
+  font-size: 12px;
+}
+/* ── Cercador de skills: resultats (GitHub en viu + catàleg) ── */
+.si-results {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  max-height: 190px;
+  overflow: auto;
+}
+.si-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.si-result:last-child {
+  border-bottom: none;
+}
+.si-result-name {
+  font-size: 12.5px;
+  color: var(--text-0);
+  font-weight: 600;
+}
+.si-result-desc {
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.si-builtin {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+}
+.si-builtin-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-0);
+}
+.si-export {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+  color: var(--text-2);
+  font-size: 11.5px;
+}
+.si-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  color: var(--text-2);
+}

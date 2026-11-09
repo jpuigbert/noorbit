@@ -53,14 +53,40 @@ pub struct ExecReport {
     pub timed_out: bool,
 }
 
-type PendingApproval = oneshot::Sender<(bool, bool)>; // (approved, remember)
+type PendingApproval = oneshot::Sender<(bool, bool, bool)>; // (approved, remember, sessió)
 
 pub struct ComputerController {
     path: PathBuf,
     perms: Mutex<Permissions>,
     history: Mutex<Vec<HistoryEntry>>,
+    // Permisos «només aquesta sessió» concedits al diàleg s'han d'ara: no
+    // van al disc (moriran amb l'app) però eviten repreguntar el mateix
+    // programa cada 5 minuts dins d'una feina llarga.
+    sess_allow: Mutex<Vec<String>>,
     pending: Mutex<HashMap<String, PendingApproval>>,
     counter: AtomicU64,
+}
+
+/// Comandes NOMÉS DE LECTURA que no cal confirmar mai (una vegada quan comence
+/// la feina de consulta): sense canonades, encadenaments ni redireccions, així
+/// que no poden amagar cap programa d'execució a dins. Els guions i anys de
+/// »rm/sudo…» ja quedar bloquejats per `is_forbidden`.
+fn is_harmless_read(command: &str) -> bool {
+    const SAFE: &[&str] = &["ls", "pwd", "whoami", "id", "uname", "date", "echo", "cat",
+        "head", "tail", "wc", "df", "du", "stat", "file", "which", "env", "uptime",
+        "ps", "sw_vers", "system_profiler", "hostname"];
+    let c = command.trim();
+    // Cadena o substitució → pot amagar res: no ho preperem.
+    if c.contains('|') || c.contains(';') || c.contains("&&")
+        || c.contains('`') || c.contains("$(") || c.contains('>')
+        || c.contains('<')
+    {
+        return false;
+    }
+    let first = c.split_whitespace().next().unwrap_or("");
+    // Permet amb ruta completa tampoc: `/bin/ls` = primer paraula llarg
+    let base = first.rsplit('/').next().unwrap_or(first);
+    SAFE.contains(&base)
 }
 
 /// Patrons intrinsicament destructius; no s'executen mai, encara que l'usuari
@@ -281,6 +307,7 @@ impl ComputerController {
             path,
             perms: Mutex::new(perms),
             history: Mutex::new(history),
+            sess_allow: Mutex::new(Vec::new()),
             pending: Mutex::new(HashMap::new()),
             counter: AtomicU64::new(1),
         }
@@ -339,20 +366,34 @@ impl ComputerController {
     }
 
     /// Resposta de l'usuari al diàleg de confirmació.
-    pub fn respond(&self, id: &str, approved: bool, remember: bool) -> Result<()> {
+    pub fn respond(&self, id: &str, approved: bool, remember: bool, session: bool) -> Result<()> {
         let tx = self
             .pending
             .lock()
             .unwrap()
             .remove(id)
             .ok_or_else(|| anyhow!("Sol·licitud de confirmació no trobada o caducada"))?;
-        let _ = tx.send((approved, remember));
+        let _ = tx.send((approved, remember, session));
         Ok(())
     }
 
     fn is_preapproved(&self, command: &str) -> bool {
+        // Lectures inofensives (cat, ls, ps…) no preguntien mai: són la gran
+        // majoria de comandos que l'IA tambe fa per mirar abans d'actuar.
+        if is_harmless_read(command) {
+            return true;
+        }
         let p = self.perms.lock().unwrap();
-        p.allowlist
+        if p.allowlist
+            .iter()
+            .any(|pat| command.trim_start().starts_with(pat.as_str()))
+        {
+            return true;
+        }
+        // Permís «només sessió» conegut (no es desa al disc).
+        self.sess_allow
+            .lock()
+            .unwrap()
             .iter()
             .any(|pat| command.trim_start().starts_with(pat.as_str()))
     }
@@ -410,12 +451,12 @@ impl ComputerController {
                 serde_json::json!({ "id": id, "command": command }),
             );
 
-            let (approved, remember) =
+            let (approved, remember, session) =
                 match tokio::time::timeout(std::time::Duration::from_secs(CONFIRM_TIMEOUT_SECS), rx)
                     .await
                 {
                     Ok(Ok(v)) => v,
-                    Ok(Err(_)) => (false, false),
+                    Ok(Err(_)) => (false, false, false),
                     Err(_) => {
                         self.pending.lock().unwrap().remove(&id);
                         return Err(anyhow!("Confirmació caducada: no s'ha executat res"));
@@ -424,12 +465,22 @@ impl ComputerController {
             if !approved {
                 return Err(anyhow!("L'usuari ha rebutat l'execució"));
             }
-            if remember {
-                let pattern = Self::remember_pattern(command);
-                {
+            // Per a SIEMPRE (es desa a computer_permissions.json) i/o per a la
+            // SESSIÓ (només memòria): amb qualsevol dels dos, el mateix programa
+            // no preguntarà de nou — «una vegada i prou».
+            if remember || session {
+                if remember {
+                    let pattern = Self::remember_pattern(command);
                     let mut p = self.perms.lock().unwrap();
                     if !p.allowlist.contains(&pattern) {
                         p.allowlist.push(pattern);
+                    }
+                }
+                if session {
+                    let pattern = Self::remember_pattern(command);
+                    let mut s = self.sess_allow.lock().unwrap();
+                    if !s.contains(&pattern) {
+                        s.push(pattern);
                     }
                 }
                 self.save();

@@ -1,0 +1,419 @@
+/* NoOrbit · estils «controls» — extrets d'App.css en el mateix ordre de cascada. */
+
+/* ---- Botons i controls compartits ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  color: var(--text-0);
+  font-size: 12.5px;
+  border: 1px solid var(--border-2);
+  transition:
+    background var(--speed-fast) var(--ease-out),
+    border-color var(--speed-fast) var(--ease-out),
+    color var(--speed-fast) var(--ease-out),
+    transform var(--speed-fast) var(--ease-out),
+    box-shadow var(--speed-fast) var(--ease-out);
+}
+.btn:hover {
+  background: var(--bg-4);
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+}
+.btn.primary:hover {
+  background: var(--accent-hover);
+  box-shadow: 0 2px 10px var(--accent-soft);
+}
+.btn.primary:active {
+  transform: translateY(1px);
+}
+.btn:not(.primary):hover {
+  border-color: var(--border-2);
+}
+.btn.danger {
+  background: transparent;
+  border-color: var(--error);
+  color: var(--error);
+}
+.btn.sm {
+  padding: 4px 8px;
+  font-size: 11.5px;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.field {
+  margin-bottom: 10px;
+}
+.field label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-2);
+  margin-bottom: 4px;
+}
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-size: 12.5px;
+  outline: none;
+}
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  border-color: var(--accent);
+}
+
+/* ---- Modals ---- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal {
+  width: 560px;
+  max-width: 92vw;
+  max-height: 84vh;
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+.modal-body {
+  padding: 16px;
+  overflow: auto;
+}
+/* Diàleg petit per a operacions de l'arbre (crear/reanomenar). */
+.modal.small {
+  width: 360px;
+}
+.tree-input {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 13px;
+  background: var(--bg-2);
+  color: var(--text-0);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm, 6px);
+}
+.tree-dialog-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+/* ---- Panell d'idioma ---- */
+.language-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.lp-section h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.lp-hint {
+  font-size: 11.5px;
+  color: var(--text-2);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+.lp-select,
+.lp-input {
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-size: 12.5px;
+  margin-bottom: 8px;
+}
+.lp-import {
+  display: flex;
+  gap: 8px;
+}
+.lp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  color: var(--text-0);
+  font-size: 12.5px;
+}
+.lp-btn:hover {
+  background: var(--bg-4);
+}
+.lp-btn.danger {
+  background: transparent;
+  border-color: var(--error);
+  color: var(--error);
+}
+.lp-msg {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--success);
+}
+
+/* ---- Tabs de modal ---- */
+.pm-modal {
+  width: 640px;
+}
+.pm-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+.pm-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  border-bottom: 2px solid transparent;
+}
+.pm-tab.active {
+  color: var(--text-0);
+  border-bottom-color: var(--accent);
+}
+
+/* ---- Manual d'ús ---- */
+.help-modal {
+  width: 680px;
+}
+.help-intro {
+  color: var(--text-1);
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+.help-section {
+  margin-bottom: 18px;
+}
+.help-section h3 {
+  font-size: 14px;
+  color: var(--text-0);
+  margin-bottom: 6px;
+  border-left: 3px solid var(--accent);
+  padding-left: 8px;
+}
+.help-sec-intro {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+.help-section ul {
+  padding-left: 18px;
+}
+.help-section li {
+  font-size: 12.5px;
+  color: var(--text-1);
+  line-height: 1.6;
+  margin-bottom: 4px;
+}
+.help-foot {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-3);
+}
+.about-block h3 {
+  margin-bottom: 6px;
+}
+.about-block p {
+  color: var(--text-1);
+  margin-bottom: 6px;
+}
+
+/* ---- Peu de modal ---- */
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---- Modals: overlay amb blur + targeta flotant ---- */
+.modal-overlay {
+  background: rgba(0, 0, 0, 0.45) !important;
+  backdrop-filter: blur(3px);
+}
+.modal {
+  border-radius: var(--radius-xl) !important;
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border-2);
+  animation: modal-in var(--speed) var(--ease-out);
+}
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---- Assistent de 1a arrencada (onboarding) ---- */
+.onb-steps {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.onb-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-2);
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+}
+.onb-step.active {
+  background: var(--accent-soft);
+  color: var(--text-0);
+  border-color: var(--accent);
+}
+.onb-lead {
+  font-size: 13.5px;
+  color: var(--text-1);
+  margin: 0 0 var(--space-4);
+  line-height: 1.5;
+}
+.onb-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+}
+.onb-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  text-align: left;
+  padding: var(--space-3);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition:
+    border-color var(--speed-fast) var(--ease-out),
+    box-shadow var(--speed-fast) var(--ease-out),
+    transform var(--speed-fast) var(--ease-out);
+}
+.onb-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-2);
+}
+.onb-card.picked {
+  border-color: var(--accent);
+  box-shadow: 0 4px 18px var(--accent-soft);
+}
+.onb-card b {
+  font-size: 12.5px;
+  color: var(--text-0);
+}
+.onb-card span {
+  font-size: 11.5px;
+  color: var(--text-2);
+  line-height: 1.45;
+}
+.onb-card em {
+  font-size: 10.5px;
+  font-style: normal;
+  color: var(--text-3);
+}
+.onb-card-ic {
+  color: var(--accent);
+}
+.onb-remote {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  flex-wrap: wrap;
+}
+.onb-themes {
+  display: flex;
+  gap: var(--space-3);
+}
+.onb-theme {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--text-1);
+  transition: border-color var(--speed-fast) var(--ease-out),
+    box-shadow var(--speed-fast) var(--ease-out);
+}
+.onb-theme.picked {
+  border-color: var(--accent);
+  box-shadow: 0 4px 18px var(--accent-soft);
+  color: var(--text-0);
+}
+.onb-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--border-2);
+}
+.onb-dark { background: #0f0f15; }
+.onb-light { background: #f5f6f8; }
+.onb-gray { background: #3b3f45; }
+.onb-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-1);
+  padding: var(--space-3);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-3);
+}

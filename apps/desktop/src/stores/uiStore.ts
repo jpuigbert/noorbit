@@ -40,6 +40,8 @@ interface UIState {
   showNewProject: boolean;
   showStartup: boolean;
   showAccount: boolean;
+  /** Assistent de primera arrencada (3 passos). */
+  showOnboarding: boolean;
   terminalOpen: boolean;
 
   // Autodesat (com VS Code)
@@ -68,6 +70,7 @@ interface UIState {
   setShowNewProject: (v: boolean) => void;
   setShowStartup: (v: boolean) => void;
   setShowAccount: (v: boolean) => void;
+  setShowOnboarding: (v: boolean) => void;
   setTerminalOpen: (v: boolean) => void;
   toggleTerminal: () => void;
   setAutoSave: (v: boolean) => void;
@@ -112,6 +115,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   showNewProject: false,
   showStartup: false,
   showAccount: false,
+  /** Assistent de primera arrencada (3 passos): només si no s'ha completat. */
+  showOnboarding: false,
   terminalOpen: false,
 
   autoSave: loadBool(LS_AUTOSAVE, true),
@@ -135,6 +140,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setShowNewProject: (v) => set({ showNewProject: v }),
   setShowStartup: (v) => set({ showStartup: v }),
   setShowAccount: (v) => set({ showAccount: v }),
+  setShowOnboarding: (v) => set({ showOnboarding: v }),
   setTerminalOpen: (v) => set({ terminalOpen: v }),
   toggleTerminal: () => set({ terminalOpen: !get().terminalOpen }),
 

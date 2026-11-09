@@ -1,0 +1,187 @@
+/* NoOrbit · estils «editor» — extrets d'App.css en el mateix ordre de cascada. */
+
+/* ---- Editor ---- */
+.editor-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-0);
+}
+.editor-tabs {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  padding: 0 6px;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.editor-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-1);
+  background: var(--bg-2);
+}
+.editor-tab .dirty-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-2);
+}
+.editor-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* L'editor viu i el diff de revisió ocupen el mateix espai; un d'amagats. */
+.editor-host {
+  flex: 1;
+  min-height: 0;
+}
+.editor-host.hidden {
+  visibility: hidden;
+  position: absolute;
+  inset: 0;
+}
+
+/* ---- Revisió d'edicions de la IA (estil Qoder / VS Code) ----------------
+   Barra que acompanya el diff en línia: codi NOU en verd, VELL en roig, i
+   els botons Accepta / Rebutja amb el compte enrere d'acceptació sola. ---- */
+.review-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  flex-shrink: 0;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-1);
+}
+.review-spark {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.review-file {
+  font-weight: 600;
+  color: var(--text-0, #fff);
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.review-hint {
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.review-count {
+  color: var(--accent-2);
+  font-variant-numeric: tabular-nums;
+}
+.review-accept {
+  border-color: rgba(74, 222, 128, 0.45);
+  color: var(--success);
+}
+.review-accept:hover {
+  background: rgba(74, 222, 128, 0.12);
+}
+.review-reject {
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #f87171;
+}
+.review-reject:hover {
+  background: rgba(248, 113, 113, 0.12);
+}
+.review-diff {
+  border-top: 1px solid var(--border);
+}
+
+/* Pastilla flotant: canvis pendents en fitxers que no són els oberts. */
+.review-pill {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 30;
+  width: 320px;
+  max-width: calc(100% - 28px);
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-1);
+}
+.review-pill.minimized {
+  width: auto;
+  padding: 4px 9px;
+  gap: 5px;
+  display: flex;
+  align-items: center;
+  color: var(--accent);
+  cursor: pointer;
+}
+.review-pill-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.review-pill-title {
+  font-weight: 600;
+}
+.review-pill-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 76px;
+  overflow: auto;
+}
+.review-pill-file {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-1);
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.review-pill-file:hover {
+  border-color: var(--accent);
+  color: #fff;
+}
+.review-pill-more {
+  color: var(--text-2);
+  font-size: 11px;
+  align-self: center;
+}
+.review-pill-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+/* ---- Ressaltat de coincidències de la cerca (F3) ---- */
+.noorbit-match {
+  background: rgba(139, 92, 246, 0.28);
+  border-radius: 2px;
+}
+.noorbit-match-active {
+  background: rgba(248, 81, 73, 0.45);
+  border: 1px solid rgba(248, 81, 73, 0.8);
+  border-radius: 2px;
+}

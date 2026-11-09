@@ -53,7 +53,7 @@ interface ComputerState {
   removePattern: (pattern: string) => Promise<void>;
   clearHistory: () => Promise<void>;
   runCommand: (command: string) => Promise<void>;
-  resolveConfirm: (approved: boolean, remember: boolean) => Promise<void>;
+  resolveConfirm: (approved: boolean, remember: boolean, session?: boolean) => Promise<void>;
   runAgent: (goal: string) => Promise<void>;
 }
 
@@ -140,12 +140,12 @@ export const useComputerStore = create<ComputerState>((set, get) => ({
     }
   },
 
-  resolveConfirm: async (approved, remember) => {
+  resolveConfirm: async (approved, remember, session = false) => {
     const p = get().pending;
     if (!p) return;
     set({ pending: null });
     try {
-      await invoke("computer_confirm", { id: p.id, approved, remember });
+      await invoke("computer_confirm", { id: p.id, approved, remember, session });
     } catch (e) {
       set({ error: String(e) });
     }

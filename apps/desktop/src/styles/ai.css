@@ -1,0 +1,359 @@
+/* NoOrbit · estils «ai» — extrets d'App.css en el mateix ordre de cascada. */
+
+/* ---- Gestor de models ---- */
+.mm-warn {
+  background: rgba(251, 191, 36, 0.12);
+  color: var(--warning);
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+}
+.mm-custom {
+  display: flex;
+  gap: 8px;
+}
+.mm-custom input {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-size: 12.5px;
+}
+.mm-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.mm-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.mm-row:last-child {
+  border-bottom: none;
+}
+.mm-name {
+  flex: 1;
+  text-align: left;
+  color: var(--text-0);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.mm-name-static {
+  color: var(--text-0);
+}
+.mm-desc {
+  color: var(--text-2);
+  font-size: 11px;
+}
+.mm-size {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.mm-prog {
+  color: var(--accent-2);
+  font-size: 11px;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mm-installed {
+  color: var(--success);
+  font-size: 11px;
+}
+.mm-ollama-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.mm-cloud-info {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- Proveïdors IA en línia ---- */
+.prov-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+.prov-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+}
+.prov-row.active {
+  border-color: var(--accent);
+}
+.prov-main {
+  min-width: 0;
+}
+.prov-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-0);
+  font-weight: 500;
+}
+.prov-model {
+  font-size: 11px;
+  color: var(--text-2);
+  background: var(--bg-3);
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+.prov-url {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-2);
+  margin-top: 3px;
+  word-break: break-all;
+}
+.prov-token {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+.prov-test {
+  font-size: 11px;
+  margin-top: 4px;
+}
+.prov-test.ok {
+  color: var(--success);
+}
+.prov-test.fail {
+  color: var(--error);
+}
+.prov-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.prov-form {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.prov-form h4 {
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.prov-form-2 {
+  display: flex;
+  gap: 10px;
+}
+.prov-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Xips de models oferts pel servidor (resultat de «Comprova»: un clic els
+   posa al formulari d'usuari). */
+.prov-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+/* Panell del servidor d'IA remot (pujada per SFTP/FTP + connectar la API). */
+.remote-ai {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  margin-top: 14px;
+}
+.remote-ai h4 {
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.remote-ai .prov-form-2 {
+  align-items: flex-end;
+}
+
+/* ---- Visor del procés de la IA (Objectiu 2) ---- */
+.proc-viewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-size: 12px;
+}
+.proc-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.proc-title {
+  font-weight: 600;
+  color: var(--text-0);
+  margin-right: 4px;
+}
+.proc-sub {
+  padding: 3px 8px;
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border);
+}
+.proc-phase {
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.proc-live {
+  background: rgba(34, 197, 94, 0.18);
+  color: #4ade80;
+}
+.proc-think {
+  background: rgba(234, 179, 8, 0.18);
+  color: #facc15;
+}
+.proc-done {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-1);
+}
+.proc-err {
+  background: rgba(248, 81, 73, 0.2);
+  color: #f87171;
+}
+.proc-idle {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-2);
+}
+.proc-meta {
+  font-family: monospace;
+  color: var(--text-2);
+  margin-left: auto;
+}
+.proc-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+.proc-text,
+.proc-thinking,
+.proc-block {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.proc-text {
+  color: var(--text-0);
+}
+.proc-thinking {
+  color: var(--text-2);
+  font-style: italic;
+  border-left: 2px solid var(--border);
+  padding-left: 8px;
+  margin-bottom: 8px;
+}
+
+/* Seccions desplegables del visor: el raonament i la resposta es conserven
+   i l'usuari els pot obrir i tancar (abans l'alçada fixa els amagava). */
+.proc-sec {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.proc-sec > summary {
+  cursor: pointer;
+  padding: 5px 8px;
+  font-weight: 600;
+  color: var(--text-1);
+  user-select: none;
+}
+.proc-sec[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+.proc-sec-hint {
+  margin-left: 6px;
+  font-weight: 400;
+  font-family: monospace;
+  font-size: 10px;
+  color: var(--text-2);
+}
+.proc-sec .proc-block {
+  padding: 8px;
+}
+.sec-think .proc-block {
+  color: var(--text-2);
+  font-style: italic;
+}
+.sec-answer .proc-block {
+  color: var(--text-0);
+}
+.proc-turns {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+}
+.proc-turn {
+  border-left: 2px solid var(--border);
+  padding-left: 6px;
+}
+.proc-turn > summary {
+  cursor: pointer;
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.proc-turn .proc-block {
+  padding: 6px 0;
+}
+.proc-block-think {
+  color: var(--text-2);
+  font-style: italic;
+}
+.proc-block-err {
+  color: #f87171;
+}
+.proc-error {
+  border: 1px solid rgba(248, 81, 73, 0.45);
+  background: rgba(248, 81, 73, 0.1);
+  color: #fca5a5;
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+  font-size: 12px;
+}
+
+/* ---- Botons de còpia/desa (Objectiu 3) ---- */
+.chat-copy-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+.chat-row:hover .chat-copy-row {
+  opacity: 1;
+}
+.chat-copy {
+  font-size: 11px;
+}

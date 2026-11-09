@@ -1,0 +1,177 @@
+/* NoOrbit · estils «git» — extrets d'App.css en el mateix ordre de cascada. */
+
+/* ---- Panell de Git (pestanya del panell dret) ---- */
+.git-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.git-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.git-branch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-0);
+}
+.git-tools {
+  display: flex;
+  gap: 4px;
+}
+.git-changes {
+  flex: 1;
+  overflow-y: auto;
+}
+.git-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-1);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.git-row:hover {
+  background: var(--bg-2);
+}
+.git-badge {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--text-2);
+}
+.git-M { background: #d19a66; }
+.git-A, .git-U { background: #98c379; }
+.git-D { background: #e06c75; }
+.git-R { background: #61afef; }
+.git-C { background: #e5c07b; }
+.git-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-diff {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.git-diff-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.git-diff-path {
+  font-size: 11px;
+  color: var(--text-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-diff-editor {
+  flex: 1;
+  min-height: 0;
+  border-bottom: 1px solid var(--border);
+}
+.git-patch {
+  max-height: 38%;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-1);
+  white-space: pre;
+}
+.git-graph {
+  max-height: 45%;
+  overflow: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-0);
+}
+.git-graph-pre {
+  margin: 0;
+  padding: 8px 10px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-1);
+  white-space: pre;
+}
+.git-stashes {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.git-stashes-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.git-stash-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.git-stash-msg {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.git-commit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+.git-msg {
+  width: 100%;
+  resize: vertical;
+  background: var(--bg-0);
+  border: 1px solid var(--border-2);
+  border-radius: 4px;
+  color: var(--text-0);
+  font-size: 12px;
+  padding: 6px;
+}
+.git-feedback {
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--text-2);
+  border-top: 1px solid var(--border);
+  white-space: pre-wrap;
+}

@@ -1,0 +1,329 @@
+/* NoOrbit · estils «shell» — extrets d'App.css en el mateix ordre de cascada. */
+
+/* 🖥️ Disseny general de la finestra NoOrbit */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg-0);
+  color: var(--text-0);
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.app-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  /* referència per a la pastilla de revisió d'edicions de la IA */
+  position: relative;
+}
+
+/* ---- Barra de menú ---- */
+.menubar {
+  display: flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 8px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  gap: 2px;
+  user-select: none;
+  flex-shrink: 0;
+}
+.menubar .brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  padding: 0 10px 0 4px;
+  color: var(--text-0);
+}
+.menubar .brand .logo {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+}
+.menu-item {
+  position: relative;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
+  font-size: 12.5px;
+}
+.menu-item:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+.menu-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 220px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  padding: 4px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  z-index: 50;
+}
+.menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
+  font-size: 12.5px;
+  width: 100%;
+  text-align: left;
+}
+.menu-row:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+.menu-row .kbd {
+  color: var(--text-3);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.menu-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 6px;
+}
+.menubar .spacer {
+  flex: 1;
+}
+
+/* ---- Barra lateral ---- */
+.sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: var(--bg-1);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.panel-body {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+.tree-node {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  font-size: 12.5px;
+  color: var(--text-1);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tree-node:hover {
+  background: var(--bg-2);
+  color: var(--text-0);
+}
+.tree-node.active {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+/* Nom que ocupa l'ample disponible; accions només en hover. */
+.tree-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-actions {
+  display: none;
+  gap: 2px;
+  margin-left: 4px;
+}
+.tree-node:hover .tree-actions {
+  display: inline-flex;
+}
+.icon-btn.tiny {
+  padding: 1px;
+}
+.icon-btn.tiny.danger:hover {
+  color: var(--error);
+}
+.empty-hint {
+  padding: 16px 12px;
+  color: var(--text-3);
+  font-size: 12px;
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* ---- Panell dret ---- */
+.rightpanel {
+  width: 380px;
+  flex-shrink: 0;
+  background: var(--bg-1);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.rp-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.rp-tab {
+  flex: 1;
+  padding: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+  border-bottom: 2px solid transparent;
+}
+.rp-tab.active {
+  color: var(--text-0);
+  border-bottom-color: var(--accent);
+}
+.rp-body {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+.preview-frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #fff;
+}
+
+/* ---- Vista prèvia ---- */
+.preview-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.preview-url {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Paleta de comandes i obertura ràpida ---- */
+.cp-palette {
+  width: 560px;
+  max-width: 90vw;
+  padding: 0;
+  overflow: hidden;
+}
+.cp-palette-input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--border-2);
+  background: var(--bg-1);
+  color: var(--text-0);
+  font-size: 14px;
+  padding: 12px 14px;
+  outline: none;
+}
+.cp-palette-list {
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.cp-palette-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
+  font-size: 13px;
+}
+.cp-palette-row.selected {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+.cp-palette-row .kbd {
+  color: var(--text-3);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.cp-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+/* ---- Indicador de tasques en segon pla (Objectiu 4) ---- */
+.bg-task-badge {
+  gap: 6px;
+}
+.bg-task-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #facc15;
+  animation: bg-task-pulse 1.4s ease-in-out infinite;
+}
+@keyframes bg-task-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ---- Panell dret: pestanyes tipus pílvola ---- */
+.rp-tab {
+  border-radius: 8px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.rp-tab.active {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+/* ---- Scrollbar amb accent (fins el "flux" se nota premium) ---- */
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--bg-4) 72%, var(--accent) 28%);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}

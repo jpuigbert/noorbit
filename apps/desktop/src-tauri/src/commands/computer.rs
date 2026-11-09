@@ -60,10 +60,13 @@ pub async fn computer_confirm(
     id: String,
     approved: bool,
     remember: bool,
+    // «Permet per a tota la sessió» (no es desa al disc).
+    session: Option<bool>,
 ) -> Result<(), String> {
+    let session = session.unwrap_or(false);
     state
         .computer
-        .respond(&id, approved, remember)
+        .respond(&id, approved, remember, session)
         .map_err(|e| e.to_string())
 }
 

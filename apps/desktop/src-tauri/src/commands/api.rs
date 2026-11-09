@@ -883,6 +883,59 @@ pub async fn ai_remote_verify(
 }
 
 /// Xat directe contra un proveïdor (independent del proveïdor actiu).
+/// Autocomplete en línia (estil Copilot però amb la IA pròpia de l'usuari):
+/// crida CRUA i CURTA — sense eines, sense events, timeout breu — perquè
+/// pugui encaixar dins d'un tipeig sense molestar. Retorna només el fragment
+/// a inserir (buit si el model no té res a dir).
+#[command]
+pub async fn ai_inline_complete(
+    state: State<'_, AppState>,
+    prefix: String,
+    suffix: String,
+    language: Option<String>,
+) -> Result<String, String> {
+    use std::time::Duration;
+
+    let ai: Arc<crate::ai::AiManager> = state.ai_manager.clone();
+    let id = ai.active_provider().await;
+    let mgr: Arc<Mutex<api::ApiManager>> = state.api_manager.clone();
+    let (provider, client) = {
+        let guard = mgr.lock().unwrap();
+        match guard.prepare(&id) {
+            Ok(v) => v,
+            Err(e) => return Err(e.to_string()),
+        }
+    };
+
+    let lang = language.unwrap_or_default();
+    let system = "Ets un motor d'autocompleció de codi integrat en un editor. Respon NOMÉS amb el fragment exacte que completa el lloc del cursor (sense repetir text previ, sense explicacions, sense claus markdown, sense fer res que ja hi hagi). Si no tens res útil a escriure, respon una cadena buida.";
+    let prompt = format!(
+        "Llenguatge: {}\n\nCODI ABANS del cursor (des del principi):\n{}\n\n⟦⟧ lloc del cursor\n\nCODI DESPRÉS del cursor:\n{}\n\nEscriu la continuació que aniria just al cursor.",
+        lang,
+        prefix.chars().rev().take(3000).collect::<String>().chars().rev().collect::<String>(),
+        suffix.chars().take(600).collect::<String>(),
+    );
+
+    // Petició amb temps límit curt: s'anula sola si el model pesa massa.
+    let dur = Duration::from_secs(8);
+    let turns = [("user".to_string(), prompt)];
+    let fut = api::chat(&client, &provider, &turns, Some(system));
+    match tokio::time::timeout(dur, fut).await {
+        Ok(Ok((content, _))) => {
+            let mut out = content.trim_start().to_string();
+            // Retall: sense blocs ```…``` ni capçaleres de conversa.
+            if let Some(fence) = out.find("```") {
+                out.truncate(fence);
+                out = out.trim_end().to_string();
+            }
+            let out = out.trim().to_string();
+            Ok(out)
+        }
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => Err("timeout".to_string()),
+    }
+}
+
 #[command]
 pub async fn ai_provider_chat(
     state: State<'_, AppState>,

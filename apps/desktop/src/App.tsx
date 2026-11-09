@@ -29,6 +29,7 @@ import ReviewPill from "./components/Editor/ReviewPill";
 import { markForPath, resolveMark } from "./stores/editReviewStore";
 import NewProjectModal from "./components/NewProjectModal";
 import StartupScreen from "./components/StartupScreen";
+import OnboardingModal, { shouldShowOnboarding } from "./components/OnboardingModal";
 import AccountModal from "./components/Account/AccountModal";
 
 /// Autodesat (com l'«Auto Save» de VS Code): desa el fitxer obert poc
@@ -112,6 +113,11 @@ export default function App() {
     });
     if (!useWorkspaceStore.getState().root) {
       useUIStore.getState().setShowStartup(true);
+    }
+    // Assistent de 3 passos NOMÉS a la primera arrencada real (es guarda quan
+    // es completa; l'usuari també el pot obrir des de Configuració).
+    if (shouldShowOnboarding()) {
+      useUIStore.getState().setShowOnboarding(true);
     }
   }, []);
 
@@ -274,6 +280,7 @@ export default function App() {
       <SearchPalette />
       <NewProjectModal />
       <StartupScreen />
+      {useUIStore((s) => s.showOnboarding) && <OnboardingModal />}
       <AccountModal />
     </div>
   );

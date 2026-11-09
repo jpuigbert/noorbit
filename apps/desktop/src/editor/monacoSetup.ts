@@ -18,24 +18,42 @@ import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker"
 
 // (self as any) perquè els tipus de Monaco no declaren MonacoEnvironment a
 // nivel global; és el punt d'entrada que llegeix Monaco per crear els workers.
+//
+// RENDIMENT: els workers es CREEN UNA i únic de vegades per llenguatge i es
+// reusen (Monaco demanaria una instància nova cada cop que s'obre/canvia de llenguatge:
+// memòria extra i primer obrir més lent). Un diccionari per etiqueta mantén
+// el worker viu i el retorna reutilitzat.
+const workerCache = new Map<string, Worker>();
+
+function workerFor(
+  label: string,
+  make: () => Worker
+): Worker {
+  const cached = workerCache.get(label);
+  if (cached) return cached;
+  const w = make();
+  workerCache.set(label, w);
+  return w;
+}
+
 (self as unknown as { MonacoEnvironment: unknown }).MonacoEnvironment = {
   getWorker(_workerId: string, label: string): Worker {
     switch (label) {
       case "json":
-        return new jsonWorker();
+        return workerFor("json", () => new jsonWorker());
       case "css":
       case "scss":
       case "less":
-        return new cssWorker();
+        return workerFor("css", () => new cssWorker());
       case "html":
       case "handlebars":
       case "razor":
-        return new htmlWorker();
+        return workerFor("html", () => new htmlWorker());
       case "typescript":
       case "javascript":
-        return new tsWorker();
+        return workerFor("typescript", () => new tsWorker());
       default:
-        return new editorWorker();
+        return workerFor("editor", () => new editorWorker());
     }
   },
 };

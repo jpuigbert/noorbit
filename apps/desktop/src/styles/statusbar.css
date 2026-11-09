@@ -1,0 +1,69 @@
+/* NoOrbit · estils «statusbar» — extrets d'App.css en el mateix ordre de cascada. */
+
+/* ---- Barra d'estat ---- */
+.statusbar {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-2);
+  gap: 14px;
+  flex-shrink: 0;
+}
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.status-dot.on {
+  background: var(--success);
+}
+.status-dot.off {
+  background: var(--text-3);
+}
+.statusbar .spacer {
+  flex: 1;
+}
+
+/* ---- Barra d'estat: chip del compte (botó amb pinta d'etiqueta,
+   com els IDEs amb compte: avatar + correu, sense decoració extra). */
+.status-item.as-btn {
+  appearance: none;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 2px;
+  max-height: 20px;
+}
+.status-item.as-btn:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+
+/* ---- Barra d'estat: treball amb filferro d'accent ---- */
+.statusbar {
+  background: var(--bg-2) !important;
+}
+.status-item.working {
+  color: var(--accent-hover) !important;
+}
+.status-dot.on {
+  background: var(--success);
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.55);
+}
+.status-dot.off {
+  background: var(--text-3);
+  opacity: 0.5;
+}

@@ -1,0 +1,44 @@
+/* NoOrbit · estils «webai» — extrets d'App.css en el mateix ordre de cascada. */
+
+/* ---- IAs de la web (llançador de xats web) ---- */
+.webai-launch {
+  overflow-y: auto;
+}
+.webai-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+  padding: 4px 12px;
+}
+.webai-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.webai-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-0);
+}
+.webai-card-url {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.webai-card-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ---- Mòduls del navegador web: el seu estil viu al costat de la resta ---- */
+/* (les classes .webai-* tenen el seu bloc definit més amunt) */

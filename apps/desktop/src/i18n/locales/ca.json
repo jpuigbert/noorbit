@@ -148,7 +148,11 @@
     "reviewAcceptAll": "Accepta tot",
     "reviewRejectAll": "Rebutja tot",
     "reviewMinimize": "Minimitza (el temps segueix corrent)",
-    "reviewShow": "Mostra els canvis pendents de la IA"
+    "reviewShow": "Mostra els canvis pendents de la IA",
+    "acOn": "IA",
+    "acOff": "IA off",
+    "acHintOn": "Autocomplete IA activat: suggeriments mentre escrius (model actiu)",
+    "acHintOff": "Autocomplete IA desactivat"
   },
   "rightPanel": {
     "preview": "Vista prèvia",
@@ -438,7 +442,9 @@
     "historyEmpty": "Encara no s'ha executat res.",
     "disabledWarn": "El control de l'ordinador està desactivat. Activa'l amunt per permetre-ho.",
     "exit": "Codi de sortida",
-    "requestAccess": "Sol·licita l'accés al sistema"
+    "requestAccess": "Sol·licita l'accés al sistema",
+    "confirmSession": "Permet el programa durant aquesta sessió (no es desa res)",
+    "confirmOnce": "Amb «Recorda» activat, una aprovació per programa és suficient: no es torna a preguntar."
   },
   "ai": {
     "title": "Assistent IA",
@@ -836,5 +842,56 @@
     "connect": "Connecta",
     "connectHint": "Verifica la API i afegeix el servidor com a proveïdor de NoOrbit",
     "useModel": "Posa aquest model al formulari"
+  },
+  "aiEdit": {
+    "title": "Edita la selecció amb la IA",
+    "selected": "selecció",
+    "placeholder": "Què vols que faci amb aquest codi? (corregir, refactor, renomenar…)",
+    "apply": "Aplica",
+    "cancel": "Cancel·la",
+    "chips": [
+      "Explica-ho",
+      "Corregeix-ho",
+      "Refactoritza",
+      "Documenta"
+    ],
+    "empty": "Selecciona primer un fragment de codi a l'editor.",
+    "short": "IA edita",
+    "noSelection": "Selecciona primer un fragment de codi a l'editor.",
+    "working": "Treballant…",
+    "error": "La IA no ha tornat fragment nou (cansa-ho una altra vegada).",
+    "chipFix": "Corregeix",
+    "chipRefactor": "Refactoritza",
+    "chipDocs": "Documenta",
+    "chipExplain": "Explica-ho"
+  },
+  "onb": {
+    "title": "Benvingut a NoOrbit",
+    "skip": "Saltar l'assistent",
+    "stepModel": "La teva IA",
+    "stepTheme": "El tema",
+    "stepReady": "A punt",
+    "intro": "Tria com vols que treballi la intel·ligència artificial. Ho pots canviar més tard des del menú IA ▸ Proveïdors.",
+    "cardLocal": "IA local (Ollama)",
+    "cardLocalDesc": "Clàssic i privat: esquerra correcte del model al teu Mac, sense compte, sense clau, sense internet obligat.",
+    "cardCloud": "IA al núvol",
+    "cardCloudDesc": "Enganxa una clau d'OpenAI, DeepSeek, Mistral… i treballa amb models grans sens cap GPU pròpia.",
+    "cardCloudNote": "Cal el teu clau (només al teu Mac)",
+    "cardRemote": "IA en servidor remot",
+    "cardRemoteDesc": "Puja el servei a una màquina amb GPU (DeepInfer/vLLM) per SFTP i connecta: les IAs treballen allà.",
+    "advanced": "Avançat",
+    "check": "Comprova",
+    "remoteHint": "Si encara no tens el servidor, ho pots configurar després a «Proveïdors ▸ Servidor d'IA remot».",
+    "themeLead": "Tria com vols veure NoOrbit (es pot canviar a Configuració).",
+    "theme": {
+      "dark": "Fosc",
+      "light": "Clar",
+      "gray": "Grafí"
+    },
+    "readyLead": "Tot a punt per començar.",
+    "readyHint": "Consell: arrossega una carpeta a l'editor per obrir-la com a projecte, i pregunta-hi el que vulguis al xat de la dreta.",
+    "back": "Enrere",
+    "next": "Següent",
+    "done": "Comencem"
   }
 }

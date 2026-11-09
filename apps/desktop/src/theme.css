@@ -28,6 +28,20 @@
   --radius-lg: 12px;
   --radius-xl: 16px;
 
+  /* Segell «high-end»: un únic ritme d'espaiat i de moviment per a tot.
+     Qualsevol component nou hauria de consumir ests tokens (no px solts):
+     és el que fa que l'apapp sencera sembre sameit de la mateixa escola. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --speed-fast: 0.14s;
+  --speed: 0.22s;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --shadow-lg: 0 18px 50px rgba(0, 0, 0, 0.45);
+
   --success: #4ade80;
   --error: #f87171;
   --warning: #fbbf24;

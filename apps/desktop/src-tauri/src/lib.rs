@@ -244,6 +244,7 @@ pub fn run() {
             commands::api::ai_provider_update,
             commands::api::ai_provider_remove,
             commands::api::ai_provider_test,
+            commands::api::ai_inline_complete,
             commands::api::ai_endpoint_check,
             commands::api::ai_remote_deploy,
             commands::api::ai_remote_verify,
