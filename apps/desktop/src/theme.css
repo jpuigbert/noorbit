@@ -142,6 +142,35 @@ body {
   --warning: #fbbf24;
 }
 
+/* ---- Tema VERD I DAURAT («Jade & Gold»): el favorit de la casa — base
+   minerals fosca amb verd jade com a accent i daurat de remat en els
+   gradients i microdetalls. Càlid, modern i fàcil de llegir. ---- */
+:root[data-theme="gold"] {
+  --bg-0: #0d1412;
+  --bg-1: #121b17;
+  --bg-2: #17231e;
+  --bg-3: #1e2f27;
+  --bg-4: #283d33;
+
+  --border: #1d2f27;
+  --border-2: #2d463a;
+
+  --text-0: #eef7f2;
+  --text-1: #bdd6c9;
+  --text-2: #8ba89a;
+  --text-3: #5f7a6c;
+
+  --accent: #2dd4a0;
+  --accent-hover: #4fe3b4;
+  --accent-2: #e8c465;
+
+  --accent-grad: linear-gradient(135deg, #2dd4a0 0%, #e8c465 100%);
+  --accent-soft: rgba(45, 212, 160, 0.13);
+  --success: #4ade80;
+  --error: #f87171;
+  --warning: #e8c465;
+}
+
 /* ---- Tema GROC ---- */
 :root[data-theme="yellow"] {
   --bg-0: #1a1606;
@@ -231,6 +260,29 @@ select {
 .icon-btn:hover {
   background: var(--bg-3);
   color: var(--text-0);
+}
+
+/* ---- Dreceres de teclat («⌘S»): fitxa de tecles, visible a menús ---- */
+.kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.7;
+  letter-spacing: 0.4px;
+  color: var(--text-2);
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+
+/* El teclat sempre sap on és: anell d'accent, subtil però clar. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .spin {

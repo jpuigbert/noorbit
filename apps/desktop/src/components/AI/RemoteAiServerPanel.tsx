@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Upload, Zap, Plug, Loader2 } from "lucide-react";
+import { Upload, Zap, Plug, Loader2, BookOpen } from "lucide-react";
 import { useT } from "../../i18n";
 import {
   useProviderStore,
@@ -31,6 +31,8 @@ export default function RemoteAiServerPanel() {
   const [report, setReport] = useState("");
   const [reportOk, setReportOk] = useState(false);
   const [check, setCheck] = useState<EndpointCheck | null>(null);
+  // Ajuda «pas a pas» per a gent que mai ha connectat un servidor desat.
+  const [tut, setTut] = useState(false);
 
   const hostTrim = host.trim();
   const apiPortNum = Number(apiPort) > 0 && Number(apiPort) <= 65535 ? Number(apiPort) : 8000;
@@ -247,6 +249,36 @@ export default function RemoteAiServerPanel() {
           {report}
         </div>
       )}
+
+      <div className="remote-tut">
+        <button className="btn sm" onClick={() => setTut(!tut)}>
+          <BookOpen size={12} />
+          {tut ? t("remote.tutHide") : t("remote.tutShow")}
+        </button>
+
+        {tut && (
+          <ol className="remote-tut-steps">
+            {["tut1", "tut2", "tut3", "tut4", "tut5", "tut6", "tut7"].map((k) => (
+              <li key={k}>
+                {k === "tut4" ? (
+                  <>
+                    {t("remote.tut4a")}
+                    <code className="remote-tut-cmd">ssh {user.trim() || "usuari"}@{hostTrim || "EL-MEU-SERVIDOR"}</code>
+                    {t("remote.tut4b")}
+                  </>
+                ) : (
+                  t(`remote.${k}`)
+                )}
+              </li>
+            ))}
+          </ol>
+        )}
+        {tut && (
+          <p className="empty-hint" style={{ marginTop: 4 }}>
+            {t("remote.tutNote")}
+          </p>
+        )}
+      </div>
 
       {/* Resultat del diagnòstic (models clicables: un clic els posa al camp) */}
       {check && (

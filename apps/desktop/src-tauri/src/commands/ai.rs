@@ -134,7 +134,19 @@ async fn chat_with_tools(
     // Unreal? projecte obert? imatges en local?) perquè el model no propose
     // el que aquest ordinador no pot fer.
     let status = runtools::tools_status_line(computer.permissions().enabled).await;
-    let manual = format!("{}\n\n{}{}", tools::DIRECTIVE_PROMPT, runtools::RUN_PROMPT, status);
+    // Tokens: el manual del navegador (≈380 tokens) NOMÉS entra quan la
+    // conversa parla de web/consultes externes — la resta de torns, econòmics.
+    let hist_text = opts
+        .history
+        .iter()
+        .map(|t| t.content.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let manual = if tools::manual_relevant(prompt, &hist_text) {
+        format!("{}\n\n{}{}", tools::DIRECTIVE_PROMPT, runtools::RUN_PROMPT, status)
+    } else {
+        format!("{}{}", runtools::RUN_PROMPT, status)
+    };
     let sys = match system {
         Some(s) => format!("{}\n\n{}", s, manual),
         None => manual,

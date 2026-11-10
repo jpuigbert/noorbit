@@ -4,7 +4,7 @@ const LS_AUTOSAVE = "noorbit.autosave";
 const LS_AUTOSAVE_DELAY = "noorbit.autosaveDelay";
 const LS_THEME = "noorbit.theme";
 
-export type Theme = "dark" | "light" | "gray" | "green" | "yellow";
+export type Theme = "dark" | "light" | "gray" | "green" | "yellow" | "gold";
 
 function loadBool(key: string, fallback: boolean): boolean {
   try {
@@ -31,6 +31,7 @@ interface UIState {
   chatOpen: boolean;
   showModelManager: boolean;
   showIaCatalog: boolean;
+  showRemoteServer: boolean;
   showSettings: boolean;
   showHelp: boolean;
   showPlugins: boolean;
@@ -61,6 +62,7 @@ interface UIState {
   setChatOpen: (open: boolean) => void;
   setShowModelManager: (v: boolean) => void;
   setShowIaCatalog: (v: boolean) => void;
+  setShowRemoteServer: (v: boolean) => void;
   setShowSettings: (v: boolean) => void;
   setShowPlugins: (v: boolean) => void;
   setShowHelp: (v: boolean) => void;
@@ -85,7 +87,7 @@ interface UIState {
 function loadTheme(): Theme {
   try {
     const v = localStorage.getItem(LS_THEME);
-    if (v === "light" || v === "gray" || v === "green" || v === "yellow" || v === "dark")
+    if (v === "light" || v === "gray" || v === "green" || v === "yellow" || v === "gold" || v === "dark")
       return v;
   } catch {
     /* sense persistència */
@@ -106,6 +108,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   chatOpen: true,
   showModelManager: false,
   showIaCatalog: false,
+  showRemoteServer: false,
   showSettings: false,
   showPlugins: false,
   showHelp: false,
@@ -131,6 +134,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setChatOpen: (open) => set({ chatOpen: open }),
   setShowModelManager: (v) => set({ showModelManager: v }),
   setShowIaCatalog: (v) => set({ showIaCatalog: v }),
+  setShowRemoteServer: (v) => set({ showRemoteServer: v }),
   setShowSettings: (v) => set({ showSettings: v }),
   setShowPlugins: (v) => set({ showPlugins: v }),
   setShowHelp: (v) => set({ showHelp: v }),

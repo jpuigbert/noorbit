@@ -1,8 +1,8 @@
 import React, { Component, type ErrorInfo, type ReactNode } from "react";
 import ReactDOM from "react-dom/client";
-// Ha d'importar-se primer: configura Monaco local (offline) + els seus workers
-// abans que qualsevol component <Editor /> es munti.
-import "./editor/monacoSetup";
+// NOTA v0.70: Monaco (3,9 MB + workers) JA NO es carrega a l'arrencada.
+// Es importa ÀJUS quan s'obre el primer fitxer de codi: fa l'app molt més
+// lleugera i ràpida d'iniciar (consulta src/editor/monReady.ts).
 import App from "./App";
 import { t } from "./i18n";
 import "./theme.css";

@@ -77,6 +77,7 @@ export default function SettingsModal() {
     { key: "light", label: t("settings.themeLight"), swatch: "#ffffff" },
     { key: "gray", label: t("settings.themeGray"), swatch: "#3b3f45" },
     { key: "green", label: t("settings.themeGreen"), swatch: "#143022" },
+    { key: "gold", label: t("settings.themeGold"), swatch: "#17231e" },
     { key: "yellow", label: t("settings.themeYellow"), swatch: "#302810" },
   ];
 

@@ -23,6 +23,7 @@ function defineNoOrbitThemes(mon: Monaco) {
   mon.editor.defineTheme("noorbit-gray", mk("#2b2d31"));
   mon.editor.defineTheme("noorbit-green", mk("#0c1a12"));
   mon.editor.defineTheme("noorbit-yellow", mk("#1a1606"));
+  mon.editor.defineTheme("noorbit-gold", mk("#0d1412"));
   _themesDefined = true;
 }
 
@@ -44,6 +45,8 @@ export function monacoThemeFor(ui: string): string {
       return "noorbit-gray";
     case "green":
       return "noorbit-green";
+    case "gold":
+      return "noorbit-gold";
     case "yellow":
       return "noorbit-yellow";
     default:

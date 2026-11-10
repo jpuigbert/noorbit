@@ -405,6 +405,9 @@
 .onb-dark { background: #0f0f15; }
 .onb-light { background: #f5f6f8; }
 .onb-gray { background: #3b3f45; }
+.onb-gold {
+  background: linear-gradient(135deg, #2dd4a0 0%, #e8c465 100%);
+}
 .onb-summary {
   display: flex;
   flex-direction: column;
@@ -416,4 +419,25 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   margin-bottom: var(--space-3);
+}
+
+/* ---- Il·lustracions SVG dels buits (pintaven amb el TEMA actiu) ---- */
+.empty-art {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+}
+.remote-server-art {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 12px;
+  opacity: 0.95;
+}
+.onb-art {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0 10px;
 }

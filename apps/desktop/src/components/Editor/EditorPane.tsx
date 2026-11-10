@@ -22,6 +22,8 @@ import {
   toggleAutocomplete,
 } from "../../editor/inlineComplete";
 import { aiReplaceSelection } from "../../editor/aiSelection";
+import { useMonacoReady } from "../../editor/monReady";
+import { ArtEmpty } from "../Illustrations";
 import { getEditor } from "../../editor/editorApi";
 import AiSelectionModal from "./AiSelectionModal";
 
@@ -188,20 +190,23 @@ export default function EditorPane() {
   const review = useEditReviewStore((s) => s.marks.find((m) => m.path === openFile?.path));
   const reviewing = !!review && !review.streaming;
 
+  // Monaco es carrega ÀJUS (primera obertura d'un fitxer de codi): fins que
+  // el seu chunk arribi, fem el marc de l'editor amb un placeholder de pes
+  // zero — l'arrencada de l'app no el toca mai.
+  const monReady = useMonacoReady();
+
   if (!openFile) {
     return (
-      <div className="editor-pane">
-        <div className="empty-hint" style={{ margin: "auto" }}>
-          <div style={{ fontSize: 14, marginBottom: 6 }}>{t("editor.noFile")}</div>
-          {t("editor.noFileHint")}
-        </div>
+      <div className="editor-pane empty-art">
+        <ArtEmpty />
+        <div style={{ fontSize: 14, marginBottom: 6, color: "var(--text-0)" }}>{t("editor.noFile")}</div>
+        <span className="empty-hint">{t("editor.noFileHint")}</span>
       </div>
     );
   }
 
   // Fitxer imatge: previsualització en lloc de codi. Monaco no pinten binari.
-  if (openFile.imagePath) {
-    return (
+  if (openFile.imagePath) {    return (
       <div className="editor-pane">
         <div className="editor-tabs">
           <div className="editor-tab">{openFile.name}</div>
@@ -225,6 +230,24 @@ export default function EditorPane() {
           </button>
         </div>
         <ImageViewer path={openFile.imagePath} name={openFile.name} />
+      </div>
+    );
+  }
+
+  // Fita de Monaco: mentre el chunk arriba (només la primera obertura),
+  // mostrem l'esquelet de l'editor — instantani, sense cap megabyte.
+  if (!monReady) {
+    return (
+      <div className="editor-pane">
+        <div className="editor-tabs">
+          <div className="editor-tab">
+            {openFile.dirty && <span className="dirty-dot" />}
+            {openFile.name}
+          </div>
+        </div>
+        <div className="empty-hint" aria-busy="true" style={{ margin: "auto" }}>
+          {t("editor.loading")}
+        </div>
       </div>
     );
   }

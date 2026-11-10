@@ -88,6 +88,7 @@ export default function MenuBar() {
       { label: t("settings.themeLight"), action: act("view.themeLight") },
       { label: t("settings.themeGray"), action: act("view.themeGray") },
       { label: t("settings.themeGreen"), action: act("view.themeGreen") },
+      { label: t("settings.themeGold"), action: act("view.themeGold") },
       { label: t("settings.themeYellow"), action: act("view.themeYellow") },
       { sep: true, label: "" },
       { label: t("settings.title"), kbd: "⌘,", action: act("view.settings") },
@@ -111,6 +112,7 @@ export default function MenuBar() {
     ai: [
       { label: t("ai.manager"), action: act("ai.models") },
       { label: t("ai.catalog"), action: act("ai.catalog") },
+      { label: t("menu.remoteServer"), action: act("ai.remoteServer") },
       { label: t("plugins.title"), action: act("ai.plugins") },
       { sep: true, label: "" },
       { label: t("rightPanel.agent"), action: act("ai.agent") },

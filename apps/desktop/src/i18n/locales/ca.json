@@ -92,7 +92,8 @@
     "window": "Finestra",
     "help": "Ajuda",
     "manual": "Manual d'ús…",
-    "about": "Quant a NoOrbit"
+    "about": "Quant a NoOrbit",
+    "remoteServer": "Servidor d'IA remot…"
   },
   "startup": {
     "title": "Benvingut a NoOrbit",
@@ -152,7 +153,8 @@
     "acOn": "IA",
     "acOff": "IA off",
     "acHintOn": "Autocomplete IA activat: suggeriments mentre escrius (model actiu)",
-    "acHintOff": "Autocomplete IA desactivat"
+    "acHintOff": "Autocomplete IA desactivat",
+    "loading": "Carregant l'editor…"
   },
   "rightPanel": {
     "preview": "Vista prèvia",
@@ -749,7 +751,8 @@
     "tasksSection": "Tasques llargues (degradació a segon pla)",
     "tasksHint": "Si una tasca de l'agent supera el límit de primer pla, passa a segon pla: baixa la prioritat, espaija les comprobacions i pots recuperar-la quan vulguis.",
     "foregroundLimit": "Límit de primer pla (segons)",
-    "totalLimit": "Límit total (segons; 0 = sense límit)"
+    "totalLimit": "Límit total (segons; 0 = sense límit)",
+    "themeGold": "Verd i daurat"
   },
   "palette": {
     "placeholder": "Escriu un comandament…",
@@ -841,7 +844,18 @@
     "checking": "Verificant…",
     "connect": "Connecta",
     "connectHint": "Verifica la API i afegeix el servidor com a proveïdor de NoOrbit",
-    "useModel": "Posa aquest model al formulari"
+    "useModel": "Posa aquest model al formulari",
+    "tutShow": "Com es fa? Ajuda pas a pas",
+    "tutHide": "Amaga l'ajuda",
+    "tut1": "Necessites una altra màquina amb GPU on fer treballar la IA: el teu PC d'escriptori, un servidor a casa, o un «VPS» llogat a la infraestructura que vulguis (Ascend SM100 per a DeepInfer, o NVIDIA per a vLLM). També funciona amb una màquina virtual a la mateixa xarxa.",
+    "tut2": "Assegura't que la màquina té el servei SSH engegat (a Linux gairebé sempre ja hi és) i que en coneixes l'adreça IP, l'usuari i la contrasenya. Es comprova obrint Terminal i fent «ssh usuari@IP» — si demana contrasenya i entra, tot a punt.",
+    "tut3": "Emplena els camps d'ací davall: Servidor (la IP), Protocol (SFTP és el més segur), Usuari i Contrasenya. La carpeta i el port de la API els pots deixar com estan.",
+    "tut4a": "Prem Puja: NoOrbit envia els fitxers del servei d'inferència per SFTP i et mostra un informe. Després obre el Terminal i entra al servidor amb ",
+    "tut4b": " per executar-hi l'últim pas (engegar el servei), que l'informe et deixarà escrit — copia'l i enganxa'l allà.",
+    "tut5": "Torna ací i prem Comprova: NoOrbit pregunta al servidor quins models té en marxa. Si no en surt cap, el més comú és que el port 8000 estigui tancat pel tallafocs: obre'l al servidor (p. ex. «ufw allow 8000» o el panell del teu proveïdor).",
+    "tut6": "Prem Connecta: escull el model que vols (si en surten and/quants, un clic al xip el tria) i el proveïdor queda afegit a NoOrbit.",
+    "tut7": "Ja tens la IA al servidor: tria el proveïdor «Servidor IA · …» a Proveïdor actiu i el xat, els especialistes i l'equip llançaran totes les seves respostes contra allà. El Mac només envia el text i rep el resultat: zero RAM de models.",
+    "tutNote": "Consell: «Comprova» només llegeix (no toca res); «Puja» escriu fitxers nous dins la carpeta remota; «Connecta» afegeix el proveïdor a la teva configuració. La contrasenya només es fa servir en aquells moments i no es desa mai al disc."
   },
   "aiEdit": {
     "title": "Edita la selecció amb la IA",
@@ -886,12 +900,16 @@
     "theme": {
       "dark": "Fosc",
       "light": "Clar",
-      "gray": "Grafí"
+      "gray": "Grafí",
+      "gold": "Verd i daurat"
     },
     "readyLead": "Tot a punt per començar.",
     "readyHint": "Consell: arrossega una carpeta a l'editor per obrir-la com a projecte, i pregunta-hi el que vulguis al xat de la dreta.",
     "back": "Enrere",
     "next": "Següent",
     "done": "Comencem"
+  },
+  "remoteServer": {
+    "title": "Servidor d'IA remot"
   }
 }

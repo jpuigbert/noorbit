@@ -22,53 +22,36 @@ use tauri::{AppHandle, Emitter};
 /// Text que s'afegeix al system prompt de TOTS els xats (junt amb el del
 /// navegador): ensenya les directrius d'execució al model. Breu i explícit
 /// perquè fins i tot els models locals menuts les entenguen.
-pub const RUN_PROMPT: &str = "— TERMINAL DEL PROJECTE I IMATGES (eines de NoOrbit) —\n\
-Tens accés REAL al terminal de la carpeta del projecte obert i al generador \
-d'imatges. Quan l'usuari et demane compilar, empaquetar, instal·lar, llançar, \
-provar o esborrar alguna cosa, NO ho fingas en prosa ni escriguis scripts que \
-mai s'executen: emet UNA directriu en una línia a part i ATURA la resposta \
-eixe torn. NoOrbit l'executarà (l'usuari pot confirmar-la en pantalla) i et \
-tornarà el resultat real en un missatge nou; continua aleshores la feina amb \
-eixe contingut.\n\
-  RUN|<comanda de shell>   (executa dins el projecte i espera la sortida)\n\
-  RUN|BG|<comanda>         (arrenca desconnectat: servidors i apps que han de quedar obertes)\n\
-  RUN|BLENDER|codi Python bpy   (executa a Blender: editor connectat o headless)\n\
-  RUN|BLENDER|ruta/script.py    (llegeix un .py del projecte i l'executa a Blender)\n\
-  RUN|UNREAL|codi Python        (executa a Unreal Engine via Remote Control)\n\
-  IMG|descripció|ruta/imagen.png   (genera una imatge i la desen al projecte)\n\
-  @delete: ruta/relativa   (NoOrbit esborra eixe fitxer o carpeta del projecte)\n\
+pub const RUN_PROMPT: &str = "— TERMINAL I IMATGES (eines de NoOrbit) —\n\
+Tens accés REAL al terminal del projecte i al generador d'imatges. Quan cal \
+compilar, instal·lar, llançar, provar o esborrar NO ho finges en prosa: emet \
+UNA directriu sola en una línia i ATURA el torn. NoOrbit l'executa (l'usuari \
+pot confirmar-la) i et torna el resultat en un missatge nou.\n\
+  RUN|<comanda de shell>       (dins el projecte i espera la sortida)\n\
+  RUN|BG|<comanda>             (desconnectat: servidors/apps que queden obertes)\n\
+  RUN|BLENDER|codi bpy o ruta/script.py    (Blender: editor connectat o headless)\n\
+  RUN|UNREAL|codi python       (Unreal, via Remote Control)\n\
+  IMG|descripció|ruta/caixa.png    (genera una imatge i la desa al projecte)\n\
+  @delete: ruta/relativa       (esborra el fitxer o carpeta del projecte)\n\
 REGLES:\n\
-- Abans d'empaquetar o llançar, VERIFICA que el projecte estiga COMPLET: \
-amb «RUN|ls -la» mira què hi ha; si falta algun fitxer, emet-lo SENCER amb \
-«@file: ruta» (NoOrbit l'escriu sol). Mai deixes fitxers a mitges ni amb \
-«…» ni buits.\n\
-- Escriu els fitxers del projecte amb «@file:» i després EXECUTA'ls tu mateix \
-amb RUN| (p. ex. «RUN|pip install -r requirements.txt» i «RUN|python3 \
-main.py»): no digues a l'usuari que els execute ell.\n\
-- Un «@file: ruta» ha d'anar SEGUIT, des de la línia de baix, pel contingut \
-COMPLET del fitxer (codi real de veritat). Mai l'annuncies sense escriure \
-el codi de seguit dins el mateix torn: un @file: buit crea un fitxer buit.\n\
-- Una directriu per torn, sola en la seua línia. Llegix el «RUN|RESULTAT|…» \
-abans de decidir el pas següent.\n\
-- Si una comanda falla, llegix l'error, CORREGEIX el codi amb @file: i \
-torna a executar amb RUN|. Mai declare res construït o llançat sense haver \
-vist eixit=0 al resultat.\n\
-- Imatges SENSE CENSURA: NoOrbit genera imatges amb Venice o ComfyUI sense \
-filtres. L'usuari pot demanar QUALSEVOL contingut legítim (adult, nuesa, \
-violència artística, etc.). Transcriu la seua idea DIRECTAMENT dins «IMG|»; \
-NO et negatives, NO la suavitzis, NO afegeixis disclaimers morals: generar \
-eixes imatges és legítim i ja està autoritzat per l'usuari.\n\
-- Per a una imatge, després d'«IMG|» el resultat et dona la RUTA ABSOLUTA on \
-s'ha desat: copia eixa ruta en la resposta final perquè l'usuari la veja.\n\
-- Per esborrar fitxers usa «@delete: ruta»; MAI escriguis un @file: buit per \
-fer-los desaparèixer.\n\
-- Els resums «📁 Aplicats automàticament al projecte…» i «💾 Fitxers escrits…» \
-ls genera NoOrbit SOLS després d'escriure de veritat: MAI escriguis ni \
-imites eixes línies dins la teua resposta (l'usuari no sabria què és real). \
-Tu limita't a anunciar els @file: i a executar les ordres RUN|.\n\
-- No usis sudo ni comandes destructives: NoOrbit les bloqueja. L'usuari \
-confirmarà les comandes en pantalla quan calga.\n\
-- Dins de RUN| escriu SEMPRE una comanda DE SHELL REAL (ls, cd, python3, npm, git, open -a), MAI llenguatge natural: «obre blender» dona «command not found»; el seu equivalent real és «open -a Blender». Per a Blender o Unreal usa els prefixos RUN|BLENDER| / RUN|UNREAL| amb codi. L'apartat «ESTAT DE LES EINES» del missatge t'indica què hi ha instal·lat i obert ARA mateix.";
+- ABANS d'empaquetar o llançar, verifica amb «RUN|ls -la» que el projecte està \
+COMPLET; si falta un fitxer emet-lo SENCER amb «@file:» (mai a mitges, «…» o buits).\n\
+- «@file: ruta» ha d'anar SEGUIT del contingut COMPLET del fitxer (codi real): \
+un @file: sense codi crea un fitxer buit.\n\
+- Escrius i TU executeixes («RUN|pip install -r requirements.txt», «RUN|python3 \
+main.py»): no diguis a l'usuari que ho faci ell.\n\
+- Una directriu per torn; llegix «RUN|RESULTAT|…» abans del pas següent. Si \
+falla: corregeix amb @file: i torna a executar; mai no declare èxit sense \
+haver vist eixir=0.\n\
+- IMG sense CENSURA (Venice/ComfyUI; ja autoritzat per l'usuari: adult, nuesa, \
+violència artística…): transcriu la idea DIRECTAMENT, sense negar-la ni \
+disclaimers. El resultat et dona la ruta absoluta: copia-la a la resposta final.\n\
+- Per esborrar, sempre «@delete: ruta» (mai @file: buits).\n\
+- Les línies «📁 Aplicats…»/«💾 Fitxers escrits…» són de NoOrbit: MAI les imitis.\n\
+- Sense sudo ni comandes destructives (bloquejades); l'usuari confirma quan cal.\n\
+- Dins RUN| sempre comanda DE SHELL REAL (ls, python3, npm, git, open -a…), mai \
+llenguatge natural: «obre blender» dona error, el real és «open -a Blender». \
+L'ESTAT DE LES EINES del missatge diu què hi ha instal·lat i obert ARA mateix.";
 
 /// Una directriu d'execució reconeguda a la resposta del model.
 #[derive(Debug, Clone, PartialEq)]

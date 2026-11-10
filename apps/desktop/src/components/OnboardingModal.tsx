@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { useT } from "../i18n";
 import { useUIStore } from "../stores/uiStore";
+import { ArtWelcome } from "./Illustrations";
 
 /// Assistent de 3 passos que surt UNA sola vegada (primera arrencada):
 ///   1) IA amb la qual treballar  2) tema  3) resum + començar.
@@ -26,8 +27,8 @@ export default function OnboardingModal() {
 
   const [step, setStep] = useState(0);
   const [choice, setChoice] = useState<null | "ollama" | "cloud" | "remote">(null);
-  const [theme, setTheme] = useState<"dark" | "light" | "gray">(() =>
-    useUIStore.getState().theme as "dark" | "light" | "gray"
+  const [theme, setTheme] = useState<"dark" | "light" | "gray" | "gold">(() =>
+    useUIStore.getState().theme as "dark" | "light" | "gray" | "gold"
   );
   const [checking, setChecking] = useState(false);
   const [ollamaOk, setOllamaOk] = useState<boolean | null>(null);
@@ -163,7 +164,7 @@ export default function OnboardingModal() {
             <div>
               <p className="onb-lead">{t("onb.themeLead")}</p>
               <div className="onb-themes">
-                {(["dark", "light", "gray"] as const).map((th) => (
+                {(["dark", "light", "gray", "gold"] as const).map((th) => (
                   <button
                     key={th}
                     className={"onb-theme" + (theme === th ? " picked" : "")}
@@ -183,6 +184,7 @@ export default function OnboardingModal() {
 
           {step === 2 && (
             <div>
+              <div className="onb-art"><ArtWelcome size={140} /></div>
               <p className="onb-lead">{t("onb.readyLead")}</p>
               <div className="onb-summary">
                 <div>

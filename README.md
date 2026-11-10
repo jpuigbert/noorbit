@@ -41,6 +41,14 @@ Tota la documentació ampliada és a la **wiki**: <https://github.com/jpuigbert/
 
 ---
 
+## Novetats de la 0.70
+
+- **Menu «IA ▸ Servidor d'IA remot»**: el mateix assistent (SFTP → SSH → Connecta), ara amb una entrada pròpia a la paleta de comandes i **un tutorial pas a pas inclòs** (màquina amb GPU, SSH, Puja, Comprova, Connecta — amb errors típics com el port 8000 del tallafocs).
+- **Arrencada molt més ràpida i lleugera**: Monaco (4 MB + 8 MB de workers) ja NO es carrega a l'inici: s'importa ÀJUS quan obres el primer fitxer de codi o el primer diff. Sense cap fitxer obert, el seu pes no arriba a descarregar-se.
+- **Menys tokens a cada resposta** (−40% o més): el manual del terminal s'ha comprimit (859 → 514 tokens) i el del navegador NOMÉS entra quan la conversa en parla (URLs, «cerca», «pregunta a…»), no a cada torn.
+- **Tema «Verd i daurat»** a Configuració ▸ Aparença (i a l'onboarding): base mineral fosca, accent jade i daurat de remat — també a l'editor.
+- **Detalls de disseny moderns**: dreceres de teclat amb fitxa de tecles físicques, anell d'accent al focus, veta degradada a les files del menú, modals amb entrada animada — i **il·lustracions SVG pròpies** (que pinten amb el tema actiu) als buits de l'editor, de l'onboarding i del servidor remot.
+
 ## Novetats recents (0.62 → 0.68)
 
 - **Servidor d'IA remot** (Proveïdors › «Servidor d'IA remot»): la GPU treballa fora del Mac. NoOrbit puja dos fitxers al teu servidor per **SFTP/FTPS/FTP** (amb `curl`, sense dependències noves): l'script d'instal·lació `noorbit-ai-server.sh` i una **API OpenAI-compatible en Python/FastAPI** que va davant del motor **DeepInfer** (DeepSeek, SM100/Ascend) o **vLLM**. Un cop executat l'script via SSH, el botó «Comprova» diagnostica la connexió des del Mac i sempre diu EL MOTIU exacte (servidor aturat, clau dolenta, URL 404, model encara carregant…), i «Connecta» afegeix el servidor com a proveïdor normal: les IAs descarregades al servidor treballen allà i **només les respostes i els canvis tornen al local per HTTP** (zero RAM d'inferència al Mac).

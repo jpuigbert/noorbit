@@ -89,6 +89,7 @@ export const actions: Record<string, () => void | Promise<void>> = {
   // IA (pròpi de NoOrbit, com el xat de Qoder)
   "ai.models": () => useUIStore.getState().setShowModelManager(true),
   "ai.catalog": () => useUIStore.getState().setShowIaCatalog(true),
+  "ai.remoteServer": () => useUIStore.getState().setShowRemoteServer(true),
   "ai.plugins": () => useUIStore.getState().setShowPlugins(true),
   "ai.agent": () => usePreviewStore.getState().setRightTab("agent"),
   "ai.computer": () => usePreviewStore.getState().setRightTab("integra"),
@@ -101,6 +102,7 @@ export const actions: Record<string, () => void | Promise<void>> = {
   "view.themeLight": () => useUIStore.getState().setTheme("light"),
   "view.themeGray": () => useUIStore.getState().setTheme("gray"),
   "view.themeGreen": () => useUIStore.getState().setTheme("green"),
+  "view.themeGold": () => useUIStore.getState().setTheme("gold"),
   "view.themeYellow": () => useUIStore.getState().setTheme("yellow"),
 
   // Ajuda
@@ -158,6 +160,7 @@ export const commandList: CommandDef[] = [
   { id: "git.open", labelKey: "menu.gitPanel" },
   { id: "ai.models", labelKey: "ai.manager" },
   { id: "ai.catalog", labelKey: "ai.catalog" },
+  { id: "ai.remoteServer", labelKey: "menu.remoteServer" },
   { id: "ai.plugins", labelKey: "plugins.title" },
   { id: "ai.agent", labelKey: "rightPanel.agent" },
   { id: "ai.computer", labelKey: "rightPanel.computer" },
@@ -169,6 +172,7 @@ export const commandList: CommandDef[] = [
   { id: "view.themeLight", labelKey: "settings.themeLight" },
   { id: "view.themeGray", labelKey: "settings.themeGray" },
   { id: "view.themeGreen", labelKey: "settings.themeGreen" },
+  { id: "view.themeGold", labelKey: "settings.themeGold" },
   { id: "view.themeYellow", labelKey: "settings.themeYellow" },
   { id: "help.manual", labelKey: "menu.manual" },
 ];

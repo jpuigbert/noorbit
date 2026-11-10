@@ -52,6 +52,26 @@ de «CODI» i és útil per a la tasca, INTEGRAR-LO al projecte: revisa'l, \
 adapta'l i emet cada fitxer amb una línia «@file: ruta» seguida del \
 contingut complet (sense tanques): NoOrbit els escriu SOLS al workspace.";
 
+/// Decideix si el manual del navegador cal en aquest torn. Els qui no
+/// parlen d'informació externa mai no en fan ús, i el DIRECTIVE_PROMPT ocupa
+/// ~380 tokens en CADA torn: el paguem quan la conversa hi té indicis
+/// (URLs, "navega", "cerca", "pregunta a ChatGPT"…) o quan el mateix model
+/// ja ha emprat «NB|» en curs de la sessió.
+pub fn manual_relevant(prompt: &str, hist_text: &str) -> bool {
+    const CLUES: &[&str] = &[
+        "http", "www.", "url", "naveg", "browser", "internet", "web",
+        "pàgina", "pagina", "en línia", "online", "cerca i", "cercador",
+        "busca ", "cerca ", "buscar", "consulta", "dades actuals", "actualitat",
+        "notícies", "noticies", "pregunta a", "dimano la", "nb|", "preu de",
+        "conversió de", "temps actual", "el temps a", "quina ia",
+    ];
+    let hay = format!("{} {}", prompt.to_lowercase(), hist_text.to_lowercase());
+    if hay.contains("nb|") {
+        return true; // ja l'estem usant: el manual no falta mai en curs
+    }
+    CLUES.iter().any(|c| hay.contains(c))
+}
+
 /// Una directriu reconeguda a la resposta del model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum NBAction {

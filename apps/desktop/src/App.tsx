@@ -30,6 +30,7 @@ import { markForPath, resolveMark } from "./stores/editReviewStore";
 import NewProjectModal from "./components/NewProjectModal";
 import StartupScreen from "./components/StartupScreen";
 import OnboardingModal, { shouldShowOnboarding } from "./components/OnboardingModal";
+import RemoteServerModal from "./components/RemoteServerModal";
 import AccountModal from "./components/Account/AccountModal";
 
 /// Autodesat (com l'«Auto Save» de VS Code): desa el fitxer obert poc
@@ -281,6 +282,7 @@ export default function App() {
       <NewProjectModal />
       <StartupScreen />
       {useUIStore((s) => s.showOnboarding) && <OnboardingModal />}
+      <RemoteServerModal />
       <AccountModal />
     </div>
   );

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DiffEditor } from "@monaco-editor/react";
+import { useMonacoReady } from "../../editor/monReady";
 import { GitBranch, RefreshCw, ArrowDown, ArrowUp, Check, Archive, History, Undo2 } from "lucide-react";
 import { useT } from "../../i18n";
 import { useUIStore } from "../../stores/uiStore";
@@ -70,6 +71,9 @@ const STATUS_LABEL: Record<string, string> = {
 /// Panell de Git integrat, com la vista Source Control de VS Code:
 /// llista de fitxers canviats, diff d'un fitxer, commit, push i pull.
 export default function GitPanel() {
+  // El DiffEditor de Monaco es carrega ÀJUS: sense cap fitxer de codi obert
+  // mai, el seu chunk (3,9 MB) no arriba a descarregar-se a l'arrencada.
+  const monReady = useMonacoReady();
   const { t } = useT();
   const root = useWorkspaceStore((s) => s.root);
   const [status, setStatus] = useState<GitStatus | null>(null);
@@ -215,7 +219,16 @@ export default function GitPanel() {
         </div>
       </div>
 
-      {diff ? (
+      {diff && !monReady ? (
+        <div className="git-diff">
+          <div className="git-diff-head">
+            <span className="git-diff-path">{diff.path}</span>
+            <button className="btn sm" onClick={() => setDiff(null)}>
+              {t("common.close")}
+            </button>
+          </div>
+        </div>
+      ) : diff ? (
         <div className="git-diff">
           <div className="git-diff-head">
             <span className="git-diff-path">{diff.path}</span>

@@ -85,15 +85,36 @@
   font-size: 12.5px;
   width: 100%;
   text-align: left;
+  position: relative;
+  transition: background var(--speed-fast) var(--ease-out), color var(--speed-fast) var(--ease-out);
 }
 .menu-row:hover {
   background: var(--bg-3);
   color: var(--text-0);
 }
+/* Veta de l'accent (degradat de la casa) a la fila sota el cursor. */
+.menu-row:hover::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 22%;
+  bottom: 22%;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--accent-grad);
+}
 .menu-row .kbd {
   color: var(--text-3);
-  font-size: 11px;
+  font-size: 10px;
   font-family: var(--font-mono);
+  padding: 1px 5px;
+  margin-left: 2px;
+  letter-spacing: 0.4px;
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  white-space: nowrap;
 }
 .menu-sep {
   height: 1px;
