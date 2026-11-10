@@ -55,6 +55,39 @@ export default function ExpertsPanel() {
   const togglePick = (id: string) =>
     setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
+  // CREA EQUIP RÀPID: sense haver de crear especialistes a mà, un clic
+  // prepara l'equip bàsic (Arquitecte · Programador · Revisor) amb rols
+  // pensats per treballar JUNTS sobre el projecte.
+  const QUICK_TEAM: ExpertInput[] = [
+    {
+      name: "Arquitecte",
+      role: "Estructura i decisions",
+      systemPrompt:
+        "Ets l'ARQUITECTE de l'equip. Decideixes l'estructura del projecte, quins fitxers " +
+        "cal crear o canviar i per què. Respon breu i concret: llista de fitxers i decisions.",
+      model: null,
+    },
+    {
+      name: "Programador",
+      role: "Escriu el codi",
+      systemPrompt:
+        "Ets el PROGRAMADOR de l'equip. Escrius/modifiques el codi que l'arquitecte defineix. " +
+        "Emet SEMPRE cada fitxer com «@file: ruta/fitxer.ext» seguit del codi COMPLET en bloc ```.",
+      model: null,
+    },
+    {
+      name: "Revisor",
+      role: "Qualitat i errors",
+      systemPrompt:
+        "Ets el REVISOR de l'equip. Revises el codi dels altres, detectes errors de sintaxi " +
+        "o lògica i proposes la versió corregida mínima. Concís i pràctic.",
+      model: null,
+    },
+  ];
+  const quickTeam = async () => {
+    for (const e of QUICK_TEAM) await s.create(e);
+  };
+
   const runTeam = () => {
     void s.runTeam(goal, picked.length > 0 ? picked : s.experts.map((e) => e.id));
   };
@@ -119,6 +152,17 @@ export default function ExpertsPanel() {
       {s.experts.length === 0 && !form && (
         <div className="empty-hint" style={{ padding: 12 }}>
           {t("experts.empty")}
+          <div style={{ marginTop: 10 }}>
+            <button
+              className="btn sm primary"
+              disabled={s.busy}
+              title={t("experts.quickTeamHint")}
+              onClick={() => void quickTeam()}
+            >
+              {s.busy && <Loader2 size={12} className="spin" />}
+              <Users size={12} /> {t("experts.quickTeam")}
+            </button>
+          </div>
         </div>
       )}
 

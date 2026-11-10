@@ -72,21 +72,34 @@ pub struct ComputerController {
 /// que no poden amagar cap programa d'execució a dins. Els guions i anys de
 /// »rm/sudo…» ja quedar bloquejats per `is_forbidden`.
 fn is_harmless_read(command: &str) -> bool {
-    const SAFE: &[&str] = &["ls", "pwd", "whoami", "id", "uname", "date", "echo", "cat",
+    const SAFE: &[&str] = &["ls", "pwd", "cd", "whoami", "id", "uname", "date", "echo", "cat",
         "head", "tail", "wc", "df", "du", "stat", "file", "which", "env", "uptime",
         "ps", "sw_vers", "system_profiler", "hostname"];
     let c = command.trim();
-    // Cadena o substitució → pot amagar res: no ho preperem.
-    if c.contains('|') || c.contains(';') || c.contains("&&")
-        || c.contains('`') || c.contains("$(") || c.contains('>')
-        || c.contains('<')
-    {
+    // Substitució de comanda → pot amagar res: no ho preperem.
+    if c.contains('`') || c.contains("$(") {
         return false;
     }
-    let first = c.split_whitespace().next().unwrap_or("");
-    // Permet amb ruta completa tampoc: `/bin/ls` = primer paraula llarg
-    let base = first.rsplit('/').next().unwrap_or(first);
-    SAFE.contains(&base)
+    // Cadena «cd projecte && cat README.md» o «a; b»: és inofensiva si TOTS
+    // els segments són lectures inofensives (abans un sol `&&` ho rebutjava
+    // tot: la IA que mira abans d'actuar preguntava cada vegada).
+    for seg in c.split("&&").flat_map(|s| s.split(';')) {
+        let seg = seg.trim();
+        if seg.is_empty() {
+            continue;
+        }
+        // Redireccions/tub dins d'un segment → pot escriure: no és lectura.
+        if seg.contains('|') || seg.contains('>') || seg.contains('<') {
+            return false;
+        }
+        let first = seg.split_whitespace().next().unwrap_or("");
+        // Amb ruta completa també val: `/bin/ls` → base «ls».
+        let base = first.rsplit('/').next().unwrap_or(first);
+        if !SAFE.contains(&base) {
+            return false;
+        }
+    }
+    true
 }
 
 /// Patrons intrinsicament destructius; no s'executen mai, encara que l'usuari
@@ -441,8 +454,13 @@ impl ComputerController {
             ));
         }
 
-        // Cal demanar confirmació? (sempre si confirm_each, o si no és a la allowlist)
-        if perms.confirm_each || !self.is_preapproved(command) {
+        // Cal demanar confirmació? ABANS: «confirm_each || !preapproved» — amb
+        // «confirma cada comanda» activat, «Recorda'm sempre» NO VALIA RES i
+        // la mateixa finestra preguntava una vegada i una altra. Ara el que
+        // està recordat (per sempre o per sessió) i les lectures inofensives
+        // NO pregunten, tal com promet la finestra de permisos; la resta,
+        // amb confirm_each activat, sempre es confirmen.
+        if !self.is_preapproved(command) {
             let id = format!("req-{}", self.counter.fetch_add(1, Ordering::SeqCst));
             let (tx, rx) = oneshot::channel();
             self.pending.lock().unwrap().insert(id.clone(), tx);

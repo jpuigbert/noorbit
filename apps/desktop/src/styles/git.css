@@ -175,3 +175,54 @@
   border-top: 1px solid var(--border);
   white-space: pre-wrap;
 }
+
+/* ── Núvol d'equip: connectar el projecte i sincronitzar entre dispositius ── */
+.git-cloud {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-1);
+  background: var(--bg-2);
+}
+.git-cloud-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  min-height: 28px;
+}
+.git-cloud-url {
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.git-cloud-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+}
+.git-cloud-badge {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.git-cloud-badge.up {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.git-cloud-badge.down {
+  color: var(--gold, #e8c465);
+  background: rgba(232, 196, 101, 0.12);
+}
+.git-cloud-spacer {
+  flex: 1;
+}
+.git-cloud-ago {
+  font-size: 10.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+}

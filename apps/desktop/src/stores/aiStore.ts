@@ -10,12 +10,16 @@ export interface OllamaModel {
 export interface SuggestedModel {
   name: string;
   description: string;
+  /// Mida de la descàrrega en bytes (aproximada al catàleg).
+  size?: number | null;
 }
 
 /// Model disponible al núvol d'Ollama (ollama.com).
 export interface CloudModel {
   name: string;
   description: string;
+  /// Mida de la descàrrega en bytes, si la font la diu (null: no es mostra).
+  size?: number | null;
 }
 
 export interface PullStatus {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, Trash2, Zap, Star, Pencil, Loader2 } from "lucide-react";
+import { Plus, Trash2, Zap, Star, Pencil, Loader2, Power } from "lucide-react";
 import { useT } from "../../i18n";
 import HarnessSection from "./HarnessSection";
 import RemoteAiServerPanel from "./RemoteAiServerPanel";
@@ -21,6 +21,11 @@ const emptyForm = (): ProviderInput => ({
   token: "",
   enabled: true,
 });
+
+/// Un servidor LOCAL (LM Studio, vLLM, DeepInfer a 127.0.0.1…) no demana cap
+/// clau: allà «sense token» no és cap avís, és el normal.
+const isLocal = (url: string): boolean =>
+  /localhost|127\.0\.0\.1|0\.0\.0\.0|::1/.test(url.toLowerCase());
 
 /// Preconfiguracions d'un sol clic: omplin el formulari amb la URL i el
 /// model adequats perquè l'usuari només hi enganxe el token.
@@ -96,6 +101,7 @@ export default function ProviderManager() {
     checkEndpoint,
     checking,
     lastCheck,
+    setEnabled,
   } = useProviderStore();
 
   const [form, setForm] = useState<ProviderInput>(emptyForm());
@@ -172,15 +178,37 @@ export default function ProviderManager() {
         {providers.map((p) => {
           const tst = lastTest[p.id];
           return (
-            <div key={p.id} className={"prov-row" + (active === p.id ? " active" : "")}>
+            <div
+              key={p.id}
+              className={"prov-row" + (active === p.id ? " active" : "") + (p.enabled ? "" : " off")}
+            >
               <div className="prov-main">
                 <div className="prov-title">
                   {active === p.id && <Star size={12} />} {p.name}
                   <span className="prov-model">{p.model}</span>
+                  {/* ESTAT ACTIU/INACTIU amb toggle MANUAL: proveïdors com
+                      DeepInfer (servidor GPU) venen desactivats de fàbrica;
+                      quan l'usuari té el servidor en marxa, ho activa aquí
+                      amb un clic — sense obrir el formulari ni token. */}
+                  <button
+                    className={"prov-toggle" + (p.enabled ? " on" : "")}
+                    title={
+                      p.enabled ? t("providers.deactivate") : t("providers.activate")
+                    }
+                    onClick={() => void setEnabled(p.id, !p.enabled)}
+                  >
+                    <Power size={11} /> {p.enabled ? t("providers.on") : t("providers.off")}
+                  </button>
                 </div>
                 <div className="prov-url">{p.base_url}</div>
                 <div className="prov-token">
-                  {p.has_token ? `${p.token_masked}` : "⚠ sense token"}
+                  {p.has_token
+                    ? `${p.token_masked}`
+                    : // Un servidor LOCAL (LM Studio, vLLM/DeepInfer…) no demana
+                      // cap clau: «sense token» no és cap problema allà.
+                      isLocal(p.base_url)
+                      ? "— local: no cal token"
+                      : "⚠ sense token"}
                 </div>
                 {tst && (
                   <div className={"prov-test " + (tst.ok ? "ok" : "fail")}>

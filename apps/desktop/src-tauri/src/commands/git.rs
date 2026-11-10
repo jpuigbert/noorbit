@@ -319,3 +319,156 @@ pub async fn git_log(limit: Option<usize>) -> Result<String, String> {
     .await
     .map_err(|e| e.to_string())?
 }
+
+// ─── Núvol: feina en equip des de diversos dispositius ──────────────────────
+// Un projecte connectat a un repositori del núvol (GitHub, GitLab, un Gitea
+// propi…) pot ser editat EN PARAL·LEL per més d'un NoOrbit: cada dispositiu
+// baixa el que els altres han fet i puja el seu. La sincronització pot ser
+// manual (1 clic) o automàtica (el frontend ho crida cada interval).
+
+/// On apunta el projecte: la URL del remot `origin`, si en té.
+#[derive(Debug, Clone, Serialize)]
+pub struct RemoteInfo {
+    pub remote: bool,
+    pub url: Option<String>,
+}
+
+/// URL del remot `origin` del projecte (cap si encara no està connectat).
+#[command]
+pub async fn git_remote_get() -> Result<RemoteInfo, String> {
+    let root = root_or_err()?;
+    tokio::task::spawn_blocking(move || {
+        let has = run_git(&root, &["remote"]).map(|s| !s.trim().is_empty())?;
+        if !has {
+            return Ok(RemoteInfo {
+                remote: false,
+                url: None,
+            });
+        }
+        let url = run_git(&root, &["remote", "get-url", "origin"])
+            .ok()
+            .map(|s| s.trim().to_string());
+        Ok(RemoteInfo {
+            remote: true,
+            url,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// CONNECTA el projecte a un repositori del núvol (el pas de 1 clic per
+/// treballar en equip): si no hi ha remot, `remote add origin URL`; si ja
+/// n'hi ha, canvia la URL. A partir d'açí tots els NoOrbit que apunten al
+/// mateix repositori editen el mateix projecte.
+#[command]
+pub async fn git_remote_set(url: String) -> Result<String, String> {
+    let root = root_or_err()?;
+    let url = url.trim().to_string();
+    if url.is_empty() {
+        return Err("Cal la URL del repositori (https://… o git@…).".into());
+    }
+    tokio::task::spawn_blocking(move || {
+        if run_git(&root, &["rev-parse", "--git-dir"]).is_err() {
+            run_git(&root, &["init"])?;
+        }
+        let has = run_git(&root, &["remote"]).map(|s| !s.trim().is_empty())?;
+        if has {
+            run_git(&root, &["remote", "set-url", "origin", &url])
+        } else {
+            run_git(&root, &["remote", "add", "origin", &url])
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Quant queda per sincronitzar: commits locals que falten per pujar (ahead)
+/// i commits del núvol que falten per baixar (behind). Sense connexió o sense
+/// upstream torna zeros: no bloqueja mai la UI.
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncStatus {
+    pub remote: bool,
+    pub ahead: i64,
+    pub behind: i64,
+}
+
+#[command]
+pub async fn git_sync_status() -> Result<SyncStatus, String> {
+    let root = root_or_err()?;
+    tokio::task::spawn_blocking(move || {
+        let has = run_git(&root, &["remote"]).map(|s| !s.trim().is_empty())?;
+        if !has {
+            return Ok(SyncStatus {
+                remote: false,
+                ahead: 0,
+                behind: 0,
+            });
+        }
+        // Baixa silenciosa de referències: sense això els comptadors no saben
+        // el que s'han fet els altres dispositius. Si no hi ha xarxa, seguim
+        // amb el que sabem (no és un error).
+        let _ = run_git(&root, &["fetch", "--quiet"]);
+        let branch = run_git(&root, &["rev-parse", "--abbrev-ref", "HEAD"])
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|_| "main".into());
+        let counts = run_git(
+            &root,
+            &["rev-list", "--left-right", "--count", &format!("origin/{branch}...HEAD")],
+        )
+        .map(|s| s.trim().to_string())
+        .ok();
+        // Format: «<darrere>\t<davant>».
+        let mut st = SyncStatus {
+            remote: true,
+            ahead: 0,
+            behind: 0,
+        };
+        if let Some(c) = counts {
+            let mut it = c.split_whitespace();
+            st.behind = it.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+            st.ahead = it.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+        }
+        Ok(st)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// SINCRONITZACIÓ COMPLETA d'equip: commit dels canvis (si n'hi ha) + baixa
+/// del que els altres han fet (`pull --rebase` amb autostash, per no perdre
+/// res a mig fer) + pujada. És la passada que fa el mode automàtic cada
+/// interval i el botó «Sincronitza» a mida: cap dispositiu queda sense pujar.
+#[command]
+pub async fn git_sync(message: Option<String>) -> Result<String, String> {
+    let root = root_or_err()?;
+    tokio::task::spawn_blocking(move || {
+        let branch = run_git(&root, &["rev-parse", "--abbrev-ref", "HEAD"])
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|_| "main".into());
+        let mut out = String::new();
+        // 1) Commit dels canvis locals (si n'hi ha) amb el missatge donat o
+        //    un genèric d'equip.
+        let dirty = run_git(&root, &["status", "--porcelain"])?;
+        if !dirty.trim().is_empty() {
+            let msg = message
+                .as_deref()
+                .map(str::trim)
+                .filter(|m| !m.is_empty())
+                .unwrap_or("Sincronització d'equip (NoOrbit)");
+            run_git(&root, &["add", "-A"])?;
+            out.push_str(&run_git(&root, &["commit", "-m", msg])?);
+        }
+        // 2) Baixa del que han fet els altres. `--rebase --autostash` aplica
+        //    el nostre treball NO committat a sobre sense perdre-lo.
+        let upstream = run_git(&root, &["rev-parse", "--verify", "--quiet", &format!("origin/{branch}")]).is_ok();
+        if upstream {
+            out.push_str(&run_git(&root, &["pull", "--rebase", "--autostash"])?);
+        }
+        // 3) Puja: si la branca encara no té upstream, la lligam a origin.
+        out.push_str(&run_git(&root, &["push", "-u", "origin", &branch])?);
+        Ok(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}

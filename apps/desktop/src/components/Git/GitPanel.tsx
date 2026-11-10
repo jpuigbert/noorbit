@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DiffEditor } from "@monaco-editor/react";
 import { useMonacoReady } from "../../editor/monReady";
-import { GitBranch, RefreshCw, ArrowDown, ArrowUp, Check, Archive, History, Undo2 } from "lucide-react";
+import {
+  GitBranch, RefreshCw, ArrowDown, ArrowUp, Check, Archive, History, Undo2,
+  Cloud, CloudUpload, Repeat,
+} from "lucide-react";
 import { useT } from "../../i18n";
 import { useUIStore } from "../../stores/uiStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
@@ -29,6 +32,17 @@ interface FileDiff {
 interface StashEntry {
   index: number;
   message: string;
+}
+/// On apunta el projecte al núvol (remot `origin`).
+interface RemoteInfo {
+  remote: boolean;
+  url: string | null;
+}
+/// Quant queda per sincronitzar amb l'equip (altres dispositius).
+interface SyncStatus {
+  remote: boolean;
+  ahead: number;
+  behind: number;
 }
 
 /// Dedueix el llenguatge de Monaco per a l'extensió del fitxer (per al color
@@ -85,6 +99,21 @@ export default function GitPanel() {
   const [stashes, setStashes] = useState<StashEntry[]>([]);
   const [showGraph, setShowGraph] = useState(false);
   const [log, setLog] = useState("");
+  // ── Núvol d'equip: més d'un NoOrbit (dispositius diferents) editant el
+  // mateix projecte. Sincronització manual d'1 clic O automàtica, a decisió
+  // de cada un (el flag es recorda per projecte).
+  const [remote, setRemote] = useState<RemoteInfo | null>(null);
+  const [sync, setSync] = useState<SyncStatus | null>(null);
+  const [cloudUrl, setCloudUrl] = useState("");
+  const [auto, setAuto] = useState(() => {
+    try {
+      return root ? localStorage.getItem(`noorbit.cloudAuto:${root}`) === "1" : false;
+    } catch {
+      return false;
+    }
+  });
+  const [lastSync, setLastSync] = useState<number>(0);
+  const busyRef = useRef(false);
 
   const refresh = useCallback(async () => {
     if (!root) {
@@ -96,6 +125,13 @@ export default function GitPanel() {
       setStatus(st);
       // El llistat de stash només té sentit dins d'un repositori.
       setStashes(st.repo ? await invoke<StashEntry[]>("git_stash_list") : []);
+      if (st.repo) {
+        setRemote(await invoke<RemoteInfo>("git_remote_get"));
+        setSync(await invoke<SyncStatus>("git_sync_status"));
+      } else {
+        setRemote(null);
+        setSync(null);
+      }
     } catch (e) {
       setStatus(null);
       setFeedback(String(e));
@@ -106,20 +142,44 @@ export default function GitPanel() {
     void refresh();
   }, [refresh]);
 
-  const act = async (fn: () => Promise<unknown>, done: string) => {
+  const act = async (fn: () => Promise<unknown>, done: string): Promise<boolean> => {
     setBusy(true);
+    busyRef.current = true;
     setFeedback(null);
     try {
       await fn();
       setFeedback(done);
       await refresh();
+      return true;
     } catch (e) {
       setFeedback(`✗ ${String(e)}`);
       await refresh();
+      return false;
     } finally {
       setBusy(false);
+      busyRef.current = false;
     }
   };
+
+  // MODE AUTOMÀTIC d'equip: cada 90 s fa una passada completa (commit + baixa
+  // + pujada) mentre el projecte tingui remot i ningú estigui fent res més.
+  // La decisió és de cada un: el flag es recorda per projecte.
+  useEffect(() => {
+    try {
+      if (root) localStorage.setItem(`noorbit.cloudAuto:${root}`, auto ? "1" : "0");
+    } catch {
+      /* sense persistència: es queda a la sessió */
+    }
+    if (!auto) return;
+    const tick = window.setInterval(() => {
+      if (busyRef.current || !remote?.remote) return;
+      void act(() => invoke("git_sync", { message: null }), t("git.cloudDone")).then((ok) => {
+        if (ok) setLastSync(Date.now());
+      });
+    }, 90_000);
+    return () => window.clearInterval(tick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auto, remote?.remote, refresh]);
 
   if (!root) {
     return <div className="empty-hint" style={{ margin: 16 }}>{t("git.noProject")}</div>;
@@ -217,6 +277,85 @@ export default function GitPanel() {
             <History size={12} />
           </button>
         </div>
+      </div>
+
+      {/* ── NÚVOL D'EQUIP: més d'un NoOrbit (dispositius diferents) editant
+          el MATEIX projecte. Connectes el repositori una vegada; després
+          sincronitzes amb 1 clic o en automàtic — a decisió de cada un. ── */}
+      <div className="git-cloud">
+        {remote?.remote ? (
+          <div className="git-cloud-line">
+            <Cloud size={12} />
+            <span className="git-cloud-url" title={remote.url ?? ""}>
+              {remote.url?.replace(/^https?:\/\//, "")}
+            </span>
+            {(sync?.ahead ?? 0) > 0 && (
+              <span className="git-cloud-badge up" title={t("git.cloudUpHint")}>
+                ↑ {sync!.ahead}
+              </span>
+            )}
+            {(sync?.behind ?? 0) > 0 && (
+              <span className="git-cloud-badge down" title={t("git.cloudDownHint")}>
+                ↓ {sync!.behind}
+              </span>
+            )}
+            <span className="git-cloud-spacer" />
+            <button
+              className="btn primary sm"
+              disabled={busy}
+              title={t("git.cloudSyncHint")}
+              onClick={() =>
+                void act(() => invoke("git_sync", { message: msg || null }), t("git.cloudDone")).then(
+                  (ok) => {
+                    if (ok) setLastSync(Date.now());
+                  }
+                )
+              }
+            >
+              <CloudUpload size={12} /> {t("git.cloudSync")}
+            </button>
+            <button
+              className={"btn sm" + (auto ? " active" : "")}
+              title={t("git.cloudAutoHint")}
+              onClick={() => setAuto(!auto)}
+            >
+              <Repeat size={12} /> {t("git.cloudAuto")}
+            </button>
+            {lastSync > 0 && (
+              <span className="git-cloud-ago" title={t("git.cloudLast")}>
+                {t("git.cloudLast")} {new Date(lastSync).toLocaleTimeString()}
+              </span>
+            )}
+          </div>
+        ) : (
+          <div className="git-cloud-line">
+            <Cloud size={12} />
+            <input
+              className="input sm git-cloud-input"
+              placeholder={t("git.cloudUrlPh")}
+              value={cloudUrl}
+              onChange={(e) => setCloudUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && cloudUrl.trim() && !busy) {
+                  void act(() => invoke("git_remote_set", { url: cloudUrl.trim() }), t("git.cloudConnected"));
+                }
+              }}
+            />
+            <button
+              className="btn primary sm"
+              disabled={busy || !cloudUrl.trim()}
+              title={t("git.cloudConnectHint")}
+              onClick={() =>
+                void act(
+                  () => invoke("git_remote_set", { url: cloudUrl.trim() }),
+                  t("git.cloudConnected")
+                )
+              }
+            >
+              <Check size={12} /> {t("git.cloudConnect")}
+            </button>
+          </div>
+        )}
       </div>
 
       {diff && !monReady ? (

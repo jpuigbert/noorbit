@@ -44,6 +44,10 @@ interface ProviderState {
   load: () => Promise<void>;
   add: (p: ProviderInput) => Promise<void>;
   update: (patch: ProviderInput & { id: string }) => Promise<void>;
+  /// ACTIVACIÓ MANUAL d'un proveïdor (p. ex. «DeepInfer (servidor GPU)», que
+  /// ve desactivat perquè no té sentit fins que tens el servidor en marxa —
+  /// però quan el tens, l'activa tu amb un clic, sense cap token).
+  setEnabled: (id: string, enabled: boolean) => Promise<void>;
   remove: (id: string) => Promise<void>;
   test: (id: string) => Promise<void>;
   select: (id: string) => Promise<void>;
@@ -100,6 +104,25 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
 
   update: async (patch) => {
     await invoke("ai_provider_update", { patch });
+    await get().load();
+  },
+
+  setEnabled: async (id, enabled) => {
+    const p = get().providers.find((x) => x.id === id);
+    if (!p) return;
+    // El backend conserva tot el que no enviem (el token sobretot).
+    await invoke("ai_provider_update", {
+      patch: {
+        id: p.id,
+        name: p.name,
+        baseUrl: p.base_url,
+        model: p.model,
+        kind: (p.kind === "anthropic" ? "anthropic" : "openai") as ProviderKind,
+        auth: p.auth,
+        headerName: p.header_name,
+        enabled,
+      },
+    });
     await get().load();
   },
 

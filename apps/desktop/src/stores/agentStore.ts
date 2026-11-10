@@ -171,6 +171,17 @@ function toHistory(messages: ChatMessage[]): HistoryTurn[] {
     .map((m) => ({ role: m.role, content: m.text.slice(0, 12000) }));
 }
 
+/// FIL MÍNIM per a l'últim recurs de memòria: abans el nivell 3 BORRAVA tota
+/// la conversa — canviaves de IA, pujava el context, entrava el recurs… i el
+/// model ja no sabia res: dir «continua» era inútil. Ara conserva els últims
+/// 6 torns retallats: poc RAM, però el model SAB què s'estava fent.
+function threadOf(history: HistoryTurn[]): HistoryTurn[] {
+  return history.slice(-6).map((t) => ({
+    role: t.role,
+    content: t.content.slice(0, 800),
+  }));
+}
+
 /// Persistència dels xats oberts (conversa inclosa) a localStorage.
 /// ABANS era un calaix global («noorbit.chats»): en obrir un projecte nou
 /// apareixien els xats antics. Ara cada projecte té el seu propi calaix
@@ -500,9 +511,11 @@ function parseDirDirectives(raw: string): string[] {
 }
 
 /// Rescata els blocs de codi (``` ...) d'una resposta en prosa i en dedueix
-/// el nom de fitxer: primer un «xxx.py» mencionat just abans del bloc; si no,
-/// un nom automàtic segons el llenguatge. Així un tutorial explicat es pot
-/// convertir en fitxers reals amb codi, ni que la IA no use el format @file:.
+/// el nom de fitxer. És el camí de RESCAT quan la IA no usa el format
+/// estricte @file: — i ha de ser TOLERANT perquè els models no responen tots
+/// igual: tanques CRLF, `~~~`, bloc sense tancar (resposta tallada), nom del
+/// fitxer escrit DESPRÉS del bloc o com a comentari a la primera línia…
+/// Així un tutorial explicat es pot convertir en fitxers reals amb codi.
 function extractFromProse(raw: string): { path: string; content: string }[] {
   const LANG_EXT: Record<string, string> = {
     python: "py", py: "py", javascript: "js", js: "js", typescript: "ts", ts: "ts",
@@ -514,42 +527,84 @@ function extractFromProse(raw: string): { path: string; content: string }[] {
   const used = new Set<string>();
   // Extensions vàlides: evita falsos positius com «e.g», «v2.0», «i.e».
   const knownExts = new Set(
-    Object.values(LANG_EXT).concat(["md", "txt", "cfg", "ini", "toml", "yml", "yaml", "json", "lock", "env"])
+    Object.values(LANG_EXT).concat(["md", "txt", "cfg", "ini", "toml", "yml", "yaml", "json", "lock", "env", "xml", "svg", "jsx", "tsx", "scss", "hpp", "h"])
   );
-  const fenceRe = /```([A-Za-z0-9]*)\n([\s\S]*?)```/g;
-  let m: RegExpExecArray | null;
-  let i = 0;
-  while ((m = fenceRe.exec(raw)) !== null) {
-    i++;
-    const lang = (m[1] || "").toLowerCase();
-    const content = m[2].replace(/\s+$/, "") + "\n";
-    if (!content.trim()) continue;
-    // Text just abans del bloc: pot contenir el nom del fitxer.
-    const before = raw.slice(Math.max(0, m.index - 320), m.index);
-    const named = before.match(/[A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,6}/g);
-    let path = "";
-    if (named) {
-      // Agafa l'últim candidat amb una extensió RECONEGUDA (evita «e.g», «3.4»).
-      const cand = [...named].reverse().find((c) => {
-        const ext = c.includes(".") ? c.split(".").pop()!.toLowerCase() : "";
-        return ext.length >= 1 && knownExts.has(ext) && !/^[\d.]+$/.test(c);
-      });
-      if (cand) path = cand;
-    }
-    if (!path) path = `bloc_${i}.${LANG_EXT[lang] || "txt"}`;
-    path = path.replace(/^\/+/, "").replace(/\\/g, "/");
-    if (path.split("/").some((s) => s === "..")) continue;
+  // Normalitzem NOMÉS per a l'extracció: CRLF → LF i línies de tanca `~~~lang`
+  // → ```lang (els models mixten estils). La línia es manté sencera: només
+  // canvia el marcador, el salt de línia queda intacte.
+  const norm = raw
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/^([ \t]*)~~~[ \t]*([A-Za-z0-9]*)[ \t]*$/gm, "$1```$2");
+
+  const dedupe = (path: string, content: string) => {
+    let p = path.replace(/^\/+/, "").replace(/\\/g, "/");
+    if (p.split("/").some((s) => s === "..")) return;
     // Rutes duplicades: afegeix un sufix numèric abans de l'extensió.
-    let uniq = path;
+    let uniq = p;
     let k = 2;
     while (used.has(uniq)) {
-      uniq = /\.[^.]+$/.test(path)
-        ? path.replace(/(\.[^.]+)$/, `_${k}$1`)
-        : `${path}_${k}`;
+      uniq = /\.[^.]+$/.test(p) ? p.replace(/(\.[^.]+)$/, `_${k}$1`) : `${p}_${k}`;
       k++;
     }
     used.add(uniq);
     out.push({ path: uniq, content });
+  };
+
+  /// Dedueix el nom del fitxer d'un bloc: 1) un comentari a la PRIMERA línia
+  /// del codi («// src/App.tsx», «# main.py», «<!-- index.html -->»); 2) el
+  /// text JUST ABANS del bloc; 3) el text JUST DESPRÉS; 4) nom automàtic
+  /// pel llenguatge. Els models barregen totes les maneres.
+  const inferPath = (lang: string, content: string, before: string, after: string, i: number): string => {
+    const first = content.split("\n", 1)[0] ?? "";
+    const cm = first.match(/^\s*(?:\/\/|#|--|<!--|\*|\/\*)\s*([\w][\w./\\-]*\.[A-Za-z0-9]{1,6})\s*(?:-->)?$/);
+    if (cm) {
+      const ext = cm[1].split(".").pop()!.toLowerCase();
+      if (knownExts.has(ext)) return cm[1];
+    }
+    for (const side of [before, after]) {
+      const named = side.match(/[A-Za-z0-9_./\\-]+\.[A-Za-z0-9]{1,6}/g);
+      if (!named) continue;
+      // Candidat amb extensió RECONEGUDA (evita «e.g», «3.4»), el més proper.
+      const cand = [...named].reverse().find((c) => {
+        const ext = c.includes(".") ? c.split(".").pop()!.toLowerCase() : "";
+        return knownExts.has(ext) && !/^[\d.]+$/.test(c);
+      });
+      if (cand) return cand;
+    }
+    return `bloc_${i}.${LANG_EXT[lang] || "txt"}`;
+  };
+
+  // Blocs TANCATS: obertura ```lang + contingut + tancament ``` (tolerant a
+  // espais/trailers a la línia de tancament).
+  const fenceRe = /```([A-Za-z0-9_-]*)\n([\s\S]*?)\n?[ \t]*```/g;
+  let m: RegExpExecArray | null;
+  let i = 0;
+  while ((m = fenceRe.exec(norm)) !== null) {
+    i++;
+    const lang = (m[1] || "").toLowerCase();
+    const content = m[2].replace(/\s+$/, "") + "\n";
+    if (!content.trim()) continue;
+    const before = norm.slice(Math.max(0, m.index - 320), m.index);
+    const after = norm.slice(m.index + m[0].length, m.index + m[0].length + 320);
+    const path = inferPath(lang, content, before, after, i);
+    dedupe(path, content);
+  }
+  // ÚLTIM bloc SENSE TANCAR: respostes tallades a mitja generació. Sense
+  // aquest rescat, el codi més valuós (el que venia al final) es perdia.
+  // NOMÉS si hi ha un nombre IMPARELL de línies de tanca: aleshores la darrera
+  // és una obertura sense parella (bloc tallat). Si són parells, tot està
+  // tancat i no hi ha res a rescatar (així no engolim prosa per error).
+  const fences = [...norm.matchAll(/^```[A-Za-z0-9_-]*[ \t]*$/gm)];
+  if (fences.length % 2 === 1) {
+    const lastOp = fences[fences.length - 1];
+    const after = norm.slice((lastOp.index ?? 0) + lastOp[0].length).replace(/^\n/, "");
+    if (after.trim()) {
+      const lang = (lastOp[0].match(/```([A-Za-z0-9_-]*)/)?.[1] ?? "").toLowerCase();
+      const content = after.replace(/\s+$/, "") + "\n";
+      const before = norm.slice(0, lastOp.index ?? 0).slice(-320);
+      dedupe(inferPath(lang, content, before, "", fences.length + 1), content);
+    }
   }
   return out;
 }
@@ -1328,7 +1383,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
     sid: string,
     invokeFn: (level: number) => Promise<T>,
     startLevel = 0,
-  ): Promise<T> => {
+  ): Promise<{ level: number; value: T }> => {
     let lastErr: unknown = null;
     for (let level = startLevel; level <= 3; level++) {
       try {
@@ -1342,11 +1397,12 @@ export const useAgentStore = create<AgentState>((set, get) => {
                 ? "⚠️ El context era massa gran: reintentant amb context REDUÏT (≈ 1.500 caràcters)…"
                 : level === 2
                 ? "⚠️ Continua sense prou memòria: reintentant SENSE adjuntar el codi del projecte…"
-                : "⚠️ Últim recurs: reintentant SENSE HISTORIAL de conversa…",
+                : "⚠️ Últim recurs: reintentant amb NOMÉS el fil bàsic de la conversa (últims torns retallats)…",
             ok: true,
           });
         }
-        return await invokeFn(level);
+        const value = await invokeFn(level);
+        return { level, value };
       } catch (e) {
         lastErr = e;
         if (!isRetriableError(e) || isCancelled(e)) throw e;
@@ -1356,6 +1412,16 @@ export const useAgentStore = create<AgentState>((set, get) => {
     }
     throw lastErr ?? new Error("Reintents esgotats");
   };
+
+  /// Nota que s'afegeix al resultat quan la resposta ha vingut amb el context
+  /// REDUÏT: sense ella, l'usuari no sabia per què la IA «no recordava» el
+  /// que estaven fent (sobretot en CANVIAR de IA i pujar el context).
+  const oomNote = (level: number): string =>
+    level >= 3
+      ? "\n\n⚠️ La IA ha anat justa de memòria i ha respost amb NOMÉS el fil bàsic de la conversa. Si ha perdut el detall, digues-li «repren el pla anterior»."
+      : level > 0
+      ? "\n\n⚠️ La IA ha anat justa de memòria: ha respost amb el context reduït. Si nota que ha perdut el fil, digues-li «repren el pla anterior»."
+      : "";
 
   return {
     backends: [],
@@ -1646,7 +1712,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
               ? 1
               : 0
             : 0;
-        const text = await runWithOOMRetry(sid, async (level) => {
+          const oomLevel = await runWithOOMRetry(sid, async (level) => {
           let m = finalPrompt;
           let h = history;
           let sy: string | null = ctx ? CONTEXT_SYSTEM : MEMORY_SYSTEM;
@@ -1658,8 +1724,11 @@ export const useAgentStore = create<AgentState>((set, get) => {
             m = prompt;
             sy = MEMORY_SYSTEM;
           } else if (level === 3) {
+            // Últim recurs: ABANS es borrava TOTA la conversa i el model
+            // perdia el fil («continua» no sabia què continuar). Ara es
+            // conserva un fil MÍNIM: últims torns retallats.
             m = prompt;
-            h = [];
+            h = threadOf(history);
             sy = MEMORY_SYSTEM;
           }
           return await invoke<string>("send_prompt_stream", {
@@ -1671,6 +1740,11 @@ export const useAgentStore = create<AgentState>((set, get) => {
             history: h,
           });
         }, quickStart);
+        // Memòria: si s'ha hagut de RETALLAR el context, el resultat ho diu
+        // al propi xat (abans només es veia al visor de procés i l'usuari no
+        // entenia per què la IA «no recordava» el que estaven fent).
+        const text = oomLevel.value;
+        const oom = oomNote(oomLevel.level);
         const thinking = await fetchThinking(sid);
         get().pushStep(sid, {
           label: "ia",
@@ -1694,7 +1768,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
           // Les línies «@agent:» ja s'han executat: no cal mostrar-les al xat
           // (el resum d'agents creats informa de la mateixa feina).
           lastResult:
-            [stripAgentDirectiveLines(text), delegated, extra, agents, todos]
+            [stripAgentDirectiveLines(text), delegated, extra, agents, todos, oom]
               .filter(Boolean)
               .join("\n\n") || stripAgentDirectiveLines(text),
           lastThinking: thinking,
@@ -1826,7 +1900,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
               : "Generant tots els fitxers del projecte (en un equip lent pot trigar 1–3 minuts)…",
           ok: true,
         });
-        const raw = await runWithOOMRetry(sid, async (level) => {
+        const oomLevel = await runWithOOMRetry(sid, async (level) => {
           // En el scaffold NO s'adjuntja el codi del projecte (no n'hi ha
           // encara); si falla per OOM, reduïm la llargada de la resposta
           // que exigim i, com a últim recurs, demanem un esquelet mínim.
@@ -1845,6 +1919,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
             session: sid,
           });
         });
+        const raw = oomLevel.value;
         get().pushStep(sid, { label: "ia", detail: "Resposta rebuda; n'extrec els fitxers…", ok: true });
         let files = parseFileBlocks(raw);
         let skeleton = false;
@@ -1966,7 +2041,10 @@ export const useAgentStore = create<AgentState>((set, get) => {
         const dels = parseDeleteDirectives(raw);
         if (files.length === 0 && dels.length === 0) {
           throw new Error(
-            "Aquest missatge no conté cap bloc de codi (```) ni fitxers «@file:» que es puguin crear."
+            "Aquest missatge no té cap bloc de codi que es pugui crear. Prova una d'aquestes:\n" +
+              "• Demana a la IA «reemete els fitxers amb @file:» i torna-ho a prémer.\n" +
+              "• Si el codi ja el tens a mà, prem «Crear a mà» i enganxa-hi les rutes.\n" +
+              "• Si la resposta es va TALLAR (codi a mitges), demana «continua»."
           );
         }
         get().pushStep(sid, {
@@ -2504,8 +2582,14 @@ export const useAgentStore = create<AgentState>((set, get) => {
           // Sense context adjunt: només el text de l'usuari.
           return { m: text, h: history, s: withTasks(platformPreamble ? platformPreamble + CONTEXT_SYSTEM : MEMORY_SYSTEM) };
         }
-        // Level 3: sense context I sense històrial.
-        return { m: text, h: [], s: withTasks(platformPreamble ? platformPreamble + CONTEXT_SYSTEM : MEMORY_SYSTEM) };
+        // Level 3: sense context I amb NOMÉS el fil bàsic (abans es BORRAVA
+        // tota la conversa: en canviar de IA i pujar el context, el model
+        // perdia el fil i «continua» no sabia què continuar).
+        return {
+          m: text,
+          h: threadOf(history),
+          s: withTasks(platformPreamble ? platformPreamble + CONTEXT_SYSTEM : MEMORY_SYSTEM),
+        };
       };
 
       const expert = sess.expertId
@@ -2581,7 +2665,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
             detail: "La IA processa el missatge i el context (en un equip lent pot trigar 1–3 minuts)…",
             ok: true,
           });
-          const out = await runWithOOMRetry(sid, async (level) => {
+          const oomLevelSend = await runWithOOMRetry(sid, async (level) => {
             const built = await rebuildForLevel(level);
             return await invoke<string>("send_prompt_stream", {
               prompt: built.m,
@@ -2593,7 +2677,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
               images: imgs.length > 0 ? imgs : undefined,
             });
           }, sendStart);
+          const out = oomLevelSend.value;
           const thinking = await fetchThinking(sid);
+          const oom = oomNote(oomLevelSend.level);
           get().pushStep(sid, {
             label: "ia",
             detail: "Resposta rebuda; comprovant si cal crear o desar fitxers al projecte…",
@@ -2609,7 +2695,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
             startedAt: null,
             lastElapsedMs: Date.now() - t0,
             lastResult:
-              [stripAgentDirectiveLines(out), delegated, extra, agents, todos]
+              [stripAgentDirectiveLines(out), delegated, extra, agents, todos, oom]
                 .filter(Boolean)
                 .join("\n\n") || stripAgentDirectiveLines(out),
             lastThinking: thinking,

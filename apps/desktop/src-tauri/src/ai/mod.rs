@@ -433,6 +433,11 @@ pub struct LoadedModel {
 pub struct CloudModel {
     pub name: String,
     pub description: String,
+    /// Mida de la descàrrega en BYTES, perquè l'usuari vegi quant pesa el
+    /// model ABANS de descarregar-lo (al Gestor de models i a Hugging Face).
+    /// `None` quan la font no la diu: la UI no mostra res.
+    #[serde(default)]
+    pub size: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1030,12 +1035,51 @@ fn parse_cloud_models(html: &str) -> Vec<CloudModel> {
             continue;
         }
         let description = extract_desc(chunk);
-        out.push(CloudModel { name, description });
+        // La mida que ollama.com mostra a la fitxa («7.6GB», «2.1TB», «404MB»):
+        // el que pesa la descàrrega ABANS de fer-la.
+        let size = extract_size(chunk);
+        out.push(CloudModel { name, description, size });
         if out.len() >= 80 {
             break;
         }
     }
     out
+}
+
+/// Mida de descàrrega que ollama.com mostra a la fitxa d'un model: el primer
+/// text del tipus «7.6GB», «2.1TB» o «404MB» dins del fragment. En bytes;
+/// `None` si la fitxa no porta mida. Busca primer TB i després GB/MB perquè
+/// el número que hi ha just ABANS de la unitat sempre sigui el seu.
+fn extract_size(chunk: &str) -> Option<u64> {
+    let up = chunk.to_ascii_uppercase();
+    for (unit, mult) in [
+        ("TB", 1_000_000_000_000u64),
+        ("GB", 1_000_000_000u64),
+        ("MB", 1_000_000u64),
+    ] {
+        let mut from = 0;
+        while let Some(p) = up[from..].find(unit) {
+            let p = from + p;
+            let before = &up[..p];
+            // El número just abans de la unitat: retrocedeix sobre dígits,
+            // punt decimal i espais (p. ex. «>7.6GB<» → 7.6).
+            let ns = before
+                .char_indices()
+                .rev()
+                .take_while(|(_, c)| c.is_ascii_digit() || *c == '.' || *c == ' ')
+                .map(|(i, _)| i)
+                .last();
+            if let Some(ns) = ns {
+                if let Ok(v) = before[ns..].trim().parse::<f64>() {
+                    if v > 0.0 {
+                        return Some((v * mult as f64) as u64);
+                    }
+                }
+            }
+            from = p + unit.len();
+        }
+    }
+    None
 }
 
 /// Dins d'un fragment d'un model, retorna el text del primer <p> descriptiu.
@@ -1801,32 +1845,37 @@ impl AiManager {
     }
 
     pub fn suggested_models() -> Vec<serde_json::Value> {
+        // La mida és l'APROXIMACIÓ real del pes de descàrrega a ollama.com
+        // (quantització Q4 per defecte): l'usuari la veu ABANS de prémer
+        // «Baixa» — sense això no sabia si li cabria al disc ni a la RAM.
         [
-            ("qwen3:8b", "Qwen3 8B — raonament i codi; pesos oberts (Apache 2.0), modificables/afinables (~5 GB)"),
-            ("qwen2.5-coder:7b", "Codi — equilibri qualitat/velocitat"),
-            ("qwen2.5-coder:3b", "Codi — lleuger, per a màquines modestes"),
-            ("llama3.2:3b", "General — ràpid i multilingüe"),
-            ("mistral:7b", "General — bo seguint instruccions"),
-            ("codellama:13b", "Codi — més qualitat, més lent"),
-            ("stable-diffusion-v2:latest", "Imàtges — requereix GPU potent"),
+            ("qwen3:8b", "Qwen3 8B — raonament i codi; pesos oberts (Apache 2.0), modificables/afinables", 5_200_000_000u64),
+            ("qwen2.5-coder:7b", "Codi — equilibri qualitat/velocitat", 4_700_000_000),
+            ("qwen2.5-coder:3b", "Codi — lleuger, per a màquines modestes", 1_900_000_000),
+            ("llama3.2:3b", "General — ràpid i multilingüe", 2_000_000_000),
+            ("mistral:7b", "General — bo seguint instruccions", 4_100_000_000),
+            ("codellama:13b", "Codi — més qualitat, més lent", 7_400_000_000),
+            ("stable-diffusion-v2:latest", "Imàtges — requereix GPU potent", 5_000_000_000),
             // famílies «sense filtres»: públiques a Ollama, NOMÉS opcions
             // instal·lables (no es descarreguen sols). Cal prou RAM: un 7B
             // necessita ~5 GB, un 8x7b ~24 GB (inviable en 8 GB).
-            ("dolphin-mistral:7b", "Sense filtres — codi i raonament (7B, ~5 GB)"),
-            ("dolphin-mixtral:8x7b", "Sense filtres — MoE 8x7b, codi/raonament (~24 GB)"),
-            ("goekdenizguelmez/JOSIEFIED-Qwen3", "Sense filtres — Qwen3-8B abliterated, codi i raonament (~5 GB)"),
-            ("richardyoung/qwen3-8b-abliterated", "Sense filtres — Qwen3-8B abliterated per modificar i ús lliure (~5 GB)"),
+            ("dolphin-mistral:7b", "Sense filtres — codi i raonament (7B)", 4_900_000_000),
+            ("dolphin-mixtral:8x7b", "Sense filtres — MoE 8x7b, codi/raonament", 26_000_000_000),
+            ("goekdenizguelmez/JOSIEFIED-Qwen3", "Sense filtres — Qwen3-8B abliterated, codi i raonament", 5_200_000_000),
+            ("richardyoung/qwen3-8b-abliterated", "Sense filtres — Qwen3-8B abliterated per modificar i ús lliure", 5_200_000_000),
             // Xiaomi MiMo: raonament fort en matemàtiques i codi, amb
             // «thinking» visible que NoOrbit mostra al xat de l'agent.
-            ("alibayram/mimo-7b-rl", "Xiaomi MiMo-7B-RL — raonament (mat/codi), thinking visible (~5 GB)"),
-            ("maternion/mimo-v2.6", "Xiaomi MiMo-V2.6 — agent 9B, crides d'eines i codi (~6 GB)"),
+            ("alibayram/mimo-7b-rl", "Xiaomi MiMo-7B-RL — raonament (mat/codi), thinking visible", 4_700_000_000),
+            ("maternion/mimo-v2.6", "Xiaomi MiMo-V2.6 — agent 9B, crides d'eines i codi", 5_800_000_000),
             // OpenAI de pesos oberts (únicos GPT descarregables localment):
             // MoE molt eficients; el 120b demana ~60 GB de RAM/VRAM.
-            ("gpt-oss:20b", "OpenAI de pesos oberts — MoE 20B, qualitat/velocitat (~13 GB)"),
-            ("gpt-oss:120b", "OpenAI de pesos oberts — MoE 120B, màxima qualitat local (~61 GB)"),
+            ("gpt-oss:20b", "OpenAI de pesos oberts — MoE 20B, qualitat/velocitat", 13_000_000_000),
+            ("gpt-oss:120b", "OpenAI de pesos oberts — MoE 120B, màxima qualitat local", 64_000_000_000),
         ]
         .iter()
-        .map(|(name, desc)| serde_json::json!({ "name": name, "description": desc }))
+        .map(|(name, desc, size)| {
+            serde_json::json!({ "name": name, "description": desc, "size": size })
+        })
         .collect()
     }
 
@@ -1869,8 +1918,10 @@ impl AiManager {
         }
         // «filter=gguf» retorna repositoris amb fitxers GGUF (els que Ollama
         // pot carregar). «sort=downloads» prioritza els més descarregats.
+        // «blobs=true» hi afegeix la MIDA de cada fitxer: amb això sumem els
+        // .gguf del repo i l'usuari veu quant pesa ABANS de descarregar-lo.
         let url = format!(
-            "https://huggingface.co/api/models?search={}&filter=gguf&sort=downloads&direction=-1&limit=40",
+            "https://huggingface.co/api/models?search={}&filter=gguf&sort=downloads&direction=-1&limit=40&blobs=true",
             urlencoding::encode(q)
         );
         let resp = self
@@ -1908,7 +1959,26 @@ impl AiManager {
                             .and_then(|d| d.as_f64())
                             .map(|d| format!("Hugging Face · {:.0} descàrregues", d))
                             .unwrap_or_else(|| "Hugging Face (GGUF)".to_string());
-                        Some(CloudModel { name, description })
+                        // MIDA de la descàrrega: suma dels fitxers .gguf del
+                        // repo (el que Ollama baixarà). Sense blobs no hi ha
+                        // mides: es queda None i la UI no mostra res.
+                        let size = m
+                            .get("siblings")
+                            .and_then(|s| s.as_array())
+                            .map(|files| {
+                                files
+                                    .iter()
+                                    .filter_map(|f| {
+                                        let name = f.get("rfilename").and_then(|r| r.as_str())?;
+                                        if !name.to_ascii_lowercase().ends_with(".gguf") {
+                                            return None;
+                                        }
+                                        f.get("size").and_then(|s| s.as_u64())
+                                    })
+                                    .sum::<u64>()
+                            })
+                            .filter(|s| *s > 0);
+                        Some(CloudModel { name, description, size })
                     })
                     .collect()
             })

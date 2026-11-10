@@ -236,7 +236,19 @@
     "popped": "Stash recuperat.",
     "stashCount": "{n} stash guardats",
     "popThis": "Recupera",
-    "graph": "Historial de branques"
+    "graph": "Historial de branques",
+    "cloudConnect": "Connecta",
+    "cloudConnectHint": "Connecta aquest projecte a un repositori del núvol (GitHub, GitLab, el teu servidor…). Després, qualsevol NoOrbit d'altre dispositiu que apunti al mateix repositori edita aquest projecte.",
+    "cloudUrlPh": "URL del repositori: https://github.com/usuari/projecte.git",
+    "cloudConnected": "Projecte connectat al núvol ✓",
+    "cloudSync": "Sincronitza",
+    "cloudSyncHint": "Tot en una passada: commit dels teus canvis + baixa el que els altres dispositius han fet + puja el teu treball.",
+    "cloudDone": "Sincronitzat amb el núvol ✓",
+    "cloudAuto": "Auto",
+    "cloudAutoHint": "Sincronització automàtica cada 90 s mentre treballes (a decisió de cada un; es recorda per projecte).",
+    "cloudLast": "Última:",
+    "cloudUpHint": "Commits teus pendents de pujar",
+    "cloudDownHint": "Commits dels altres dispositius pendents de baixar"
   },
   "status": {
     "ready": "A punt",
@@ -330,7 +342,11 @@
     "thTranslating": "traduint…",
     "thRaw": "Original",
     "thShowCat": "Mostra la traducció al català",
-    "thShowRaw": "Mostra l'original del model"
+    "thShowRaw": "Mostra l'original del model",
+    "teamToggle": "Equip",
+    "teamToggleHint": "TREBALL EN EQUIP: en enviar, l'ordre es reparteix entre tots els especialistes i veus com treballen a la sub-pestanya Especialistes.",
+    "teamCreate": "Crea equip",
+    "teamCreateHint": "Encara no tens especialistes: ves a crear l'equip (Arquitecte · Programador · Revisor) amb un clic."
   },
   "tasks": {
     "title": "Llista de tasques",
@@ -425,7 +441,9 @@
     "teamElapsed": "Temps: {s} s",
     "teamFinished": "Equip acabat",
     "workingWith": "Treballaran:",
-    "finalAnswer": "Resposta final de l'equip"
+    "finalAnswer": "Resposta final de l'equip",
+    "quickTeam": "Crea equip ràpid",
+    "quickTeamHint": "Crea amb un clic els 3 especialistes bàsics (Arquitecte · Programador · Revisor), ja amb rols per treballar junts."
   },
   "computer": {
     "title": "Control de l'ordinador",
@@ -571,7 +589,11 @@
     "baseUrlHint": "P. ex. https://api.openai.com/v1",
     "check": "Comprova",
     "checking": "Comprovant…",
-    "useModel": "Posa aquest model al formulari"
+    "useModel": "Posa aquest model al formulari",
+    "activate": "Activa manualment (per a servidors locals no cal token)",
+    "deactivate": "Desactiva aquest proveïdor",
+    "on": "Actiu",
+    "off": "Inactiu"
   },
   "skills": {
     "title": "Skills i connectors",

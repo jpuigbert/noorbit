@@ -484,7 +484,16 @@ export default function ModelManagerModal() {
                   return (
                     <div key={s.name} className="mm-row">
                       <div className="mm-cloud-info">
-                        <div className="mm-name-static">{s.name}</div>
+                        <div className="mm-name-static">
+                          {s.name}
+                          {/* Quant pesa ABANS de baixar-lo (s'indica amb ≈
+                              perquè el catàleg és una aproximació). */}
+                          {s.size ? (
+                            <span className="mm-size" style={{ marginLeft: 8 }}>
+                              ≈ {fmtSize(s.size)}
+                            </span>
+                          ) : null}
+                        </div>
                         {s.description && <div className="mm-desc">{s.description}</div>}
                       </div>
                       {installed ? (
@@ -548,7 +557,17 @@ export default function ModelManagerModal() {
                   return (
                     <div key={c.name} className="mm-row">
                       <div className="mm-cloud-info">
-                        <div className="mm-name-static">{c.name}</div>
+                        <div className="mm-name-static">
+                          {c.name}
+                          {/* Quant pesa ABANS de baixar-lo: suma dels .gguf
+                              (HF) o la fitxa d'ollama.com. Si no se sap,
+                              no es mostra res. */}
+                          {c.size ? (
+                            <span className="mm-size" style={{ marginLeft: 8 }}>
+                              {fmtSize(c.size)}
+                            </span>
+                          ) : null}
+                        </div>
                         {c.description && <div className="mm-desc">{c.description}</div>}
                       </div>
                       {installed ? (
@@ -614,7 +633,17 @@ export default function ModelManagerModal() {
                   return (
                     <div key={c.name} className="mm-row">
                       <div className="mm-cloud-info">
-                        <div className="mm-name-static">{c.name}</div>
+                        <div className="mm-name-static">
+                          {c.name}
+                          {/* Quant pesa ABANS de baixar-lo: suma dels .gguf
+                              (HF) o la fitxa d'ollama.com. Si no se sap,
+                              no es mostra res. */}
+                          {c.size ? (
+                            <span className="mm-size" style={{ marginLeft: 8 }}>
+                              {fmtSize(c.size)}
+                            </span>
+                          ) : null}
+                        </div>
                         {c.description && <div className="mm-desc">{c.description}</div>}
                       </div>
                       {prog ? (

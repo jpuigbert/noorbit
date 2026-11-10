@@ -107,6 +107,45 @@ amb la seua línia «@file: ruta» i, JUST a la línia de seguida, el codi COMPL
 (funcions, imports, lògica real; res de «…» ni promeses). Pot ser llarg: \
 escriu'l sencer. Si de veritat no cal cap fitxer, respon amb normalitat.";
 
+/// Detecta quan l'usuari ha demanat CREAR EL PROJECTE SENCER però la resposta
+/// només ha emés (gairebé) cap fitxer: un README i un pla de passos en prosa
+/// («instal·la… configura… després…»). Els models menuts ho fan sovint i
+/// l'usuari es queda sense codi. Criteri: prompt de creació + resposta amb
+/// pla (@todo o passos numerats) + ≤1 fitxer emés.
+fn project_underbuilt(prompt: &str, text: &str) -> bool {
+    use regex::Regex;
+    let low = prompt.to_lowercase();
+    let asks = low.contains("tot el projecte")
+        || low.contains("tot el codi")
+        || low.contains("tota la programacio")
+        || low.contains("tota la programació")
+        || low.contains("carpetes necess")
+        || Regex::new(r"(?i)\b(crea|crear|fes|munta|genera|estructura)\b[^.]{0,80}\b(projecte|joc|botiga|web|app|aplicacio|aplicació|programa)\b")
+            .map(|r| r.is_match(prompt))
+            .unwrap_or(false);
+    if !asks {
+        return false;
+    }
+    let files = Regex::new(r"(?im)^[ \t>*-]*@?file:\s*\S")
+        .map(|r| r.find_iter(text).count())
+        .unwrap_or(0);
+    if files > 1 {
+        return false;
+    }
+    Regex::new(r"(?i)(@todo|passos?|seguents passos|seguents passos|\b1\s*[\.\)]\s)")
+        .map(|r| r.is_match(text))
+        .unwrap_or(false)
+}
+
+/// Recordatori per quan ha respost amb un PLA però no ha emés els fitxers:
+/// que emeti CADA fitxer del pla amb @file: + codi complet, fins acabar.
+const PROJECT_NUDGE: &str = "NoOrbit: has respost amb un PLA de passos però has \
+emés poc més d'un fitxer. L'usuari ha demanat CREAR el projecte SENCER: emet \
+ARA cada fitxer del pla amb la seua línia «@file: ruta/fitxer.ext» i, JUST \
+a la línia de seguida, el codi COMPLET (res de promeses, res de «…», res de \
+«després configuraríem»). Un @file: per cada fitxer, tots els que calguin, \
+fins acabar el pla. Comença ara mateix pel primer fitxer pendent.";
+
 /// Un torn de xat amb les EINES DE NOORBIT connectades: qualsevol resposta
 /// del model que continga directrius «NB|…» (navegador) o «RUN|…» / «IMG|…»
 /// (terminal del projecte i generador d'imatges) s'executa de veritat, se'n
@@ -155,6 +194,8 @@ async fn chat_with_tools(
     let mut text = String::new();
     let mut nudged = false;
     let mut files_nudged = false;
+    // «Emet tot el projecte» (README + pla sense codi): un sol recordatori.
+    let mut project_nudged = false;
     let t0 = std::time::Instant::now();
     for round in 0..=MAX_ROUNDS {
         let res = if streaming {
@@ -212,6 +253,18 @@ async fn chat_with_tools(
                     });
                     current =
                         format!("{}\n\nFitxers que han quedat buits: {}", FILE_NUDGE, empties.join(", "));
+                    continue;
+                }
+                // I si ha demanat CREAR EL PROJECTE SENCER però només ha emés
+                // un README amb un pla de passos en prosa? UN recordatori
+                // imperatiu perquè emeti CADA fitxer del pla amb @file:.
+                if !project_nudged && project_underbuilt(prompt, &text) {
+                    project_nudged = true;
+                    opts.history.push(HistoryTurn {
+                        role: "assistant".into(),
+                        content: text.clone(),
+                    });
+                    current = PROJECT_NUDGE.to_string();
                     continue;
                 }
             }

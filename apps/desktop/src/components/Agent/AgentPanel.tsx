@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ClipboardEvent, t
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { ListChecks, Zap, CheckCircle2, XCircle, Server, Download, RefreshCw, Cpu, UserCog, Send, Square, Brain, Boxes, X, Plus, Trash2, FolderPlus, FileDown, FolderTree, GitFork, Smartphone, Apple, Monitor, Copy, FolderOpen, ImageOff, Paperclip, ExternalLink, ChevronDown } from "lucide-react";
+import { ListChecks, Zap, CheckCircle2, XCircle, Server, Download, RefreshCw, Cpu, UserCog, Send, Square, Brain, Boxes, X, Plus, Trash2, FolderPlus, FileDown, FolderTree, GitFork, Smartphone, Apple, Monitor, Copy, FolderOpen, ImageOff, Paperclip, ExternalLink, ChevronDown, Users } from "lucide-react";
 import { useT } from "../../i18n";
 import { useAgentStore, useActiveChat, extractRecommendedPaths, extractChatImagePaths } from "../../stores/agentStore";
 import { useAIStore, OLLAMA_CLOUD_MODELS } from "../../stores/aiStore";
@@ -110,6 +110,9 @@ export default function AgentPanel() {
   // l'expert (rol + model propis). Cada xat pot treballar amb un d'diferent.
   const experts = useExpertStore((s) => s.experts);
   const loadExperts = useExpertStore((s) => s.load);
+  // MODE EQUIP (per xat): el text que envies es reparteix entre TOTS els
+  // especialistes (plurals/àrbitre del backend) i veus el progrés de cadascun.
+  const [teamMode, setTeamMode] = useState(false);
 
   // Proveïdors configurats (Venice, Claude, Ollama Cloud…) per triar la IA
   // d'aquest xat. `active` és el proveïdor global (el de la configuració).
@@ -226,6 +229,16 @@ export default function AgentPanel() {
     if (!text && imgs.length === 0 && files.length === 0) return;
     setPrompt("");
     resetGrow();
+    // MODE EQUIP: si hi ha especialistes, l'ordre va a l'equip de cop (i el
+    // detall del treball es veu a la sub-pestanya Especialistes).
+    if (teamMode && experts.length > 0) {
+      setPendingImgs([]);
+      setPendingFiles([]);
+      void useExpertStore.getState().runTeam(text, experts.map((e) => e.id));
+      usePreviewStore.getState().setRightTab("agent");
+      usePreviewStore.getState().setAgentSub("experts");
+      return;
+    }
     setPendingImgs([]);
     setPendingFiles([]);
     setAttachErr(null);
@@ -810,6 +823,28 @@ export default function AgentPanel() {
               <button className="btn sm" disabled={disabled} onClick={handleQuick}>
                 <Zap size={13} /> {t("agent.quick")}
               </button>
+              {/* TREBALL EN EQUIP: amb un clic l'ordre va a TOTS els
+                  especialistes (els veus treballar a la sub-pestanya). Si
+                  encara no n'hi ha, el botó et porta a crear l'equip. */}
+              {experts.length > 0 ? (
+                <button
+                  className={"btn sm" + (teamMode ? " primary" : "")}
+                  disabled={disabled}
+                  title={t("agent.teamToggleHint")}
+                  onClick={() => setTeamMode(!teamMode)}
+                >
+                  <Users size={13} /> {t("agent.teamToggle")} ({experts.length})
+                </button>
+              ) : (
+                <button
+                  className="btn sm"
+                  disabled={disabled}
+                  title={t("agent.teamCreateHint")}
+                  onClick={goCreateExpert}
+                >
+                  <Users size={13} /> {t("agent.teamCreate")}
+                </button>
+              )}
               <button
                 className="btn sm"
                 disabled={disabled}
