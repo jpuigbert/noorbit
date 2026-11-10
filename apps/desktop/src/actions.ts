@@ -90,12 +90,29 @@ export const actions: Record<string, () => void | Promise<void>> = {
   "ai.models": () => useUIStore.getState().setShowModelManager(true),
   "ai.catalog": () => useUIStore.getState().setShowIaCatalog(true),
   "ai.remoteServer": () => useUIStore.getState().setShowRemoteServer(true),
+  // Tornar a veure l'assistent de benvinguda (3 passos) en qualsevol moment:
+  // apareix a Ajuda ▸ … i també es pot cercar amb ⌘P («benvinguda»).
+  "view.onboarding": () => useUIStore.getState().setShowOnboarding(true),
   "ai.plugins": () => useUIStore.getState().setShowPlugins(true),
   "ai.agent": () => usePreviewStore.getState().setRightTab("agent"),
-  "ai.computer": () => usePreviewStore.getState().setRightTab("integra"),
-  "ai.experts": () => usePreviewStore.getState().setRightTab("integra"),
-  "ai.unreal": () => usePreviewStore.getState().setRightTab("integra"),
-  "ai.blender": () => usePreviewStore.getState().setRightTab("integra"),
+  // Sub-pestanyes DINS de la pestanya Agent (les «Integracions» ja no són
+  // una pestanya a part: sempre es veuen servides al costat del xat).
+  "ai.computer": () => {
+    usePreviewStore.getState().setRightTab("agent");
+    usePreviewStore.getState().setAgentSub("computer");
+  },
+  "ai.experts": () => {
+    usePreviewStore.getState().setRightTab("agent");
+    usePreviewStore.getState().setAgentSub("experts");
+  },
+  "ai.unreal": () => {
+    usePreviewStore.getState().setRightTab("agent");
+    usePreviewStore.getState().setAgentSub("unreal");
+  },
+  "ai.blender": () => {
+    usePreviewStore.getState().setRightTab("agent");
+    usePreviewStore.getState().setAgentSub("blender");
+  },
 
   // Temes de colors (tota la pantalla + editor)
   "view.themeDark": () => useUIStore.getState().setTheme("dark"),
@@ -161,6 +178,7 @@ export const commandList: CommandDef[] = [
   { id: "ai.models", labelKey: "ai.manager" },
   { id: "ai.catalog", labelKey: "ai.catalog" },
   { id: "ai.remoteServer", labelKey: "menu.remoteServer" },
+  { id: "view.onboarding", labelKey: "menu.replayOnboarding" },
   { id: "ai.plugins", labelKey: "plugins.title" },
   { id: "ai.agent", labelKey: "rightPanel.agent" },
   { id: "ai.computer", labelKey: "rightPanel.computer" },

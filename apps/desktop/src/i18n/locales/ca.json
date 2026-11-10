@@ -93,7 +93,8 @@
     "help": "Ajuda",
     "manual": "Manual d'ús…",
     "about": "Quant a NoOrbit",
-    "remoteServer": "Servidor d'IA remot…"
+    "remoteServer": "Servidor d'IA remot…",
+    "replayOnboarding": "Assistent de benvinguda (repeteix)"
   },
   "startup": {
     "title": "Benvingut a NoOrbit",
@@ -322,7 +323,14 @@
     "modelGlobal": "Model global",
     "modelHint": "Model d'Ollama només per a aquest xat (si la IA del xat és local).",
     "cloudModelHint": "Model d'Ollama Cloud que usarà aquest xat. Canviar-lo afecta també els altres xats que fan servir Ollama Cloud.",
-    "cloudModelNone": "Tria un model del núvol"
+    "cloudModelNone": "Tria un model del núvol",
+    "teamOn": "Equip d'especialistes treballant…",
+    "thCatalan": "en català",
+    "thTranslated": "traduït al català",
+    "thTranslating": "traduint…",
+    "thRaw": "Original",
+    "thShowCat": "Mostra la traducció al català",
+    "thShowRaw": "Mostra l'original del model"
   },
   "tasks": {
     "title": "Llista de tasques",

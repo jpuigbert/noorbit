@@ -124,6 +124,8 @@ export default function MenuBar() {
     help: [
       { label: t("menu.manual"), action: act("help.manual") },
       { sep: true, label: "" },
+      { label: t("menu.replayOnboarding"), action: act("view.onboarding") },
+      { sep: true, label: "" },
       { label: t("menu.about"), action: act("view.settings") },
     ],
   };

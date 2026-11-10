@@ -19,6 +19,7 @@ import TaskChecklist from "./TaskChecklist";
 import { CopyButton, SaveButton } from "../CopyButton";
 import ChatMarkdown from "./ChatMarkdown";
 import { useWebAiStore } from "../../stores/webAiStore";
+import ChatThought from "./ChatThought";
 
 export default function AgentPanel() {
   const { t } = useT();
@@ -133,7 +134,8 @@ export default function AgentPanel() {
   // el formulari de creació en muntar-se.
   const goCreateExpert = () => {
     useExpertStore.getState().requestCreate();
-    usePreviewStore.getState().setRightTab("integra");
+    usePreviewStore.getState().setRightTab("agent");
+    usePreviewStore.getState().setAgentSub("experts");
   };
 
   useEffect(() => {
@@ -955,19 +957,10 @@ export default function AgentPanel() {
           ) : (
             <div key={i} className="chat-row assistant">
               {m.thinking && (
-                /* Obert PER DEFECTE: l'usuari vol veure el procés de
-                   pensament sense haver de clicar-hi; si el contingut no cap,
-                   el propi panell té barra de desplaçament. */
-                 <details className="chat-thought">
-                  <summary>
-                    <Brain size={12} style={{ verticalAlign: -2, marginRight: 4 }} />
-                    {t("agent.thinkingTitle")}
-                    {m.elapsedMs != null && ` · ${(m.elapsedMs / 1000).toFixed(1)} s`}
-                  </summary>
-                  {m.thinking && (
-                    <pre className="agent-thinking-body">{m.thinking}</pre>
-                  )}
-                </details>
+                /* Sempre OBERT i en CATALÀ (ChatThought): el raonament és
+                   la part que més es vol seguir — amb traducció automàtica
+                   si el model pensa en anglès, i «Original» a un clic. */
+                <ChatThought thinking={m.thinking} elapsedMs={m.elapsedMs} />
               )}
               <div className={"chat-bubble assistant" + (m.error ? " err" : "")}>
                 <ChatMarkdown text={m.text} />
