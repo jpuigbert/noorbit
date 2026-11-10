@@ -36,8 +36,6 @@ import TerminalPanel from "./components/Terminal/TerminalPanel";
 import ReviewPill from "./components/Editor/ReviewPill";
 import { markForPath, resolveMark } from "./stores/editReviewStore";
 import StartupScreen from "./components/StartupScreen";
-import { shouldShowOnboarding } from "./components/OnboardingModal";
-
 /// Autodesat (com l'«Auto Save» de VS Code): desa el fitxer obert poc
 /// després de l'últim canvi i també quan la finestra perd el focus.
 function useAutosave() {
@@ -121,9 +119,15 @@ export default function App() {
       useUIStore.getState().setShowStartup(true);
     }
     // Assistent de 3 passos NOMÉS a la primera arrencada real (es guarda quan
-    // es completa; l'usuari també el pot obrir des de Configuració).
-    if (shouldShowOnboarding()) {
-      useUIStore.getState().setShowOnboarding(true);
+    // es completa; l'usuari també el pot obrir des de Configuració). La
+    // comprovació va en línia (localStorage) i NO importa el modal, perquè
+    // el modal es carregui ÀJUS com la resta de diàlegs grans.
+    try {
+      if (localStorage.getItem("noorbit.onboardingDone") !== "1") {
+        useUIStore.getState().setShowOnboarding(true);
+      }
+    } catch {
+      /* sense persistència: no el molestem cada cop */
     }
   }, []);
 
