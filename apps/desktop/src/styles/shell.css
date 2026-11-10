@@ -167,8 +167,20 @@
   color: var(--text-0);
 }
 .tree-node.active {
+  /* Fitxer obert: fons suau + veta degradada de la casa al costat. */
   background: var(--bg-3);
   color: var(--text-0);
+  position: relative;
+}
+.tree-node.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 20%;
+  bottom: 20%;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--accent-grad);
 }
 /* Nom que ocupa l'ample disponible; accions només en hover. */
 .tree-name {

@@ -41,6 +41,11 @@ Tota la documentació ampliada és a la **wiki**: <https://github.com/jpuigbert/
 
 ---
 
+## Novetats de la 0.71
+
+- **Arrencada encara més lleugera**: els 9 diàlegs (Configuració, Proveïdors, Plugins, Ajuda, Compte, Catàleg IA, Gestor de models, Servidor remot, Onboarding) es carreguen **a demanda**, no a l'inici — el paquet principal ha baixat un 27% (357 → 260 KB).
+- **Remats de disseny**: el botó primari porta el degradat del TEMA (a «Verd i daurat» és jade→daurat), els inputs brillen amb anell d'accent al focus i el fitxer actiu de l'arbre té la veta de la casa.
+
 ## Novetats de la 0.70
 
 - **Menu «IA ▸ Servidor d'IA remot»**: el mateix assistent (SFTP → SSH → Connecta), ara amb una entrada pròpia a la paleta de comandes i **un tutorial pas a pas inclòs** (màquina amb GPU, SSH, Puja, Comprova, Connecta — amb errors típics com el port 8000 del tallafocs).

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import "./App.css";
 import { useUIStore, applyTheme } from "./stores/uiStore";
 import { useWorkspaceStore } from "./stores/workspaceStore";
@@ -15,11 +15,19 @@ import StatusBar from "./components/StatusBar";
 import Sidebar from "./components/Sidebar";
 import EditorPane from "./components/Editor/EditorPane";
 import RightPanel from "./components/RightPanel/RightPanel";
-import ModelManagerModal from "./components/AI/ModelManagerModal";
-import IaCatalogModal from "./components/AI/IaCatalogModal";
-import PluginManager from "./components/Plugins/PluginManager";
-import SettingsModal from "./components/Settings/SettingsModal";
-import HelpModal from "./components/Help/HelpModal";
+// Panells GRANS AMB LAZY: el seu codi és un chunk apart que només baixa quan
+// el flag que els obre és actiu per primer cop (arrencada més ràpida i poc
+// JS per analitzar). Els diàlegs mitjans (⌘P, quick open…) queden estàtics:
+// s'han d'obrir a l'instant.
+const ModelManagerModal = lazy(() => import("./components/AI/ModelManagerModal"));
+const IaCatalogModal = lazy(() => import("./components/AI/IaCatalogModal"));
+const PluginManager = lazy(() => import("./components/Plugins/PluginManager"));
+const SettingsModal = lazy(() => import("./components/Settings/SettingsModal"));
+const HelpModal = lazy(() => import("./components/Help/HelpModal"));
+const AccountModal = lazy(() => import("./components/Account/AccountModal"));
+const NewProjectModal = lazy(() => import("./components/NewProjectModal"));
+const RemoteServerModal = lazy(() => import("./components/RemoteServerModal"));
+const OnboardingModalComponent = lazy(() => import("./components/OnboardingModal"));
 import ComputerConfirmModal from "./components/Computer/ComputerConfirmModal";
 import CommandPalette from "./components/CommandPalette";
 import QuickOpen from "./components/QuickOpen";
@@ -27,11 +35,8 @@ import SearchPalette from "./components/SearchPalette";
 import TerminalPanel from "./components/Terminal/TerminalPanel";
 import ReviewPill from "./components/Editor/ReviewPill";
 import { markForPath, resolveMark } from "./stores/editReviewStore";
-import NewProjectModal from "./components/NewProjectModal";
 import StartupScreen from "./components/StartupScreen";
-import OnboardingModal, { shouldShowOnboarding } from "./components/OnboardingModal";
-import RemoteServerModal from "./components/RemoteServerModal";
-import AccountModal from "./components/Account/AccountModal";
+import { shouldShowOnboarding } from "./components/OnboardingModal";
 
 /// Autodesat (com l'«Auto Save» de VS Code): desa el fitxer obert poc
 /// després de l'últim canvi i també quan la finestra perd el focus.
@@ -270,20 +275,24 @@ export default function App() {
       <TerminalPanel />
       <StatusBar />
 
-      <ModelManagerModal />
-      <IaCatalogModal />
-      <PluginManager />
-      <SettingsModal />
-      <HelpModal />
+      {/* Modals HQ: només es MUNTEN quan el seu flag és actiu (ja no winyen
+          cap byte del seu codi a l'arrencada, i el chunk baixa amb un clic). */}
+      <Suspense fallback={null}>
+        {useUIStore((s) => s.showModelManager) && <ModelManagerModal />}
+        {useUIStore((s) => s.showIaCatalog) && <IaCatalogModal />}
+        {useUIStore((s) => s.showPlugins) && <PluginManager />}
+        {useUIStore((s) => s.showSettings) && <SettingsModal />}
+        {useUIStore((s) => s.showHelp) && <HelpModal />}
+        {useUIStore((s) => s.showAccount) && <AccountModal />}
+        {useUIStore((s) => s.showNewProject) && <NewProjectModal />}
+        {useUIStore((s) => s.showRemoteServer) && <RemoteServerModal />}
+        {useUIStore((s) => s.showOnboarding) && <OnboardingModalComponent />}
+      </Suspense>
       <ComputerConfirmModal />
       <CommandPalette />
       <QuickOpen />
       <SearchPalette />
-      <NewProjectModal />
       <StartupScreen />
-      {useUIStore((s) => s.showOnboarding) && <OnboardingModal />}
-      <RemoteServerModal />
-      <AccountModal />
     </div>
   );
 }

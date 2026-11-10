@@ -22,12 +22,15 @@
   background: var(--bg-4);
 }
 .btn.primary {
-  background: var(--accent);
+  /* Degradat de la casa (canvia amb el tema: violeta-blau en fosc,
+     jade-dauretat en «Verd i daurat»…) — lectura AA garantida. */
+  background: var(--accent-grad);
   border-color: transparent;
   color: #fff;
+  filter: saturate(1.05);
 }
 .btn.primary:hover {
-  background: var(--accent-hover);
+  filter: saturate(1.05) brightness(1.08);
   box-shadow: 0 2px 10px var(--accent-soft);
 }
 .btn.primary:active {
@@ -74,6 +77,7 @@
 .field select:focus,
 .field textarea:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 /* ---- Modals ---- */
