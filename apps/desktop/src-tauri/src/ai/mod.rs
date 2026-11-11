@@ -577,14 +577,14 @@ where
     };
     tokio::pin!(fut);
     tokio::pin!(watch);
-    loop {
-        tokio::select! {
-            r = &mut fut => return r,
-            _ = &mut watch => {
-                // La petició pendent es descarta en deixar-la caure.
-                drop(fut);
-                return Err(anyhow!(CANCELLED_MSG));
-            }
+    // Sense `loop`: les dues branques del select fan `return`, així que un
+    // bucle aquí és codi mort (clippy::never_loop) i no aporta res.
+    tokio::select! {
+        r = &mut fut => return r,
+        _ = &mut watch => {
+            // La petició pendent es descarta en deixar-la caure.
+            drop(fut);
+            return Err(anyhow!(CANCELLED_MSG));
         }
     }
 }
@@ -1259,7 +1259,6 @@ pub fn ensure_ollama_installed() -> Result<String> {
                     if app.exists() {
                         let writable = std::fs::metadata("/Applications")
                             .map(|m| {
-                                #[allow(clippy::fs_metadata)]
                                 use std::os::unix::fs::PermissionsExt as _;
                                 m.permissions().mode() & 0o200 != 0
                             })
@@ -1302,7 +1301,6 @@ pub fn ensure_ollama_installed() -> Result<String> {
     }
     let bytes = resp.bytes().map_err(|e| anyhow!("cos: {}", e))?;
     std::fs::write(&dest, &bytes)?;
-    #[allow(clippy::fs_metadata)]
     {
         use std::os::unix::fs::PermissionsExt as _;
         let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755));
@@ -2097,6 +2095,76 @@ impl AiManager {
         Ok(format!("Model '{}' descarregat", name))
     }
 
+    /// Nom del MODEL INICIAL per a usuaris nous, segons la RAM de la màquina
+    /// (quantització Q4 d'ollama.com): prou per seguir instruccions i escriure
+    /// codi sense quedar-se sense memòria. Un Mac Intel de 8 GB amb qwen3:4b
+    /// va bé; màquines modestes reben el 1.7b o el 0.6b.
+    fn starter_model_name() -> String {
+        const GB: u64 = 1024 * 1024 * 1024;
+        match Self::total_memory_bytes() {
+            Some(ram) if ram >= 8 * GB => "qwen3:4b".to_string(),
+            Some(ram) if ram >= 4 * GB => "qwen3:1.7b".to_string(),
+            _ => "qwen3:0.6b".to_string(),
+        }
+    }
+
+    /// Baixa el MODEL INICIAL si Ollama no té CAP model instal·lat (estat
+    /// d'un usuari que acabà d'instal·lar-ho: sense això TOTS els xats
+    /// fallarien amb 404). Retorna el nom baixat, o None si ja n'hi havia /
+    /// no s'ha pogut baixar. Emès amb els events «ai://pull» de progrés.
+    pub async fn pull_starter_model(&self, app: &tauri::AppHandle) -> Option<String> {
+        use tauri::Emitter;
+        let empty = self
+            .list_models()
+            .await
+            .map(|m| m.is_empty())
+            .unwrap_or(true);
+        if !empty {
+            return None;
+        }
+        let name = Self::starter_model_name();
+        let _ = app.emit(
+            "ai://pull",
+            serde_json::json!({
+                "model": name,
+                "message": format!(
+                    "Primer arrencada: descarregant el model inicial «{}» (només passa un cop)…",
+                    name
+                )
+            }),
+        );
+        match self.pull_model(app, &name).await {
+            Ok(_) => Some(name),
+            Err(e) => {
+                let _ = app.emit(
+                    "ai://pull",
+                    serde_json::json!({
+                        "model": name,
+                        "message": format!("No s'ha pogut baixar el model inicial: {}", e)
+                    }),
+                );
+                None
+            }
+        }
+    }
+
+    /// Tasca d'ARRANCADA: espera que el servei Ollama escolti (pot tardar:
+    /// pot estar descarregant-se i instal·lant-se ara mateix) i, si no té cap
+    /// model, en baixa un d'inicial. No bloca la UI — s'invoca des d'un fil
+    /// de fons en obrir NoOrbit.
+    pub async fn ensure_default_model(&self, app: &tauri::AppHandle) {
+        // Fins a 3 minuts: la primera instal·lació d'Ollama pot trigar.
+        for _ in 0..90 {
+            if self.is_running().await {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+        if self.is_running().await {
+            self.pull_starter_model(app).await;
+        }
+    }
+
     pub async fn delete_model(&self, name: &str) -> Result<()> {
         self.http
             .delete(self.url("/api/delete"))
@@ -2716,7 +2784,7 @@ impl AiManager {
         } else {
             None
         };
-        let req = ChatRequest {
+        let mut req = ChatRequest {
             model,
             messages,
             stream: true,
@@ -2784,8 +2852,6 @@ impl AiManager {
         // tardar més de quatre minuts i tallar-ho era un error falsò. Mentre
         // espera la capçalera, el visor ho pregunta a Ollama cada 15 s i només
         // en parla quan hi ha alguna cosa NOVA a dir (o cada 60 s).
-        let send = Self::send_chat(&self.http_stream, &chat_url, &req);
-        tokio::pin!(send);
         // «Atura» es mira des de ja: la futura d'avís es crea ABANS d'esperar
         // i es manté d'una iteració a l'altra (si es creara dins del `select!`,
         // un clic fet entre dues iteracions es podria perdre).
@@ -2801,38 +2867,98 @@ impl AiManager {
             }
         };
         tokio::pin!(watch);
+        // USUARI NOU SENSE CAP MODEL: el primer enviament a un Ollama acabat
+        // d'instal·lar retorna 404 («model no trobat»). En lloc de mostrar un
+        // error tècnic, baixem el model inicial (progrés a «ai://pull») i
+        // REINTENTEM el mateix xat una vegada: l'usuari no ha de fer res.
+        let mut starter_tried = false;
         let resp = loop {
-            tokio::select! {
-                biased;
-                _ = &mut watch => return Err(anyhow!(CANCELLED_MSG)),
-                r = &mut send => break r,
-                _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
-                    let ms = start.elapsed().as_millis() as u64;
-                    // Què fa Ollama DE VERITAT: si el model ja és a la memòria,
-                    // el que triga és la lectura del context, no la càrrega.
-                    let phase = match self.model_is_loaded(&model_label).await {
-                        Some(true) => WaitPhase::Prefill,
-                        Some(false) => WaitPhase::Loading,
-                        None => WaitPhase::Unknown,
-                    };
-                    if let Some(note) = wc.take(phase, ms) {
-                        ctl.process(app, "ollama", &model_label, "thinking", &note, ms);
+            // El futur «send» reté el préstec de «req»: el contenim en un
+            // bloc propi perquè mori ABANS de poder substituir el model.
+            let resp = {
+                let send = Self::send_chat(&self.http_stream, &chat_url, &req);
+                tokio::pin!(send);
+                let resp = loop {
+                tokio::select! {
+                    biased;
+                    _ = &mut watch => return Err(anyhow!(CANCELLED_MSG)),
+                    r = &mut send => break r,
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
+                        let ms = start.elapsed().as_millis() as u64;
+                        // Què fa Ollama DE VERITAT: si el model ja és a la memòria,
+                        // el que triga és la lectura del context, no la càrrega.
+                        let phase = match self.model_is_loaded(&model_label).await {
+                            Some(true) => WaitPhase::Prefill,
+                            Some(false) => WaitPhase::Loading,
+                            None => WaitPhase::Unknown,
+                        };
+                        if let Some(note) = wc.take(phase, ms) {
+                            ctl.process(app, "ollama", &model_label, "thinking", &note, ms);
+                        }
                     }
                 }
+            };
+            let resp = match resp {
+                Ok(r) => r,
+                Err(e) => {
+                    ctl.process(
+                        app,
+                        "ollama",
+                        &model_label,
+                        "error",
+                        &e.to_string(),
+                        start.elapsed().as_millis() as u64,
+                    );
+                    return Err(e);
+                }
+            };
+            resp // el futur «send» i el seu préstec de «req» moren aquí
+            };
+            if resp.status().as_u16() != 404 || starter_tried {
+                break resp;
             }
-        };
-        let resp = match resp {
-            Ok(r) => r,
-            Err(e) => {
+            starter_tried = true;
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            let sense_models = self
+                .list_models()
+                .await
+                .map(|m| m.is_empty())
+                .unwrap_or(false);
+            if !sense_models {
+                // El model demanat no existeix però sí que n'hi ha d'altres
+                // instal·lats: error normal (el model triat no és al sistema).
+                let note = ollama_error_note(&model_label, status, &body);
                 ctl.process(
                     app,
                     "ollama",
                     &model_label,
                     "error",
-                    &e.to_string(),
+                    &note,
                     start.elapsed().as_millis() as u64,
                 );
-                return Err(e);
+                return Err(anyhow!("Ollama error {}: {}", status, body));
+            }
+            ctl.process(
+                app,
+                "ollama",
+                &model_label,
+                "thinking",
+                "Ollama encara no té cap model: baixo el model inicial (només passa el primer cop; pot trigar uns minuts)…",
+                start.elapsed().as_millis() as u64,
+            );
+            match self.pull_starter_model(app).await {
+                Some(nou) => {
+                    // Tornem a provar el MATEIX xat amb el model acabat de baixar.
+                    req.model = nou;
+                }
+                None => {
+                    return Err(anyhow!(
+                        "No he pogut baixar el model inicial d'Ollama (pot ser manca de xarxa \
+                         o d'espai al disc). Torna-ho a provar més tard o baixa'n un des del \
+                         gestor de models."
+                    ));
+                }
             }
         };
         if !resp.status().is_success() {

@@ -298,7 +298,18 @@ impl AgentOrchestrator {
             return None;
         }
         let html = resp.text().await.ok()?;
-        let brut = match regex::Regex::new(r"(?is)<(script|style|noscript|header|footer|nav)[^>]*>.*?</\1>") {
+        // El motor `regex` de Rust NO admet retroreferències (</\1>), així
+        // que expandim les etiquetes a alternatives explícites. Abans aquesta
+        // regex fallava SEMPRE en compilar-la i el fallback retornava l'HTML
+        // en brut (scripts i estils dins del text que veia la IA).
+        let brut = match regex::Regex::new(concat!(
+            r"(?is)<script[^>]*>.*?</script>|",
+            r"<style[^>]*>.*?</style>|",
+            r"<noscript[^>]*>.*?</noscript>|",
+            r"<header[^>]*>.*?</header>|",
+            r"<footer[^>]*>.*?</footer>|",
+            r"<nav[^>]*>.*?</nav>",
+        )) {
             Ok(re) => re.replace_all(&html, " ").to_string(),
             Err(_) => html,
         };

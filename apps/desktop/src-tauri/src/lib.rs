@@ -140,7 +140,8 @@ pub fn run() {
             // 11434 no escolta, arrenca `ollama serve` en segon pla; i si
             // Ollama no hi és a l'ordinador, el BAIXA i l'INSTAL·LA sol
             // (descàrrega oficial d'ollama.com) i després l'engega.
-            std::thread::spawn(|| {
+            let ollama_handle = handle.clone();
+            std::thread::spawn(move || {
                 if crate::ai::ollama_running() {
                     return;
                 }
@@ -153,6 +154,18 @@ pub fn run() {
                 if let Err(e) = crate::ai::start_ollama_server() {
                     eprintln!("NoOrbit/Ollama: no s'ha pogut arrencar el servei: {e}");
                 }
+                // USUARI NOU: un Ollama acabat d'instal·lar no té CAP model i
+                // TOTS els xats fallarien amb 404. Si no n'hi ha cap, baixa'n
+                // un d'inicial (mida segons la RAM) amb progrés — sense que
+                // l'usuari hagi de fer res ni entendre res d'Ollama.
+                let ai = {
+                    use tauri::Manager as _;
+                    let state = ollama_handle.state::<AppState>();
+                    state.ai_manager.clone()
+                };
+                tauri::async_runtime::spawn(async move {
+                    ai.ensure_default_model(&ollama_handle).await;
+                });
             });
             Ok(())
         })

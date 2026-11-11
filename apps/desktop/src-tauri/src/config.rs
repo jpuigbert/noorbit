@@ -35,7 +35,11 @@ impl Default for AiConfig {
     fn default() -> Self {
         Self {
             ollama_url: "http://localhost:11434".into(),
-            default_model: "qwen3:8b".into(),
+            // Model per defecte per a UN USUARI NOU (el primer que veurà):
+            // 4b perquè capiga en un portàtil normal. Si l'usuari ja té la
+            // config desada no afecta res, i «resolve_usable_model» sempre
+            // cau al primer model instal·lat si aquest no hi és.
+            default_model: "qwen3:4b".into(),
             comfyui_url: "http://localhost:8188".into(),
             image_model: "flux-schnell".into(),
             backend_3d: String::new(),

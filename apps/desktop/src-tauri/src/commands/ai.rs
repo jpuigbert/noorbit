@@ -647,7 +647,7 @@ pub async fn start_ollama() -> Result<String, String> {
 /// - Windows: pàgina de descàrrega oficial.
 /// Sempre és transparent: l'usuari veu i autoritza el que s'executa.
 #[command]
-pub async fn install_ollama() -> Result<String, String> {
+pub async fn install_ollama(app: AppHandle) -> Result<String, String> {
     // Instal·lació AUTOMÀTICA (sense Terminal ni navegador): descarrega
     // l'oficial d'ollama.com i l'instal·la, i després engega el servei.
     let msg = tokio::task::spawn_blocking(|| {
@@ -660,6 +660,17 @@ pub async fn install_ollama() -> Result<String, String> {
     .await
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())?;
+    // USUARI NOU: un Ollama acabat d'instal·lar no té CAP model (el primer
+    // xat donaria 404). Baixem el model inicial EN SEGON PLA (progrés via
+    // «ai://pull») sense fer esperar la interfície.
+    use tauri::Manager as _;
+    let state = app.state::<AppState>();
+    let ai = state.ai_manager.clone();
+    drop(state);
+    let bg = app.clone();
+    tauri::async_runtime::spawn(async move {
+        ai.ensure_default_model(&bg).await;
+    });
     Ok(format!("{} — servei arrencat en segon pla (port 11434).", msg))
 }
 

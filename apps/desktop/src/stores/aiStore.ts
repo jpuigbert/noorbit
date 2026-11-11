@@ -220,6 +220,30 @@ export const useAIStore = create<AIState>((set, get) => ({
   },
 
   loadModels: async () => {
+    // Escoltador PERMANENT del progrés de baixades que fa el BACKEND per sí
+    // sol (model inicial d'un usuari nou / recuperació automàtica d'un 404):
+    // el gestor de models mostra el progrés encara que ningú no hagi premut
+    // «Baixa» — i quan acaba, el model apareix a la llista.
+    if (!(globalThis as Record<string, unknown>).__noorbitPullListener) {
+      (globalThis as Record<string, unknown>).__noorbitPullListener = true;
+      void import("@tauri-apps/api/event").then(({ listen }) =>
+        listen<{ model: string; message: string }>("ai://pull", (evt) => {
+          const { model, message } = evt.payload;
+          if (message.includes("success") || message.includes("descarregat")) {
+            set((s) => {
+              const pulling = { ...s.pulling };
+              delete pulling[model];
+              return { pulling };
+            });
+            void get().loadModels();
+          } else {
+            set((s) => ({
+              pulling: { ...s.pulling, [model]: message },
+            }));
+          }
+        })
+      );
+    }
     try {
       const models = await invoke<OllamaModel[]>("ollama_list_models");
       set({ models });
