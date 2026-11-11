@@ -817,6 +817,77 @@ fn ollama_error_note(model: &str, status: reqwest::StatusCode, body: &str) -> St
     format!("{}\nDetall tècnic: {}", causa, body)
 }
 
+/// Finestra de context (en tokens) d'un model de NÚVOL: serveix per a saber
+/// quin percentatge del context s'ha ocupat en cada resposta. Taula orienta-
+/// tiva pels models més habituals; si no es coneix, 8k (valor conservador).
+pub fn context_window_for(model: &str) -> u64 {
+    let m = model.to_lowercase();
+    if m.contains("claude") {
+        200_000
+    } else if m.contains("gpt-4o") || m.contains("gpt-4.1") || m.contains("gpt-5") {
+        128_000
+    } else if m.contains("gpt-4") || m.contains("gpt-3.5") {
+        8_192
+    } else if m.contains("deepseek") {
+        65_536
+    } else if m.contains("qwen3") {
+        40_960
+    } else if m.contains("qwen") {
+        32_768
+    } else if m.contains("llama3") || m.contains("llama-3") {
+        128_000
+    } else if m.contains("mistral") || m.contains("magistral") {
+        32_768
+    } else if m.contains("gemma") {
+        8_192
+    } else if m.contains("phi") {
+        4_096
+    } else if m.contains("glm") {
+        128_000
+    } else if m.contains("kimi") || m.contains("moonshot") {
+        128_000
+    } else {
+        8_192
+    }
+}
+
+/// Emet la COMPTABILITZACIÓ DE TOKENS d'un torn amb l'event «ai://usage»:
+/// la interfície la mostra sota la resposta (quants tokens d'entrada i de
+/// sortida, i quin percentatge del context s'ha ocupat). És el que permet
+/// saber quant costa de veritat una resposta d'una API de núvol.
+pub fn emit_usage(
+    app: &tauri::AppHandle,
+    session: &str,
+    provider: &str,
+    model: &str,
+    input: u64,
+    output: u64,
+    context_window: Option<u64>,
+) {
+    use tauri::Emitter;
+    let context_window = context_window
+        .filter(|w| *w > 0)
+        .unwrap_or_else(|| context_window_for(model));
+    let total = input.saturating_add(output);
+    let _ = app.emit(
+        "ai://usage",
+        serde_json::json!({
+            "session": session,
+            "provider": provider,
+            "model": model,
+            "input": input,
+            "output": output,
+            "total": total,
+            "contextWindow": context_window,
+            "contextUsedPct": if context_window > 0 {
+                ((input as f64 / context_window as f64) * 100.0).min(100.0)
+            } else {
+                0.0
+            },
+        }),
+    );
+}
+
 /// Tradueix errors opacs d'Ollama (memòria, connexió…) en missatges útils.
 pub fn friendly_error(e: &str) -> String {
     let low = e.to_lowercase();
@@ -2794,6 +2865,12 @@ impl AiManager {
         } else {
             Self::ctx_options(prompt_chars, sys_chars)
         };
+        // Finestra de context REAL d'aquest torn («num_ctx»): la interfície la
+        // mostra com a «tant % del context s'ha ocupat».
+        let ctx_window = options
+            .as_ref()
+            .and_then(|o| o.get("num_ctx"))
+            .and_then(|v| v.as_u64());
         let model_label = model.clone();
         // Els models que declaren l'habilitat «thinking» (qwen3, deepseek-r1…)
         // poden emetre el raonament en un CANAL PROPI: se'ls demana de forma
@@ -3037,6 +3114,9 @@ impl AiManager {
         let mut buf: Vec<u8> = Vec::new();
         let mut full = String::new();
         let mut thinking_acc = String::new();
+        // Comptabilització de tokens del torn (Ollama la publica al final).
+        let mut usage_input: u64 = 0;
+        let mut usage_output: u64 = 0;
         // Temps sense rebre cap fragment. Un model que no pot cabre en la RAM
         // no dona senyals: amb 3 minuts de silenci es talla i HO EXPLICA, en
         // lloc de penjar la interfície o mostrar un «ERROR» buit.
@@ -3136,6 +3216,15 @@ impl AiManager {
                     continue;
                 }
                 if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&line) {
+                    // Comptabilització de tokens: Ollama envia el compte al
+                    // final del flux («prompt_eval_count» = tokens llegits,
+                    // «eval_count» = tokens generats).
+                    if let Some(p) = v.get("prompt_eval_count").and_then(|x| x.as_u64()) {
+                        usage_input = p;
+                    }
+                    if let Some(c) = v.get("eval_count").and_then(|x| x.as_u64()) {
+                        usage_output = c;
+                    }
                     let msg = match v.get("message") {
                         Some(m) => m,
                         None => continue,
@@ -3212,6 +3301,34 @@ impl AiManager {
             "",
             start.elapsed().as_millis() as u64,
         );
+        // Comptabilització de tokens (Ollama). Si el model no l'ha donada,
+        // s'estima pel text (≈4 caràcters per token) perquè la interfície
+        // sempre pugui dir quant ha ocupat el context.
+        if usage_input > 0 || usage_output > 0 {
+            emit_usage(
+                app,
+                &ctl.id,
+                "ollama",
+                &model_label,
+                usage_input,
+                usage_output,
+                ctx_window,
+            );
+        } else {
+            let est_in = ((prompt_chars + sys_chars) / 4) as u64;
+            let est_out = (full.chars().count() / 4) as u64;
+            if est_in > 0 || est_out > 0 {
+                emit_usage(
+                    app,
+                    &ctl.id,
+                    "ollama",
+                    &model_label,
+                    est_in,
+                    est_out,
+                    ctx_window,
+                );
+            }
+        }
         Ok(full)
     }
 

@@ -147,6 +147,16 @@ impl AiProvider {
     pub fn is_anthropic(&self) -> bool {
         self.kind.eq_ignore_ascii_case("anthropic")
     }
+
+    /// Nom del tipus d'API (per a la interfície i la comptabilització):
+    /// «openai» (compatible OpenAI) o «anthropic».
+    pub fn kind_name(&self) -> String {
+        if self.is_anthropic() {
+            "anthropic".to_string()
+        } else {
+            "openai".to_string()
+        }
+    }
 }
 
 fn mask(token: &str) -> String {
@@ -614,6 +624,10 @@ async fn stream_sse(
             "model": provider.model,
             "messages": messages,
             "stream": true,
+            // Demana el compte de tokens al final del flux: sense això el
+            // proveïdor no diu quant ha consumit (necessari per a saber el
+            // cost real i quant del context s'ha ocupat).
+            "stream_options": { "include_usage": true },
         });
         let req = provider
             .apply_auth(http.post(&url))
@@ -639,6 +653,11 @@ async fn stream_sse(
     let mut thinking = String::new();
     let label = provider.name.clone();
     let model = provider.model.clone();
+    // Comptabilització de tokens: l'API de núvol l'envia al final del flux
+    // («usage»), i Anthropic la distribueix entre «message_start» i
+    // «message_delta». Sense això no es pot saber quant s'ha gastat.
+    let mut usage_input: u64 = 0;
+    let mut usage_output: u64 = 0;
 
     'stream: loop {
         if ctl.is_cancelled() {
@@ -670,6 +689,35 @@ async fn stream_sse(
                 continue;
             };
             let (tok, th) = parse_delta(&v);
+            // «usage» (OpenAI-compatible) o «message_start/message_delta»
+            // (Anthropic): el compte de tokens del torn.
+            if let Some(u) = v.get("usage").and_then(|u| u.as_object()) {
+                let get = |k: &str| u.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+                let p = get("prompt_tokens").max(get("input_tokens"));
+                let c = get("completion_tokens").max(get("output_tokens"));
+                if p > 0 {
+                    usage_input = p;
+                }
+                if c > 0 {
+                    usage_output = c;
+                }
+            }
+            if v.get("type").and_then(|t| t.as_str()) == Some("message_start") {
+                if let Some(u) = v.get("message").and_then(|m| m.get("usage")) {
+                    usage_input = u
+                        .get("input_tokens")
+                        .and_then(|x| x.as_u64())
+                        .unwrap_or(usage_input);
+                }
+            }
+            if v.get("type").and_then(|t| t.as_str()) == Some("message_delta") {
+                if let Some(u) = v.get("usage") {
+                    usage_output = u
+                        .get("output_tokens")
+                        .and_then(|x| x.as_u64())
+                        .unwrap_or(usage_output);
+                }
+            }
             let ms = start.elapsed().as_millis() as u64;
             if !th.is_empty() {
                 thinking.push_str(&th);
@@ -696,6 +744,20 @@ async fn stream_sse(
     }
     let ms = start.elapsed().as_millis() as u64;
     ctl.process(app, &label, &model, "done", "", ms);
+    // Comptabilització de tokens del torn (entrada/sortida): la interfície
+    // la mostra sota la resposta. Si el proveïdor no l'ha enviada, s'estima
+    // pel nombre de caràcters (~4 caràcters per token) per no deixar-ho en
+    // blanc.
+    if usage_input > 0 || usage_output > 0 {
+        crate::ai::emit_usage(
+            app,
+            &ctl.id,
+            &provider.kind_name(),
+            &model,
+            usage_input,
+            usage_output,
+        );
+    }
     if full.trim().is_empty() {
         return Err(anyhow!("Resposta buida del proveïdor"));
     }
