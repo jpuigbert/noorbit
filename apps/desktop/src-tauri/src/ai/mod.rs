@@ -896,10 +896,17 @@ fn explain_send_failure(e: &reqwest::Error, url: &str) -> String {
          més ràpid."
             .to_string()
     } else if !listening {
-        // El servei no hi és: intentem arrencar-lo nosaltres (si està instal·lat).
+        // El servei no hi és: intentem arrencar-lo nosaltres (si està instal·lat);
+        // si NO ho està, l'hem de BAIXAR i INSTAL·LAR: ho llenç en un fil de fons
+        // (la descàrrega triga uns minuts i així no congelo el xat) i aviso
+        // l'usuari que ho repeteixi quan acabi.
         let tried = if ollama_installed() {
             start_ollama_server().is_ok()
         } else {
+            std::thread::spawn(|| {
+                let _ = ensure_ollama_installed();
+                let _ = start_ollama_server();
+            });
             false
         };
         format!(
@@ -909,9 +916,11 @@ fn explain_send_failure(e: &reqwest::Error, url: &str) -> String {
             if tried {
                 "Ho he intentat arrencar jo: espera uns segons i repeteix el missatge."
             } else {
-                "Obre l'app d'Ollama o executa `ollama serve` en un terminal i \
-                 repeteix el missatge. Si no el tens instal·lat, instal·la'l o \
-                 connecta un proveïdor remot amb token (p. ex. Venice AI)."
+                "No el tens instal·lat: estic BAIXANT i INSTAL·LANT Ollama \
+                 automàticament en segon pla (triga uns minuts la descàrrega). \
+                 Quan acabi torna a enviar el missatge — o prem «Inicia Ollama» \
+                 al panell IA. També pots connectar un proveïdor remot amb token \
+                 (p. ex. Venice AI) mentre s'instal·la."
             }
         )
     } else if e.is_connect() {
@@ -1131,9 +1140,40 @@ fn decode_entities(s: &str) -> String {
         .replace("&nbsp;", " ")
 }
 
+/// Ruta REAL del binari d'Ollama al sistema. Crítica: quan NoOrbit corre
+/// com a .app el seu PATH és mínim (sovint sense /usr/local/bin), i si
+/// Ollama és l'App d'escriptori el CLI viu DINS del bundle
+/// (Ollama.app/Contents/Resources/ollama) — per això un «ollama serve»
+/// des de NoOrbit fallava amb ENOENT i el port 11434 quedava mort.
+pub fn ollama_binary() -> Option<std::path::PathBuf> {
+    if let Ok(p) = which::which("ollama") {
+        return Some(p);
+    }
+    let mut cands: Vec<std::path::PathBuf> = Vec::new();
+    if cfg!(target_os = "macos") {
+        if let Some(home) = dirs::home_dir() {
+            cands.push(home.join("Applications/Ollama.app/Contents/Resources/ollama"));
+            cands.push(home.join(".noorbit/bin/ollama"));
+        }
+        cands.push(std::path::PathBuf::from(
+            "/Applications/Ollama.app/Contents/Resources/ollama",
+        ));
+    }
+    cands.push(std::path::PathBuf::from("/opt/homebrew/bin/ollama"));
+    cands.push(std::path::PathBuf::from("/usr/local/bin/ollama"));
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        // Windows: l'instal·lador oficial deixa el CLI aquí (l'usuari normal).
+        cands.push(std::path::PathBuf::from(local)
+            .join("Programs")
+            .join("Ollama")
+            .join("ollama.exe"));
+    }
+    cands.into_iter().find(|p| p.is_file())
+}
+
 /// Detecta si el binari/servei d'Ollama és al sistema (CLI a PATH o l'app).
 pub fn ollama_installed() -> bool {
-    if which::which("ollama").is_ok() {
+    if ollama_binary().is_some() {
         return true;
     }
     // macOS: l'aplicació d'escriptori arrenca el servei en segon pla.
@@ -1157,6 +1197,212 @@ fn ollama_port_open() -> bool {
         std::time::Duration::from_millis(400),
     )
     .is_ok()
+}
+
+/// Diu si el servidor Ollama està escoltant ara mateix (versió pública).
+pub fn ollama_running() -> bool {
+    ollama_port_open()
+}
+
+/// Còpia recursiva d'una carpeta (per instal·lar la App d'Ollama a /Applications
+/// quan el zip i el destí poden estar en volums diferents i `rename` falla).
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let to = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_recursive(&entry.path(), &to)?;
+        } else {
+            std::fs::copy(entry.path(), &to)?;
+        }
+    }
+    Ok(())
+}
+
+/// BAIXA I INSTAL·LA Ollama automàticament quan no hi és al sistema (macOS):
+/// 1) l'app oficial (zip universal d'ollama.com) a /Applications (o a
+/// ~/Applications si /Applications no és escrivible), 2) si la descàrrega
+/// falla, el binari CLI de GitHub Releases dins de ~/.noorbit/bin.
+/// No demana res a l'usuari: el missatge resultant explica on ha quedat.
+#[cfg(target_os = "macos")]
+pub fn ensure_ollama_installed() -> Result<String> {
+    if ollama_installed() {
+        return Ok("Ollama ja està instal·lat".into());
+    }
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(600))
+        .user_agent("NoOrbit")
+        .build()
+        .map_err(|e| anyhow!("client HTTP: {}", e))?;
+
+    // 1) App oficial (universal): conté el CLI dins Resources/ollama.
+    if let Ok(resp) = client.get("https://ollama.com/download/Ollama-darwin.zip").send() {
+        if resp.status().is_success() {
+            if let Ok(bytes) = resp.bytes() {
+                let zip = std::env::temp_dir().join("noorbit_ollama.zip");
+                let dir = std::env::temp_dir().join("noorbit_ollama_unzip");
+                let _ = std::fs::remove_dir_all(&dir);
+                if std::fs::write(&zip, &bytes).is_ok()
+                    && std::fs::create_dir_all(&dir).is_ok()
+                    && std::process::Command::new("unzip")
+                        .args(["-q", "-o"])
+                        .arg(&zip)
+                        .arg("-d")
+                        .arg(&dir)
+                        .status()
+                        .map(|s| s.success())
+                        .unwrap_or(false)
+                {
+                    let app = dir.join("Ollama.app");
+                    if app.exists() {
+                        let writable = std::fs::metadata("/Applications")
+                            .map(|m| {
+                                #[allow(clippy::fs_metadata)]
+                                use std::os::unix::fs::PermissionsExt as _;
+                                m.permissions().mode() & 0o200 != 0
+                            })
+                            .unwrap_or(false);
+                        let dest = if writable {
+                            std::path::PathBuf::from("/Applications/Ollama.app")
+                        } else if let Some(home) = dirs::home_dir() {
+                            home.join("Applications/Ollama.app")
+                        } else {
+                            std::path::PathBuf::from("/Applications/Ollama.app")
+                        };
+                        if copy_dir_recursive(&app, &dest).is_ok() {
+                            let _ = std::fs::remove_dir_all(&dir);
+                            let _ = std::fs::remove_file(&zip);
+                            return Ok(format!(
+                                "Ollama instal·lat automàticament a {}",
+                                dest.display()
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2) Fallback: binari CLI de GitHub Releases a la carpeta local de NoOrbit.
+    let home = dirs::home_dir().ok_or_else(|| anyhow!("no hi ha carpeta d'usuari"))?;
+    let bindir = home.join(".noorbit/bin");
+    std::fs::create_dir_all(&bindir)?;
+    let dest = bindir.join("ollama");
+    let resp = client
+        .get("https://github.com/ollama/ollama/releases/latest/download/ollama-darwin")
+        .send()
+        .map_err(|e| anyhow!("descàrrega del CLI d'Ollama: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(anyhow!(
+            "No he pogut descarregar Ollama (HTTP {})",
+            resp.status()
+        ));
+    }
+    let bytes = resp.bytes().map_err(|e| anyhow!("cos: {}", e))?;
+    std::fs::write(&dest, &bytes)?;
+    #[allow(clippy::fs_metadata)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755));
+    }
+    Ok(format!("Ollama (CLI) instal·lat a {}", dest.display()))
+}
+
+/// Sistemes no-macOS: mantenim el flux manual (Terminal / pàgina oficial).
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+pub fn ensure_ollama_installed() -> Result<String> {
+    anyhow::bail!("La instal·lació automàtica d'Ollama no està disponible en aquest sistema")
+}
+
+/// Linux: executa l'INSTAL·LADOR OFICIAL (https://ollama.com/install.sh),
+/// que resol el binari, el servei systemd i el grup segons la distro.
+/// Si l'usuari no pot escriure a /usr/local (cal sudo i no hi ha terminal
+/// darrere d'una app gràfica), ho diem amb el comandament manual exacte.
+#[cfg(target_os = "linux")]
+pub fn ensure_ollama_installed() -> Result<String> {
+    if ollama_installed() {
+        return Ok("Ollama ja està instal·lat".into());
+    }
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .user_agent("NoOrbit")
+        .build()
+        .map_err(|e| anyhow!("client HTTP: {}", e))?;
+    let resp = client
+        .get("https://ollama.com/install.sh")
+        .send()
+        .map_err(|e| anyhow!("descàrrega de l'instal·lador oficial: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(anyhow!(
+            "No he pogut descarregar l'instal·lador oficial (HTTP {})",
+            resp.status()
+        ));
+    }
+    let body = resp.bytes().map_err(|e| anyhow!("cos: {}", e))?;
+    let script = std::env::temp_dir().join("noorbit_ollama_install.sh");
+    std::fs::write(&script, &body)?;
+    let out = std::process::Command::new("sh")
+        .arg(&script)
+        .output()
+        .map_err(|e| anyhow!("execució de l'instal·lador: {}", e))?;
+    let _ = std::fs::remove_file(&script);
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    if out.status.success() && ollama_installed() {
+        return Ok("Ollama instal·lat amb l'instal·lador oficial de ollama.com".into());
+    }
+    // Sense permisos d'administrador (sudo sense terminal no funciona):
+    // donem l'ordre manual exacta en lloc d'un fracàs opac.
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    Err(anyhow!(
+        "L'instal·lador oficial ha demanat permisos d'administrador i des \
+d'una app gràfica no n'hi ha. Executa manualment en un terminal:\n\
+  curl -fsSL https://ollama.com/install.sh | sh\n(detall: {})",
+        stderr.lines().last().unwrap_or("sense sortida d'error")
+    ))
+}
+
+/// Windows: descarrega l'INSTAL·LADOR OFICIAL (OllamaSetup.exe) i l'executa
+/// en mode SILENCIÓS (Inno Setup: /VERYSILENT), sense obrir finestres.
+#[cfg(target_os = "windows")]
+pub fn ensure_ollama_installed() -> Result<String> {
+    use std::os::windows::process::CommandExt as _;
+    if ollama_installed() {
+        return Ok("Ollama ja està instal·lat".into());
+    }
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(600))
+        .user_agent("NoOrbit")
+        .build()
+        .map_err(|e| anyhow!("client HTTP: {}", e))?;
+    let resp = client
+        .get("https://ollama.com/download/OllamaSetup.exe")
+        .send()
+        .map_err(|e| anyhow!("descàrrega de l'instal·lador oficial: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(anyhow!(
+            "No he pogut descarregar OllamaSetup.exe (HTTP {})",
+            resp.status()
+        ));
+    }
+    let bytes = resp.bytes().map_err(|e| anyhow!("cos: {}", e))?;
+    let exe = std::env::temp_dir().join("noorbit_ollama_setup.exe");
+    std::fs::write(&exe, &bytes)?;
+    let out = std::process::Command::new(&exe)
+        .args(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .status()
+        .map_err(|e| anyhow!("execució de l'instal·lador: {}", e))?;
+    let _ = std::fs::remove_file(&exe);
+    if out.success() && ollama_installed() {
+        return Ok("Ollama instal·lat amb l'instal·lador oficial per a Windows".into());
+    }
+    Err(anyhow!(
+        "L'instal·lador oficial de Windows no ha acabat bé (exit {}). \
+Prova d'executar-lo manualment des de https://ollama.com/download",
+        out.code().unwrap_or(-1)
+    ))
 }
 
 /// Espera que el port d'Ollama quede (obert | tancat); cert si ho aconsegueix.
@@ -1213,6 +1459,9 @@ fn stop_ollama_server() {
 /// A macOS, `launchctl setenv` fa que l'app d'Ollama també la faci servir
 /// quan es torne a obrir des del Finder.
 fn spawn_ollama_serve(models_dir: &str) -> Result<()> {
+    // Binari resolt (mai el nom buit «ollama»: des d'una .app el PATH no
+    // el conté i fallava amb «client error (Connect)» per sempre).
+    let bin = ollama_binary().ok_or_else(|| anyhow!("No trobo el binari d'Ollama al sistema"))?;
     #[cfg(target_os = "macos")]
     {
         let mut cmd = std::process::Command::new("launchctl");
@@ -1229,20 +1478,26 @@ fn spawn_ollama_serve(models_dir: &str) -> Result<()> {
     #[cfg(unix)]
     {
         let mut cmd = std::process::Command::new("nohup");
-        cmd.arg("ollama")
+        cmd.arg(&bin)
             .arg("serve")
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
         if !models_dir.is_empty() {
             cmd.env("OLLAMA_MODELS", models_dir);
         }
+        // PATH amplat perquè qualsevol subprocés d'Ollama trobi eines del sistema.
+        let path_env = std::env::var("PATH").unwrap_or_default();
+        cmd.env(
+            "PATH",
+            format!("/usr/local/bin:/opt/homebrew/bin:{}", path_env),
+        );
         cmd.spawn()
             .map(|_| ())
-            .map_err(|e| anyhow!("No s'ha pogut arrencar Ollama: {}", e))?;
+            .map_err(|e| anyhow!("No s'ha pogut arrencar Ollama ({}): {}", bin.display(), e))?;
     }
     #[cfg(windows)]
     {
-        let mut cmd = std::process::Command::new("ollama");
+        let mut cmd = std::process::Command::new(&bin);
         cmd.arg("serve").creation_flags(0x00000008);
         if !models_dir.is_empty() {
             cmd.env("OLLAMA_MODELS", models_dir);
@@ -1454,7 +1709,8 @@ pub fn migrate_models(app: &tauri::AppHandle) -> Result<String> {
 /// si ja roda sense aplicar-la, el reinicia perquè les descàrregues hi vagin.
 pub fn start_ollama_server() -> Result<()> {
     if !ollama_installed() {
-        return Err(anyhow!("Ollama no està instal·lat"));
+        // El programa s'ho fa sol: baixa i instal·la Ollama abans d'engegar-lo.
+        ensure_ollama_installed()?;
     }
     // Si ja escolta, assegurem que utilitzi la carpeta configurada (si cal,
     // el reinicia amb OLLAMA_MODELS).

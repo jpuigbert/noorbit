@@ -1002,10 +1002,17 @@ async function autoMaterialize(raw: string): Promise<string | null> {
 
   let files = parseFileBlocks(raw);
   if (files.length === 0) {
-    // Accepta només blocs amb nom de fitxer real; els «bloc_N» automàtics
-    // es queden per al botó manual (evita fitxers brossa en respostes normals).
-    files = extractFromProse(raw).filter((f) => !/^bloc_\d+\./.test(f.path));
+    files = extractFromProse(raw);
   }
+  // Blocs de codi SENSE nom de fitxer (els models locals sovint no anomenen
+  // res): abans es descartaven i NOMÉS sobrevivien els .md, així que «no crea
+  // res de codi». Ara els blocs de CODI real (.py/.js/.ts/…) es desin a la
+  // carpeta «codi_ia/» del projecte (els .md/.txt sense nom es descarten:
+  // són prosa explicativa, no codi).
+  const isUnnamed = (p: string) => /^bloc_\d+\./.test(p.split("/").pop() || "");
+  files = files
+    .filter((f) => !isUnnamed(f.path) || !/\.(md|txt)$/i.test(f.path))
+    .map((f) => (isUnnamed(f.path) ? { ...f, path: `codi_ia/${f.path}` } : f));
   // Carpetes que la IA ha demanat explícitament (estructura buida, sense fitxer).
   const dirReqs = parseDirDirectives(raw);
   // Fitxers/carpetes que la IA ha demanat ESBORRAR (l'opció contraria a @file:).

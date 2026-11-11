@@ -425,6 +425,13 @@ import bpy
 sc = bpy.context.scene
 sc.render.image_settings.file_format = 'FFMPEG'
 sc.render.ffmpeg.format = 'MPEG4'
+# Àudio del vídeo: si l'escena té música/veu a l'editor de seqüències, el
+# render els inclou NOMÉS amb un codec d'àudio definit; sense això el .mp4
+# sortiria mut.
+try:
+    sc.render.ffmpeg.audio_codec = 'AAC'
+except Exception:
+    pass
 if sc.frame_end > 300:
     sc.frame_end = 300
 try:

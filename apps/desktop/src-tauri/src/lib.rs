@@ -135,6 +135,25 @@ pub fn run() {
             if auto_connect_blender {
                 crate::blender::auto_connect::spawn_auto_connect(handle.clone());
             }
+
+            // IA local sense trencacols: quan NoOrbit s'obre, si el port
+            // 11434 no escolta, arrenca `ollama serve` en segon pla; i si
+            // Ollama no hi és a l'ordinador, el BAIXA i l'INSTAL·LA sol
+            // (descàrrega oficial d'ollama.com) i després l'engega.
+            std::thread::spawn(|| {
+                if crate::ai::ollama_running() {
+                    return;
+                }
+                if !crate::ai::ollama_installed() {
+                    match crate::ai::ensure_ollama_installed() {
+                        Ok(msg) => eprintln!("NoOrbit/Ollama: {}", msg),
+                        Err(e) => eprintln!("NoOrbit/Ollama: no s'ha pogut instal·lar: {e}"),
+                    }
+                }
+                if let Err(e) = crate::ai::start_ollama_server() {
+                    eprintln!("NoOrbit/Ollama: no s'ha pogut arrencar el servei: {e}");
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -340,6 +359,7 @@ pub fn run() {
             unreal::commands::unreal_ping,
             unreal::commands::unreal_info,
             unreal::commands::unreal_detect_installations,
+            unreal::commands::unreal_find_uproject,
             unreal::commands::unreal_auto_connect,
             unreal::commands::unreal_run_python,
             unreal::commands::unreal_create_blueprint,

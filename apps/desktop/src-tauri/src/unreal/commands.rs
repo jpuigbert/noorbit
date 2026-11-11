@@ -63,6 +63,40 @@ pub async fn unreal_detect_installations() -> Result<Vec<String>, String> {
         .collect())
 }
 
+/// Cerca un fitxer `.uproject` a la carpeta del projecte obert (arrel + un
+/// nivell de subcarpetes): el fa servir la UI per AUTO-OMPLIR el projecte
+/// sense que l'usuari hagui de seleccionar-lo a mà.
+#[command]
+pub async fn unreal_find_uproject(root: String) -> Result<Option<String>, String> {
+    let dir = PathBuf::from(&root);
+    if !dir.is_dir() {
+        return Ok(None);
+    }
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(_) => return Ok(None),
+    };
+    let mut nested: Option<PathBuf> = None;
+    for e in entries.flatten() {
+        let p = e.path();
+        if p.extension().and_then(|x| x.to_str()) == Some("uproject") {
+            return Ok(Some(p.to_string_lossy().to_string()));
+        }
+        if p.is_dir() && nested.is_none() {
+            if let Ok(sub) = std::fs::read_dir(&p) {
+                for s in sub.flatten() {
+                    let sp = s.path();
+                    if sp.extension().and_then(|x| x.to_str()) == Some("uproject") {
+                        nested = Some(sp);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    Ok(nested.map(|p| p.to_string_lossy().to_string()))
+}
+
 #[command]
 pub async fn unreal_auto_connect(
     project: String,

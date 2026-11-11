@@ -30,6 +30,9 @@ const AccountModal = lazy(() => import("./components/Account/AccountModal"));
 const NewProjectModal = lazy(() => import("./components/NewProjectModal"));
 const RemoteServerModal = lazy(() => import("./components/RemoteServerModal"));
 const OnboardingModalComponent = lazy(() => import("./components/OnboardingModal"));
+/// Detecció de l'entorn a l'obrir: si falta Ollama/Blender, pregunta si els
+/// vols instal·lar (instal·lació automàtica nativa del sistema operatiu).
+import SetupCheckModal from "./components/SetupCheckModal";
 import ComputerConfirmModal from "./components/Computer/ComputerConfirmModal";
 import CommandPalette from "./components/CommandPalette";
 import QuickOpen from "./components/QuickOpen";
@@ -321,6 +324,9 @@ export default function App() {
         {useUIStore((s) => s.showOnboarding) && <OnboardingModalComponent />}
       </Suspense>
       <ComputerConfirmModal />
+      {/* Detecció d'entorn a l'obrir: es mostra SOL si falta algun component
+          (i cada vegada, llevat que l'usuari premi «No tornar-la a mostrar»). */}
+      <SetupCheckModal />
       <CommandPalette />
       <QuickOpen />
       <SearchPalette />

@@ -94,3 +94,8 @@ export const unrealPackageGame = (
   engineRoot: string,
   options: PackageOptions
 ) => invoke<BuildResult>("unreal_package_game", { engineRoot, options });
+
+/// Cerca un .uproject dins la carpeta del projecte obert (arrel + un nivell):
+/// serveix per auto-omplir el projecte d'Unreal sense haver de seleccionar-lo.
+export const unrealFindUproject = (root: string) =>
+  invoke<string | null>("unreal_find_uproject", { root });

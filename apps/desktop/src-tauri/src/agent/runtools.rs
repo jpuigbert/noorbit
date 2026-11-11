@@ -51,6 +51,10 @@ natural dins de BLENDER: les imatges es creen amb «IMG|descripció|ruta.png».
 desa una còpia del fitxer amb bpy.ops.wm.save_as_mainfile(..., copy=True) i
 imprimeix «NOORBIT_VIDEO_OK:<ruta_blend>» — MAI cridis render(animation=True)
 en viu (bloqueja Blender): NoOrbit renderitza headless i dona la ruta .mp4.
+- MÚSICA/SONS/VEU a Blender: pots generar WAV amb numpy + wave i afegir-los
+amb scene.sequence_editor_create() + sequences.new_sound; la veu parlada es
+fa amb el TTS del sistema (macOS «say», Linux «espeak-ng», Windows SAPI) i
+la boca es pot animar amb keyframes aleatoris mentre sona la veu.
 - Una directriu per torn; llegix «RUN|RESULTAT|…» abans del pas següent. Si \
 falla: corregeix amb @file: i torna a executar; mai no declare èxit sense \
 haver vist eixir=0.\n\

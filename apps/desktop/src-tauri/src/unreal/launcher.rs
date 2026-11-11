@@ -1,5 +1,6 @@
 //! Detecció i arrencada d'Unreal Engine 5.
 
+use super::client::UnrealClient;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -120,6 +121,64 @@ pub fn editor_binary(engine_root: &Path) -> Option<PathBuf> {
     None
 }
 
+/// Assegura que el projecte té els plugins que necessita NoOrbit
+/// (PythonScriptPlugin + RemoteControl) ACTIVATS al fitxer `.uproject`.
+///
+/// Sense això, molts projectes recents (i tots els creats sense marcar-los)
+/// arriben amb el servidor Remote Control apagat: l'editor s'obre però el
+/// port 30010 no respon mai, i és la causa més freqüent de «no connecta».
+/// Retorna `true` si ha HAGUT de modificar el fitxer.
+pub fn ensure_project_plugins(uproject: &Path) -> Result<bool> {
+    let raw = std::fs::read_to_string(uproject)
+        .map_err(|e| anyhow!("No puc llegir el .uproject: {}", e))?;
+    let mut v: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|e| anyhow!("El .uproject no és JSON vàlid: {}", e))?;
+
+    let required = ["PythonScriptPlugin", "RemoteControl"];
+    let plugins = v
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("El .uproject no és un objecte"))?
+        .entry("Plugins")
+        .or_insert_with(|| serde_json::json!([]));
+    if !plugins.is_array() {
+        *plugins = serde_json::json!([]);
+    }
+
+    let mut changed = false;
+    for name in required {
+        let already = plugins
+            .as_array()
+            .map(|a| {
+                a.iter().any(|p| {
+                    p.get("Name").and_then(|n| n.as_str()) == Some(name)
+                        && p.get("Enabled").and_then(|e| e.as_bool()) == Some(true)
+                })
+            })
+            .unwrap_or(false);
+        if !already {
+            plugins
+                .as_array_mut()
+                .ok_or_else(|| anyhow!("Plugins no és una llista"))?
+                .push(serde_json::json!({ "Name": name, "Enabled": true }));
+            changed = true;
+        }
+    }
+
+    if changed {
+        // Còpia de seguretat d'una sola escriptura (la primera vegada que
+        // toquem el fitxer): l'usuari pot tornar-ho endarrere a mà.
+        let backup = uproject.with_extension("uproject.bak");
+        if !backup.exists() {
+            let _ = std::fs::copy(uproject, &backup);
+        }
+        let pretty = serde_json::to_string_pretty(&v)
+            .map_err(|e| anyhow!("No puc tornar a escriure el .uproject: {}", e))?;
+        std::fs::write(uproject, pretty)
+            .map_err(|e| anyhow!("No puc escriure el .uproject: {}", e))?;
+    }
+    Ok(changed)
+}
+
 /// Retorna el binari de RunUAT per a una instal·lació.
 pub fn runuat_binary(engine_root: &Path) -> Option<PathBuf> {
     let batch = engine_root
@@ -150,12 +209,20 @@ pub async fn launch_editor(
         cmd.arg(arg);
     }
 
-    // Habilita Remote Control API i Python Editor Script
+    // Habilita Remote Control API i Python Editor Script (per si el .uproject
+    // no ha pogut ser parchejat; l'un no treu l'altre).
     cmd.arg("-EnablePlugins=PythonScriptPlugin,RemoteControl");
 
-    // Script d'inicialització que obre el servidor HTTP de Remote Control
-    if let Some(init_script) = init_script_path() {
-        cmd.arg(format!("-ExecCmds=python {}", init_script.to_string_lossy()));
+    // Script d'inicialització que obre el servidor HTTP de Remote Control.
+    // EXECUTEPYTHONSCRIPT és el mètode FIABLE: s'executa un cop el motor
+    // inicialitzat i admet rutes amb espais. L'antic «-ExecCmds=python <ruta>»
+    // es trencava amb rutes amb espais («/Users/Shared/Epic Games/…») i
+    // s'executava abans que el plugin Python estigués llest.
+    if let Some(init_script) = ensure_bootstrap_script() {
+        cmd.arg(format!(
+            "-ExecutePythonScript={}",
+            init_script.to_string_lossy()
+        ));
     }
 
     cmd.stdout(Stdio::null())
@@ -195,6 +262,38 @@ fn init_script_path() -> Option<PathBuf> {
         return Some(p);
     }
     None
+}
+
+/// Bootstrap d'emergència: si el bundle no porta unreal-scripts (execucions
+/// en desenvolupament), l'ESCRIU a la carpeta temporal del sistema perquè
+/// `-ExecutePythonScript` sempre tingui un fitxer vàlid que obrir el RC.
+const BOOTSTRAP_FALLBACK: &str = r#"import unreal
+PORT = 30010
+def _log(m): unreal.log("[NoOrbit/bootstrap] " + m)
+try:
+    ctx = unreal.EditorLevelLibrary.get_editor_world()
+except Exception:
+    ctx = None
+for cmd in ("RemoteControl.EnableServer", "rc.EnableServer 1",
+            "RemoteControl.SetHttpPort {}".format(PORT)):
+    try:
+        unreal.SystemLibrary.execute_console_command(ctx, cmd)
+    except Exception:
+        pass
+_log("Remote Control demanat al port {}".format(PORT))
+"#;
+
+pub fn ensure_bootstrap_script() -> Option<PathBuf> {
+    if let Some(p) = init_script_path() {
+        return Some(p);
+    }
+    let dir = std::env::temp_dir().join("noorbit");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return None;
+    }
+    let p = dir.join("bootstrap.py");
+    std::fs::write(&p, BOOTSTRAP_FALLBACK).ok()?;
+    Some(p)
 }
 
 /// Espera que la Remote Control API estigui disponible.
@@ -240,21 +339,41 @@ pub async fn auto_connect(project: &Path, timeout: u64) -> Result<LaunchReport> 
         ));
     }
 
+    // ACTIVA els plugins que necessitem al .uproject ABANS de dur el projecte
+    // a l'editor: sense PythonScriptPlugin+RemoteControl el port 30010 no
+    // respondria mai i l'espera acabaria en temps exhaurit.
+    let patched = ensure_project_plugins(project)?;
+
     launch_editor(&editor, project, &[]).await?;
 
     let ok = wait_for_rc(DEFAULT_RC_PORT, timeout).await?;
     if !ok {
         return Err(anyhow!(
             "Unreal Editor s'ha obert però la Remote Control API no ha respost en {} s.\n\
-             Comprova que els plugins 'Python Editor Script' i 'Remote Control API' estiguin activats.",
+             Els plugins «Python Editor Script» i «Remote Control API» ja estan activats \
+             al projecte; si no connecta, obre l'editor amb el mateix projecte i activa \
+             «Window → Virtual Production → Remote Control».\n\
+             També pots tornar-ho a provar (la primera arrencada pot trigar més: \
+             compilació de shaders).",
             timeout
         ));
     }
+
+    // Assegura els dos servidors de Remote Control (HTTP ja respon; el WS és
+    // el que la intefície web de RC fara servir més endavant). Best-effort:
+    // si no es pot, el HTTP que ja hi ha n'és suficient per treballar.
+    let client = UnrealClient::with_port(DEFAULT_RC_PORT);
+    let _ = super::remote_control::start_websocket(&client, 30020).await;
+    let _ = super::remote_control::start_http(&client, DEFAULT_RC_PORT).await;
 
     Ok(LaunchReport {
         engine_path: engine_root.to_string_lossy().to_string(),
         project_path: project.to_string_lossy().to_string(),
         launched: true,
-        message: "Unreal Engine arrencat i connectat".into(),
+        message: if patched {
+            "Unreal Engine arrencat i connectat (plugins Python+RemoteControl activats al projecte)".into()
+        } else {
+            "Unreal Engine arrencat i connectat".into()
+        },
     })
 }

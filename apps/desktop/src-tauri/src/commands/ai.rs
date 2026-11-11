@@ -648,63 +648,19 @@ pub async fn start_ollama() -> Result<String, String> {
 /// Sempre és transparent: l'usuari veu i autoritza el que s'executa.
 #[command]
 pub async fn install_ollama() -> Result<String, String> {
-    let download_url = "https://ollama.com/download";
-
-    #[cfg(target_os = "macos")]
-    {
-        if which::which("brew").is_ok() {
-            let script = "tell application \"Terminal\" to do script \"brew install ollama && ollama serve\"";
-            std::process::Command::new("osascript")
-                .arg("-e")
-                .arg(script)
-                .spawn()
-                .map_err(|e| format!("No s'ha pogut obrir el Terminal: {}", e))?;
-            return Ok("S'ha obert el Terminal per instal·lar Ollama amb Homebrew.".into());
+    // Instal·lació AUTOMÀTICA (sense Terminal ni navegador): descarrega
+    // l'oficial d'ollama.com i l'instal·la, i després engega el servei.
+    let msg = tokio::task::spawn_blocking(|| {
+        let r = crate::ai::ensure_ollama_installed();
+        if r.is_ok() {
+            let _ = crate::ai::start_ollama_server();
         }
-        std::process::Command::new("open")
-            .arg(download_url)
-            .spawn()
-            .map_err(|e| format!("No s'ha pogut obrir el navegador: {}", e))?;
-        return Ok("S'ha obert la pàgina de descàrrega d'Ollama.".into());
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        let cmd = "curl -fsSL https://ollama.com/install.sh | sh";
-        let term = which::which("x-terminal-emulator")
-            .or_else(|_| which::which("gnome-terminal"))
-            .or_else(|_| which::which("konsole"))
-            .or_else(|_| which::which("xterm"))
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
-        if term.is_empty() {
-            std::process::Command::new("xdg-open")
-                .arg(download_url)
-                .spawn()
-                .map_err(|e| format!("No s'ha pogut obrir el navegador: {}", e))?;
-            return Ok("S'ha obert la pàgina de descàrrega d'Ollama.".into());
-        }
-        std::process::Command::new(term)
-            .arg("-e")
-            .arg(format!("sh -c '{}; exec sh'", cmd))
-            .spawn()
-            .map_err(|e| format!("No s'ha pogut obrir el Terminal: {}", e))?;
-        return Ok("S'ha obert el Terminal per instal·lar Ollama.".into());
-    }
-
-    #[cfg(windows)]
-    {
-        std::process::Command::new("cmd")
-            .arg("/C")
-            .arg("start")
-            .arg(download_url)
-            .spawn()
-            .map_err(|e| format!("No s'ha pogut obrir el navegador: {}", e))?;
-        return Ok("S'ha obert la pàgina de descàrrega d'Ollama.".into());
-    }
-
-    #[allow(unreachable_code)]
-    Err("Instal·lació no suportada en aquest sistema".into())
+        r
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    Ok(format!("{} — servei arrencat en segon pla (port 11434).", msg))
 }
 
 // ── DeepSeek Harness (dsh): instal·lació autogestionada, sense admin ───────

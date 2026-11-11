@@ -139,15 +139,16 @@ pub fn script_build_lighting(quality: &str) -> String {
 import unreal
 
 quality_map = {{
-    "preview": unreal.LightingBuildQuality.PREVIEW,
-    "medium": unreal.LightingBuildQuality.MEDIUM,
-    "high": unreal.LightingBuildQuality.HIGH,
-    "production": unreal.LightingBuildQuality.PRODUCTION,
+    "Preview": "BuildLighting Preview",
+    "Medium": "BuildLighting Medium",
+    "High": "BuildLighting High",
+    "Production": "BuildLighting Production",
 }}
 
-q = quality_map.get("{quality}", unreal.LightingBuildQuality.HIGH)
-unreal.EditorLevelLibrary.editor_build_lighting()
-print(f"Il·luminació construïda amb qualitat {{q}}")
+cmd = quality_map.get("{quality}", "BuildLighting High")
+ctx = unreal.EditorLevelLibrary.get_editor_world()
+unreal.SystemLibrary.execute_console_command(ctx, cmd)
+print("Il·luminació construïda: {{}}".format(cmd))
 "#,
         quality = quality
     )

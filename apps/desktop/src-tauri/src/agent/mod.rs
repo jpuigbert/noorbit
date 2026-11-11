@@ -1058,6 +1058,7 @@ for ob in peces:
 sc.render.resolution_x = 960; sc.render.resolution_y = 540
 sc.render.image_settings.file_format = 'FFMPEG'
 sc.render.ffmpeg.format = 'MPEG4'
+sc.render.ffmpeg.audio_codec = 'AAC'
 if sc.camera is None:
     bpy.ops.object.camera_add(location=(4.5, -5.5, 3.2),
         rotation=(1.15, 0.0, 0.75))
@@ -1065,6 +1066,84 @@ if sc.camera is None:
 bpy.ops.wm.save_as_mainfile(filepath="/tmp/noorbit_video.blend", copy=True)
 print("NOORBIT_VIDEO_OK:/tmp/noorbit_video.blend")
 ```
+- MÚSICA I SONS (quan l'usuari demani música, so o ambientació): genera el
+WAV amb numpy (Blender el porta inclòs) i afegeix-lo a l'EDITOR DE
+SEQÜÈNCIES amb sequence_editor_create + sequences.new_sound (Blender 4.x).
+```python
+import bpy, wave, numpy as np
+sr = 22050; dur = 8.0; t = np.arange(int(sr*dur)) / sr
+# Progressió d'acords (Do - Fa - Sol - Do), una nota cada 2 s:
+freqs = [261.63, 349.23, 392.00, 261.63]
+audio = np.zeros_like(t)
+for i, f in enumerate(freqs):
+    seg = (t >= i*2) & (t < (i+1)*2)
+    audio[seg] += 0.30*np.sin(2*np.pi*f*t[seg]) + 0.12*np.sin(2*np.pi*2*f*t[seg])
+env = np.minimum(1, np.minimum(t/0.3, (dur-t)/0.3))  # fade in/out
+audio *= env
+with wave.open("/tmp/noorbit_music.wav", "wb") as w:
+    w.setnchannels(1); w.setsampwidth(2); w.setframerate(int(sr))
+    w.writeframes((np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes())
+sc = bpy.context.scene
+se = sc.sequence_editor_create()
+se.sequences.new_sound("NoOrbit_Musica", "/tmp/noorbit_music.wav", 1, 1)
+sc.frame_end = max(sc.frame_end, int(dur * sc.render.fps))
+print("Música de %.0f s afegida a la línia de temps" % dur)
+```
+- VEU / PARLA (el nan parla!): usa el TTS DEL SISTEMA (no cal res extern).
+macOS: `say` + `afconvert` a WAV; Linux: `espeak-ng -w`; Windows: PowerShell
+System.Speech. Després afegeix la veu com a so de seqüència.
+```python
+import bpy, subprocess, platform, os
+text = "Hola! Soc el nan del teu jardí vermell."
+out = "/tmp/noorbit_veu"
+sist = platform.system()
+if sist == "Darwin":
+    subprocess.run(["say", "-o", out + ".aiff", text], check=True)
+    subprocess.run(["afconvert", "-f", "WAVE", "-d", "LEI16@22050",
+                    out + ".aiff", out + ".wav"], check=True)
+    os.remove(out + ".aiff")
+elif sist == "Linux":
+    subprocess.run(["espeak-ng", "-w", out + ".wav", text], check=True)
+else:
+    subprocess.run(["powershell", "-Command",
+        "Add-Type -AssemblyName System.Speech; "
+        "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+        "$s.SetOutputToWaveFile('%s.wav'); $s.Speak('%s'); $s.Dispose()"
+        % (out, text)], check=True)
+sc = bpy.context.scene
+se = sc.sequence_editor_create()
+veu = se.sequences.new_sound("NoOrbit_Veu", out + ".wav", 2, 1)
+dur = veu.frame_final_duration
+sc.frame_end = max(sc.frame_end, dur)
+print("Veu afegida (%d frames): «%s»" % (dur, text))
+```
+- PARLAR FLUID (boca animada mentre sona la veu): crea una boca petita a la
+cara i anima la seva escala amb keyframes cada pocs frames durant TOTA la
+durada de la veu (aleatòria = parlant; no sincronia per fonema, és fluida).
+```python
+import bpy, random
+boca = bpy.data.objects.get("Nano_Boca")
+if boca is None:
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.05,
+        segments=16, ring_count=12,
+        location=(3.0, -0.27, 1.24))  # sota el nas (adapta-ho al cap)
+    boca = bpy.context.view_layer.objects.active
+    boca.name = "Nano_Boca"
+veu = next((s for s in bpy.context.scene.sequence_editor.sequences
+            if s.name.startswith("NoOrbit_Veu")), None)
+dur = int(veu.frame_final_duration) if veu else 96
+f = 1
+while f < dur:
+    boca.scale = (1.0, 0.4 + random.random()*0.8, 0.6)
+    boca.keyframe_insert("scale", frame=f)
+    f += random.randint(3, 7)
+boca.scale = (1.0, 0.4, 0.6)
+boca.keyframe_insert("scale", frame=dur)
+print("Boca animada parlant durant %d frames" % dur)
+```
+- ÀUDIO AL VÍDEO: SI l'escena té sons de seqüència (música/veu), el render
+amb FFMPEG els inclou NOMÉS si scene.render.ffmpeg.audio_codec = 'AAC' —
+posa-ho SEMPRE quan hi hagi àudio (a la recepta de vídeo, abans de desar).
 REGLS DE FIGURES (fonts principals d'error):
 - Primitius DISPONIBLES (Blender 4.x): primitive_uv_sphere_add,
   primitive_cone_add, primitive_cylinder_add, primitive_torus_add,
