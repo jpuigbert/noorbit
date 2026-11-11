@@ -146,6 +146,14 @@ jobs:
     # Només quan el disparador és un tag `v*` (no per workflow_dispatch sol)
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Historial complet: les notes de la release es generen del
+          # MISSATGE DEL COMMIT que apunta el tag (són detallades i en
+          # català), i per llegir-lo cal tenir-lo al repo local.
+          fetch-depth: 0
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -178,6 +186,31 @@ jobs:
             }) | sort_by(.tag) | {updated: now|todate, versions: .}' > artifacts/versions.json
           cat artifacts/versions.json | head -c 600; echo
 
+      # ── Notes de la release: GENERADES del commit que apunta el tag ──────
+      # El projecte manté una tradició: cada commit de versió porta el seu
+      # changelog complet al missatge (en català). Aquí el traspassem al cos
+      # del GitHub Release: capçalera amb la versió REAL (del tauri.conf),
+      # novetats del commit, i la nota d'instal·lació/versions velles.
+      - name: Build release notes (from tag commit)
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VER=$(node -p "JSON.parse(require('fs').readFileSync('apps/desktop/src-tauri/tauri.conf.json','utf8')).version")
+          # Missatge del commit apuntat pel tag, sense el prefix «vX.Y: ».
+          NOTES=$(git log -1 --format=%B "$TAG" | sed -E "1s/^v[0-9][^:]*: //" | sed -E "1s/^v[0-9][^ ]* *//" )
+          {
+            echo "## NoOrbit ${VER} — novetats"
+            echo
+            echo "${NOTES}"
+            echo
+            echo "---"
+            echo
+            echo "**Instal·lació**: DMG universal signat ad-hoc a macOS (doble clic; si Gatekeeper es queixa la primera vegada: clic dret → *Obre*, o \`xattr -dr com.apple.quarantine /Applications/NoOrbit.app\`). Windows: \`-setup.exe\` amb doble clic (usuari actual). Debian/Ubuntu: \`.deb\` amb doble clic o \`sudo apt install ./NoOrbit_…_amd64.deb\`. Instruccions completes a qualsevol SO: fitxer \`INSTALL.md\` del repositori."
+            echo
+            echo "Les **versions anteriors** segueixen disponibles a https://github.com/jpuigbert/noorbit/releases — l'índex complet de versions i assets és el fitxer adjunt \`versions.json\`."
+          } > release-notes.md
+          echo "── release-notes.md ──"; head -8 release-notes.md
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -192,21 +225,12 @@ jobs:
             artifacts/**/*.AppImage.tar.gz
             artifacts/versions.json
           generate_release_notes: true
-          # Cos del release: capçalera de novetats + on són les versions
-          # velles. generate_release_notes hi afegeix sota la llista de
-          # commits/PR des de l'últim tag.
-          body: |
-            ## NoOrbit 0.61.2-alpha — novetats
-
-            - **Errors de sintaxi detectats fins i tot sense obrir el fitxer**: quan la IA escriu fitxers, NoOrbit els revisa offline (JSON real + balanceig de claudàtors per a TS/JS, Python, Rust, C…) i els errors apareixen al panell *Problemes* i com a ratlles vermelles en obrir-los.
-            - **Quick-fix estil Eclipse**: clica sobre l'error i prem **⌘+1** (Ctrl+1 a Windows/Linux) per aplicar la correcció suggerida (tanca claudàtors/cometes, esborra caràcters sobrers…); **⇧⌘+1** demana a la IA local que repari l'error.
-            - **Suggeriments en escriure**: autocomplete natiu de Monaco per a TS/JS/JSON/CSS/HTML, en línia i sense connexió.
-            - **DMG universal signat ad-hoc** (`codesign --force --deep --sign -`): instal·lable amb **doble clic** a qualsevol Mac (Intel i Apple Silicon). La primera vegada, si Gatekeeper es queixa: clic dret → *Obre*, o `xattr -dr com.apple.quarantine /Applications/NoOrbit.app`.
-            - **Windows**: el `-setup.exe` s'instal·la amb doble clic (usuari actual, sense admin). **Debian/Ubuntu**: `.deb` amb doble clic (GDebi/centre de programari) o `sudo apt install ./NoOrbit_…_amd64.deb`.
-
-            Instruccions completes d'instal·lació a qualsevol SO: fitxer `INSTALL.md` del repositori.
-
-            Les **versions anteriors** segueixen disponibles per descarregar a https://github.com/jpuigbert/noorbit/releases — i l'índex complet de versions i assets és el fitxer adjunt `versions.json`.
+          # Cos del release GENERAT del commit del tag: cada versió porta
+          # les seves pròpies novetats (mai més el text reciclat d'una
+          # release vella). «generate_release_notes» hi afegeix sota la
+          # llista de commits/PR des de l'últim tag + l'enllaç de comparació
+          # CORRECTE (GitHub el calcula per a aquest tag).
+          body_path: release-notes.md
           draft: false
           prerelease: false
           # La versió nova passa a ser la «Latest» sense esborrar res: els
