@@ -756,6 +756,7 @@ async fn stream_sse(
             &model,
             usage_input,
             usage_output,
+            None,
         );
     }
     if full.trim().is_empty() {

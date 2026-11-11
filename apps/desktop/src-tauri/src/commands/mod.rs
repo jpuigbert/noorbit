@@ -8,6 +8,7 @@ pub mod experts;
 pub mod fs;
 pub mod git;
 pub mod image;
+pub mod learning;
 pub mod plugins;
 pub mod portable;
 pub mod preview;

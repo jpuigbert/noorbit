@@ -84,11 +84,22 @@ pub async fn expert_delete(state: State<'_, AppState>, id: String) -> Result<(),
     state.experts.remove(&id).map_err(|e| e.to_string())
 }
 
+/// Protocol de fitxers comú a TOTS els especialistes: si la seua feina genera
+/// codi o proves, ha d'emetre «@file: ruta» (NoOrbit l'escriu al projecte).
+/// Sense això, un especialista podia respondre amb prosa i la feina no
+/// existia al disc. S'afegeix DESPRÉS de les seues instruccions.
+const FILE_PROTOCOL: &str = "\n\n— FITXERS REALS (NoOrbit) —\n\
+Quan generes o modifiques codi o proves (tests), emet cada fitxer amb una \
+línia «@file: ruta/real» seguida del contingut COMPLET (imports i lògica \
+real, mai «…» ni TODO). Les proves són fitxers de prova reals, no una \
+explicació. No diguis que ho has fet si no has emès cap «@file:».";
+
 /// Executa una tasca concreta amb un especialista (el seu rol, instruccions i
 /// model). `session`/`history` fan que la resposta pertanya al xat que l'ha
 /// cridat — i que l'especialista conega el fil del treball (o d'un «fork»).
 #[command]
 pub async fn expert_run(
+    app: AppHandle,
     state: State<'_, AppState>,
     expert_id: String,
     prompt: String,
@@ -107,12 +118,30 @@ pub async fn expert_run(
         images: Vec::new(),
     };
     let sid = session.unwrap_or_else(|| crate::ai::DEFAULT_SESSION.to_string());
-    crate::ai::in_session(
+    let system = format!("{}{}", expert.system_prompt, FILE_PROTOCOL);
+    let out = crate::ai::in_session(
         &sid,
-        ai.chat_opts(&prompt, Some(&expert.system_prompt), &opts),
+        ai.chat_opts(&prompt, Some(&system), &opts),
     )
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    // Aprenentatge local: la resposta de l'especialista també s'aprèn (amb
+    // l'origen ben marcat: un especialista no és la IA principal).
+    crate::commands::learning::record_turn(
+        &state,
+        &prompt,
+        &out,
+        &format!("especialista:{}", expert.name),
+        expert.model.as_deref().unwrap_or(""),
+    )
+    .await;
+    crate::commands::learning::maybe_auto_distill(
+        app,
+        ai.clone(),
+        state.learning.clone(),
+        state.config.clone(),
+    );
+    Ok(out)
 }
 
 /// La sessió d'un especialista DINS el treball en equip: cada un té el seu
@@ -307,11 +336,12 @@ async fn run_team(
                 // Sessió PRÒPIA de l'especialista: el seu fil/stream és visible
                 // des del panell d'especialistes i des del xat («Obre al xat»).
                 let sid = team_sid(&expert.id);
+                let system = format!("{}{}", expert.system_prompt, FILE_PROTOCOL);
                 let outcome = tokio::time::timeout(
                     limit,
                     crate::ai::in_session(
                         &sid,
-                        ai.chat_opts(&item.task, Some(&expert.system_prompt), &opts),
+                        ai.chat_opts(&item.task, Some(&system), &opts),
                     ),
                 )
                 .await;

@@ -47,6 +47,25 @@ export interface ChatMessage {
   /// Rutes absolutes d'imatges adjuntes o generades (es mostren al xat i
   /// es poden copiar; els models amb visió d'Ollama les reben com a entrada).
   images?: string[];
+  /// Comptabilització de tokens del torn (entrada/sortida i context ocupat).
+  /// Especialment útil amb les APIs de núvol: s'hi veu què costa cada
+  /// resposta i quant del context s'ha consumit.
+  usage?: TokenUsage;
+}
+
+/// Consum de tokens d'un torn, tal com l'informa el proveïdor.
+export interface TokenUsage {
+  provider: string;
+  model: string;
+  /// Tokens d'entrada (prompt + sistema + historial).
+  input: number;
+  /// Tokens generats.
+  output: number;
+  total: number;
+  /// Finestra de context del model (tokens).
+  contextWindow: number;
+  /// Percentatge del context ocupat pels tokens d'entrada.
+  contextUsedPct: number;
 }
 
 /// Extreu les rutes absolutes d'imatge (png/jpg/webp/gif/bmp) que apareixen
@@ -274,7 +293,9 @@ const SCAFFOLD_SYSTEM =
   "carpetes; si vols una carpeta buida (estructura), emet una línia " +
   "«@dir: <ruta>» (p. ex. @dir: assets/textures). Genera TOTS els fitxers " +
   "perquè el projecte funcioni (codi, configuració, requirements.txt i " +
-  "README.md). No escriguis res més enllà de blocs «@file:» i línies «@dir:».";
+  "README.md) i, si el projecte té lògica, inclou proves reals dins tests/ " +
+  "(o la carpeta de proves del llenguatge). No escriguis res més enllà de " +
+  "blocs «@file:» i línies «@dir:».";
 
 /// System prompt del pla de reserva: només la LLISTA DE RUTES (una per línia),
 /// tasca molt més senzilla que un model dèbil sí que pot resoldre.
@@ -384,6 +405,12 @@ const MEMORY_SYSTEM =
   "«@edit: ruta» + marcador «<<<<<<< CERCA» + el text EXACTE que vols canviar " +
   "+ «=======» + el text NOU (buit = ESBORRAR-lo) + «>>>>>>>».\n" +
   "PER ESBORRAR un fitxer sencer: una línia «@delete: ruta». " +
+  "Si la petició és FER codi («fes…», «implementa…», «crea…», «afegeix…», " +
+  "«arregla…») o PROVES («tests», «proves»), la resposta HA de portar els " +
+  "fitxers amb «@file:» i el codi COMPLET; les proves són fitxers reals " +
+  "(p. ex. tests/test_*.py o la carpeta de proves del projecte), mai una " +
+  "explicació, i si cal executar-les afegeix «RUN|<comanda>». No diguis que " +
+  "ho has fet si no has emès cap «@file:». " +
   "Respon sempre en català.";
 
 /// Nota curta que acompanya el context del projecte: demana al model que
@@ -408,6 +435,10 @@ const CONTEXT_SYSTEM =
   "esborrar-lo) + «>>>>>>>». NoOrbit aplica el canvi al fitxer real.\n" +
   "PER ESBORRAR UN FITXER SENCER (o codi que falla): una línia «@delete: " +
   "ruta». Ho esborra de veritat al projecte.\n\n" +
+  "SI ET DEMANEN FER CODI o PROVES (tests): no ho expliquis en prosa — emet " +
+  "els fitxers amb «@file:» i el codi COMPLET. Les proves són fitxers reals " +
+  "(p. ex. tests/test_*.py o la carpeta de proves del projecte), no una " +
+  "explicació, i si cal executar-les afegeix «RUN|<comanda>».\n\n" +
   "MEMÒRIA DE LA CONVERSA: tens el historial de les consultes anteriors " +
   "d'aquest xat. Si el missatge actual CONTINUA una tasca prèvia (p. ex. " +
   "«ara afegeix…», «millora-ho», «nova versió»), usa'l com a base. Si en " +
@@ -452,7 +483,7 @@ function parseFileBlocks(raw: string): { path: string; content: string }[] {
     }
   };
   for (const line of lines) {
-    const m = line.match(/^[ \t>*-]*@?file:\s*(.+?)\s*$/i);
+    const m = line.match(/^[ \t>#*-]*(?:\d+[.)]\s+)?@?file:\s*(.+?)\s*$/i);
     if (m) {
       flush();
       cur = {
@@ -474,9 +505,9 @@ function parseFileBlocks(raw: string): { path: string; content: string }[] {
     // Una directriu d'execució o d'estructura INTERROMP el bloc: tot el que
     // ve després ja no és contingut d'aquest fitxer.
     if (
-      /^[ \t>*-]*@?(dir|directori|carpeta|folder|delete|esborra|borra|elimina|remove|rm)\w*:/i.test(line) ||
-      /^[ \t>*-]*@?(edit|modifica|substitueix|reemplaça)\w*:/i.test(line) ||
-      /^[ \t>*-]*(RUN|IMG|NB)\|/i.test(line)
+      /^[ \t>#*-]*(?:\d+[.)]\s+)?@?(dir|directori|carpeta|folder|delete|esborra|borra|elimina|remove|rm)\w*:/i.test(line) ||
+      /^[ \t>#*-]*(?:\d+[.)]\s+)?@?(edit|modifica|substitueix|reemplaça)\w*:/i.test(line) ||
+      /^[ \t>#*-]*(RUN|IMG|NB)\|/i.test(line)
     ) {
       flush();
       continue;
@@ -1519,6 +1550,9 @@ interface AgentState {
   /// Projecte (bucket) de l'últim xat obert: només es mostren els del projecte actual.
   bucket: string | null;
   activeId: string;
+  /// Últim consum de tokens per xat (event «ai://usage»): s'ensenya sota la
+  /// resposta. Especialment útil amb les APIs de núvol (què costa cada torn).
+  usageBySession: Record<string, TokenUsage>;
 
   refreshBackends: () => Promise<void>;
 
@@ -1634,6 +1668,53 @@ export const useAgentStore = create<AgentState>((set, get) => {
       sessions: st.sessions.map((s) => (s.id === sid ? { ...s, ...(typeof p === "function" ? p(s) : p) } : s)),
     }));
 
+  // ── COMPTABILITZACIÓ DE TOKENS ────────────────────────────────────────
+  // El backend emet «ai://usage» al final de cada torn (Ollama i APIs de
+  // núvol). Es registra UN COP i es desa per xat: així la resposta mostra
+  // quant ha costat (entrada/sortida) i quin percentatge del context s'ha
+  // ocupat — la dada que fa falta per saber si una API de núvol val la pena.
+  if (!(globalThis as Record<string, unknown>).__noorbitUsageListener) {
+    (globalThis as Record<string, unknown>).__noorbitUsageListener = true;
+    void import("@tauri-apps/api/event").then(({ listen }) =>
+      listen<TokenUsage & { session: string }>("ai://usage", (evt) => {
+        const p = evt.payload;
+        if (!p?.session) return;
+        const usage: TokenUsage = {
+          provider: p.provider ?? "",
+          model: p.model ?? "",
+          input: p.input ?? 0,
+          output: p.output ?? 0,
+          total: p.total ?? (p.input ?? 0) + (p.output ?? 0),
+          contextWindow: p.contextWindow ?? 0,
+          contextUsedPct: p.contextUsedPct ?? 0,
+        };
+        set((st) => ({
+          usageBySession: { ...st.usageBySession, [p.session]: usage },
+        }));
+        // Si el xat ja té el missatge final, hi enganxem l'ús (el comptador
+        // ha de quedar SOTA la resposta corresponent).
+        const sess = get().sessions.find((s) => s.id === p.session);
+        if (sess && sess.messages.length > 0) {
+          const last = sess.messages[sess.messages.length - 1];
+          if (last.role === "assistant") {
+            set((st2) => ({
+              sessions: st2.sessions.map((s) =>
+                s.id === p.session
+                  ? {
+                      ...s,
+                      messages: s.messages.map((m, i) =>
+                        i === s.messages.length - 1 ? { ...m, usage } : m
+                      ),
+                    }
+                  : s
+              ),
+            }));
+          }
+        }
+      })
+    );
+  }
+
   const sessOf = (sid: string): ChatSession | undefined =>
     get().sessions.find((s) => s.id === sid);
 
@@ -1729,6 +1810,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
     sessions: initialChats.sessions,
     activeId: initialChats.activeId,
     bucket: currentBucket,
+    usageBySession: {},
 
     refreshBackends: async () => {
       set({ checking: true });
@@ -1897,6 +1979,14 @@ export const useAgentStore = create<AgentState>((set, get) => {
           input: { prompt, modality, workspace: null, session: sid },
         });
         const thinking = await fetchThinking(sid);
+        // També ací: si l'agent ha generat codi o proves amb «@file:» (o en
+        // blocs de codi), s'han d'escriure AL PROJECTE. Abans aquest camí es
+        // quedava en text i l'usuari veia la feina «feta» sense cap fitxer.
+        resetLiveMaterialize();
+        const extra = await autoMaterialize(res.text);
+        const agents = await applyAgentDirectives(res.text, sid);
+        const delegated = await applyDelegateDirectives(res.text, sid);
+        const todos = applyTodoDirectives(res.text);
         set((st) => ({
           sessions: st.sessions.map((s) =>
             s.id === sid
@@ -1905,7 +1995,10 @@ export const useAgentStore = create<AgentState>((set, get) => {
                   running: false,
                   startedAt: null,
                   lastElapsedMs: Date.now() - t0,
-                  lastResult: res.text,
+                  lastResult:
+                    [stripAgentDirectiveLines(res.text), delegated, extra, agents, todos]
+                      .filter(Boolean)
+                      .join("\n\n") || stripAgentDirectiveLines(res.text),
                   lastThinking: thinking,
                   timeline: [...s.timeline, ...res.steps.map((st2) => ({ ...st2, at: Date.now() }))],
                 }
@@ -3105,6 +3198,8 @@ export const useAgentStore = create<AgentState>((set, get) => {
       if (!g) return;
       const text = g.lastResult ?? g.error ?? "";
       if (!text && !g.lastThinking) return;
+      // Comptador de tokens del torn (si el backend l'ha emès).
+      const usage = get().usageBySession[id];
       set((s) => ({
         sessions: s.sessions.map((x) =>
           x.id === id
@@ -3120,6 +3215,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
                     elapsedMs: g.lastElapsedMs,
                     at: Date.now(),
                     error: !g.lastResult && !!g.error,
+                    usage,
                   },
                 ],
               }

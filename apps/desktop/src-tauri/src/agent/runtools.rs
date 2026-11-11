@@ -40,6 +40,10 @@ REGLES:\n\
 COMPLET; si falta un fitxer emet-lo SENCER amb «@file:» (mai a mitges, «…» o buits).\n\
 - «@file: ruta» ha d'anar SEGUIT del contingut COMPLET del fitxer (codi real): \
 un @file: sense codi crea un fitxer buit.\n\
+- Si l'usuari demana «fes…», «implementa…», «crea els tests» o semblant, la \
+resposta HA de portar els fitxers amb «@file:» i codi COMPLET; les PROVES són \
+fitxers de prova reals (no una explicació) i, si cal, s'executen amb «RUN|». \
+Dir «fet» sense cap fitxer no val.\n\
 - Escrius i TU executeixes («RUN|pip install -r requirements.txt», «RUN|python3 \
 main.py»): no diguis a l'usuari que ho faci ell.\n\
 - Si l'usuari demana CREAR/generar/dibuixar una imatge, respón UNA línia \
@@ -148,11 +152,11 @@ fn clean_file_path(p: &str) -> String {
 /// directrius «RUN|/IMG|/NB|», els «@dir:» i els «@delete:» INTERROMPEN el
 /// bloc: la prosa i les ordres posteriors no entren al fitxer.
 pub fn extract_file_blocks(text: &str) -> Vec<(String, String)> {
-    let Ok(file_re) = regex::Regex::new(r"(?i)^[ \t>*-]*@?file:\s*(.+?)\s*$") else {
+    let Ok(file_re) = regex::Regex::new(r"(?i)^[ \t>#*-]*(?:\d+[.)]\s+)?@?file:\s*(.+?)\s*$") else {
         return Vec::new();
     };
     let Ok(stop_re) = regex::Regex::new(
-        r"(?i)^[ \t>*-]*@?(dir|directori|carpeta|folder|delete|esborra|borra|elimina|remove|rm)\w*:|^[ \t>*-]*@?(edit|modifica|substitueix|reemplaça)\w*:|^[ \t>*-]*(run|img|nb)\|",
+        r"(?i)^[ \t>#*-]*(?:\d+[.)]\s+)?@?(dir|directori|carpeta|folder|delete|esborra|borra|elimina|remove|rm)\w*:|^[ \t>#*-]*(?:\d+[.)]\s+)?@?(edit|modifica|substitueix|reemplaça)\w*:|^[ \t>#*-]*(run|img|nb)\|",
     ) else {
         return Vec::new();
     };

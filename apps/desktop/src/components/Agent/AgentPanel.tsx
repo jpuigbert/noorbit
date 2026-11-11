@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ClipboardEvent, t
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { ListChecks, Zap, CheckCircle2, XCircle, Server, Download, RefreshCw, Cpu, UserCog, Send, Square, Brain, Boxes, X, Plus, Trash2, FolderPlus, FileDown, FolderTree, GitFork, Smartphone, Apple, Monitor, Copy, FolderOpen, ImageOff, Paperclip, ExternalLink, ChevronDown, Users } from "lucide-react";
+import { ListChecks, Zap, CheckCircle2, XCircle, Server, Download, RefreshCw, Cpu, UserCog, Send, Square, Brain, Boxes, X, Plus, Trash2, FolderPlus, FileDown, FolderTree, GitFork, Smartphone, Apple, Monitor, Copy, FolderOpen, ImageOff, Paperclip, ExternalLink, ChevronDown, Users, Gauge } from "lucide-react";
 import { useT } from "../../i18n";
 import { useAgentStore, useActiveChat, extractRecommendedPaths, extractChatImagePaths } from "../../stores/agentStore";
 import { useAIStore, OLLAMA_CLOUD_MODELS } from "../../stores/aiStore";
@@ -1023,6 +1023,48 @@ export default function AgentPanel() {
                   {msgImgs.map((p) => (
                     <ChatImage key={p} path={p} />
                   ))}
+                </div>
+              )}
+              {/* CONTEXT I TOKENS: quant ha ocupat el torn i quant del context
+                  del model s'ha consumit. Indispensable amb les APIs de núvol
+                  (per saber què costa cada resposta). */}
+              {m.usage && (m.usage.input > 0 || m.usage.output > 0) && (
+                <div
+                  className="chat-usage"
+                  title={
+                    m.usage.contextWindow > 0
+                      ? `Context del model: ${m.usage.contextWindow.toLocaleString("ca")} tokens`
+                      : undefined
+                  }
+                >
+                  <Gauge size={11} />
+                  <span>
+                    {m.usage.input.toLocaleString("ca")} entrada ·{" "}
+                    {m.usage.output.toLocaleString("ca")} sortida
+                  </span>
+                  {m.usage.contextWindow > 0 && (
+                    <>
+                      <span className="chat-usage-sep">·</span>
+                      <span>
+                        {m.usage.contextUsedPct.toFixed(0)}% del context (
+                        {m.usage.contextWindow.toLocaleString("ca")})
+                      </span>
+                      <span className="chat-usage-bar" aria-hidden>
+                        <span
+                          className="chat-usage-fill"
+                          style={{
+                            width: `${Math.max(2, Math.min(100, m.usage.contextUsedPct))}%`,
+                          }}
+                        />
+                      </span>
+                    </>
+                  )}
+                  {m.usage.provider && (
+                    <>
+                      <span className="chat-usage-sep">·</span>
+                      <span className="chat-usage-model">{m.usage.model || m.usage.provider}</span>
+                    </>
+                  )}
                 </div>
               )}
               {/* Objectiu 3: còpia del resultat (resposta, raonament) i desa

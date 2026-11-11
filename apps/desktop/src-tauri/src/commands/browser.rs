@@ -6,7 +6,8 @@
 //! identitat ni s'esquiva cap protecció.
 
 use crate::browser::{self, BrowserStatus, ChatProbe, PageExtract, WebIa};
-use tauri::{command, AppHandle};
+use crate::AppState;
+use tauri::{command, AppHandle, State};
 
 /// Obre el navegador intern amb una URL. `hidden = true` l'obre en segon
 /// pla (la IA el fa servir per llegir sense molestar; es pot mostrar després).
@@ -112,6 +113,7 @@ pub async fn web_ia_status(app: AppHandle) -> Result<ChatProbe, String> {
 #[command]
 pub async fn web_ia_ask(
     app: AppHandle,
+    state: State<'_, AppState>,
     name: String,
     question: String,
     wait_secs: Option<u64>,
@@ -144,6 +146,10 @@ pub async fn web_ia_ask(
     let answer = browser::chat_ask(&app, &question, std::time::Duration::from_secs(secs))
         .await
         .map_err(|e| e.to_string())?;
+    // Aprenentatge local: el que l'IA web ha respost també s'aprèn (amb
+    // l'origen marcat: una IA web, no el model local).
+    crate::commands::learning::record_turn(&state, &question, &answer, &format!("web:{}", ia.name), "")
+        .await;
     Ok(format!(
         "Resposta obtinguda del xat web de {} ({}), amb el compte de l'usuari — \
          lectura del que la pàgina mostra en pantalla:\n\n{}",

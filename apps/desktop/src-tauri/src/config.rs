@@ -127,6 +127,54 @@ impl Default for UnrealConfigFile {
     }
 }
 
+/// Aprenentatge local: NoOrbit observa les converses de l'usuari amb TOTES
+/// les IAs (local, remotes, especialistes, IAs web) i en treu lliçons que
+/// tornen al context dels xats futures — a més d'un registre exportable per
+/// entrenar un model local (LoRA) més endavant.
+///
+/// Tot és LOCAL: res surt de l'ordinador tret que l'usuari ho exporti.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LearningConfig {
+    /// Interruptor principal: engega l'observació de les converses i
+    /// l'injecció de les lliçons al context.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Destil·la les lliçons automàticament en segon pla (no bloqueja el xat).
+    #[serde(default = "default_true")]
+    pub auto_distill: bool,
+    /// Injecta les lliçons apreses al system prompt dels xats.
+    #[serde(default = "default_true")]
+    pub inject: bool,
+    /// Model local per destil·lar (buit = el model global d'Ollama).
+    #[serde(default)]
+    pub model: String,
+    /// Nombre màxim de lliçons conservades.
+    #[serde(default = "default_max_lessons")]
+    pub max_lessons: usize,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_max_lessons() -> usize {
+    120
+}
+
+impl Default for LearningConfig {
+    fn default() -> Self {
+        Self {
+            // Desactivat per defecte: aprendre de les converses és una
+            // decisió de l'usuari (privacitat), no un comportament implícit.
+            enabled: false,
+            auto_distill: true,
+            inject: true,
+            model: String::new(),
+            max_lessons: default_max_lessons(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
     #[serde(default)]
@@ -143,6 +191,9 @@ pub struct AppConfig {
     /// Carpeta d'arrels de skills (buit = per defecte).
     #[serde(default)]
     pub skills_dir: String,
+    /// Aprenentatge local (lliçons + registre per entrenar un model local).
+    #[serde(default)]
+    pub learning: LearningConfig,
 }
 
 impl AppConfig {

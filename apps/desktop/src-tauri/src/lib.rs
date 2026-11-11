@@ -12,6 +12,7 @@ pub mod config;
 pub mod experts;
 pub mod external_orchestrator;
 pub mod imgen;
+pub mod learning;
 pub mod lsp;
 pub mod mobile;
 pub mod plugins;
@@ -36,6 +37,8 @@ pub struct AppState {
     pub autonomous: Arc<autonomous::AutonomousStore>,
     /// Control del treball en equip (evita dos equips alhora i permet aturar-lo).
     pub team: Arc<experts::TeamControl>,
+    /// Aprenentatge local: registre de converses + lliçons apreses (tot local).
+    pub learning: Arc<learning::LearningStore>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -89,7 +92,10 @@ pub fn run() {
     let autonomous = Arc::new(autonomous::AutonomousStore::new(data_dir.clone()));
 
     // Especialistes: agents d'IA creats per l'usuari (individuals i en equip).
-    let experts = Arc::new(experts::ExpertManager::new(data_dir));
+    let experts = Arc::new(experts::ExpertManager::new(data_dir.clone()));
+
+    // Aprenentatge local: el registre de converses i les lliçons apreses.
+    let learning = Arc::new(learning::LearningStore::new(data_dir));
 
     let agent_config = agent::AgentConfig::default();
     let orchestrator = Arc::new(agent::AgentOrchestrator::new(agent_config));
@@ -114,6 +120,7 @@ pub fn run() {
         agent_orchestrator: orchestrator,
         autonomous,
         team: Arc::new(experts::TeamControl::new()),
+        learning,
     };
 
     tauri::Builder::default()
@@ -359,6 +366,15 @@ pub fn run() {
             commands::experts::expert_run,
             commands::experts::experts_team_run,
             commands::experts::experts_team_stop,
+            // Aprenentatge local (la IA que aprèn de les altres IAs)
+            commands::learning::learning_status,
+            commands::learning::learning_set_config,
+            commands::learning::learning_list,
+            commands::learning::learning_delete_lesson,
+            commands::learning::learning_clear,
+            commands::learning::learning_distill,
+            commands::learning::learning_export,
+            commands::learning::learning_record,
             // Blender
             blender::commands::blender_ping,
             blender::commands::blender_info,

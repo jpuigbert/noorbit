@@ -54,13 +54,13 @@ normalitat.";
 /// el contingut COMPLET en el mateix torn.
 fn empty_file_paths(text: &str) -> Vec<String> {
     use regex::Regex;
-    let Ok(re) = Regex::new(r"(?im)^[ \t>*-]*@?file:\s*(.+?)\s*$") else {
+    let Ok(re) = Regex::new(r"(?im)^[ \t>#*-]*(?:\d+[.)]\s+)?@?file:\s*(.+?)\s*$") else {
         return Vec::new();
     };
     let lines: Vec<&str> = text.lines().collect();
     // Marques de cada línia que inicia un bloc (@file:, @dir:, @delete:…).
     let is_marker = |l: &str| -> bool {
-        Regex::new(r"(?im)^\s*[\t >*-]*@?(file|dir|directori|carpeta|folder|delete|esborra|borra|elimina|remove|rm)\w*:\s*(.*)$")
+        Regex::new(r"(?im)^\s*[\t >#*-]*@?(file|dir|directori|carpeta|folder|delete|esborra|borra|elimina|remove|rm)\w*:\s*(.*)$")
             .map(|r| r.is_match(l))
             .unwrap_or(false)
     };
@@ -178,6 +178,80 @@ La generació la fa el sistema: rodet local en CPU (també en Mac Intel) o \
 proveïdor en línia amb token. El resultat et tornarà la RUTA real del fitxer \
 per copiar-la a la resposta final.";
 
+/// L'usuari demana FER/crear/modificar codi (no només preguntar-ne coses)?
+/// És el criteri que activa el recordatori perquè el model emeta fitxers de
+/// veritat en lloc de respondre amb prosa o un pla. Inclou les proves, que
+/// sovint es demanen amb «fes els tests» o «escriu proves».
+fn asks_for_code(prompt: &str) -> bool {
+    use regex::Regex;
+    let action = Regex::new(
+        r"(?i)\b(crea|crear|fes|fes-me|implementa|implementar|afegeix|afegir|modifica|modificar|corregeix|corregir|arregla|arreglar|refactoritza|refactoritzar|escriu|escriure|genera|generar|completa|completar|desenvolupa|desenvolupar|programa|programar|monta|muntar|migra|migrar)\b",
+    )
+    .map(|r| r.is_match(prompt))
+    .unwrap_or(false);
+    if !action {
+        return false;
+    }
+    let object = Regex::new(
+        r"(?i)\b(codi|codi font|funci[oó]|funcions|m[eè]tode|classe|component|components|m[oò]dul|m[oò]duls|api|endpoint|servei|serveis|fitxer|fitxers|arxiu|arxius|test|tests|prova|proves|suite|backend|frontend|pantalla|vista|bot[oó]|formulari|script|app|aplicaci[oó]|web|projecte|joc|login|autenticaci[oó]|crud|sql|base de dades|model|controlador|migraci[oó]|esquema|ruta|p[aà]gina|estil|css|html)\b",
+    )
+    .map(|r| r.is_match(prompt))
+    .unwrap_or(false);
+    let path_like = Regex::new(
+        r"(?i)[A-Za-z0-9_./-]+\.(py|js|jsx|ts|tsx|rs|go|java|kt|swift|rb|php|c|cpp|h|hpp|cs|sql|html|css|scss|json|yaml|yml|toml|sh|md)\b",
+    )
+    .map(|r| r.is_match(prompt))
+    .unwrap_or(false);
+    object || path_like
+}
+
+/// L'usuari parla de PROVES/TESTS? (en català «proves» també pot ser «try»,
+/// però només s'usa juntament amb un verb de creació).
+fn asks_for_tests(prompt: &str) -> bool {
+    use regex::Regex;
+    Regex::new(r"(?i)\b(tests?|proves?|testej\w*|provar|unitari\w*|unit[aà]ri\w*|integraci[oó]|tdd|cobertura)\b")
+        .map(|r| r.is_match(prompt))
+        .unwrap_or(false)
+}
+
+/// La resposta ja inclou algun fitxer anunciat amb «@file:» (amb la mateixa
+/// tolerància que el parser del frontend: calaixos, títols markdown, números).
+fn has_file_blocks(text: &str) -> bool {
+    use regex::Regex;
+    Regex::new(r"(?im)^[ \t>#*-]*(?:\d+[.)]\s+)?@?file:\s*\S")
+        .map(|r| r.is_match(text))
+        .unwrap_or(false)
+}
+
+/// Hi ha cap tanca de codi ``` a la resposta? Si n'hi ha, el frontend pot
+/// rescatar el codi i escriure'l; si no n'hi ha, el model només ha parlat.
+fn has_code_fence(text: &str) -> bool {
+    text.lines().any(|l| l.trim_start().starts_with("```"))
+}
+
+/// Recordatori quan l'usuari demana PROVES i la resposta no ha creat cap
+/// fitxer de prova: les proves han de ser fitxers reals, no una explicació.
+const TESTS_NUDGE: &str = "NoOrbit: l'usuari ha demanat PROVES (tests) i la \
+resposta NO ha creat cap fitxer amb «@file:». Una prova explicada en prosa no \
+serveix: ha de ser un FITXER REAL dins el projecte. Emet ARA, per a cada \
+prova, «@file: <ruta coherent amb el projecte>» (p. ex. tests/test_<tema>.py, \
+src/<tema>.test.ts o la carpeta de proves que ja use el projecte) seguit del \
+codi COMPLET de la prova (imports + casos reals que fallen si el codi està \
+malament, mai buits ni amb «…»). Si cal, crea també la configuració de proves \
+del projecte. Després escriu UNA línia «RUN|<comanda per executar les proves>» \
+i atura el torn. No expliquis res més.";
+
+/// Recordatori general: l'usuari ha demanat fer codi i el model ha respost
+/// només amb prosa o un pla. Calen fitxers reals.
+const CODE_NUDGE: &str = "NoOrbit: l'usuari t'ha demanat FER una cosa de codi i \
+la resposta no ha creat cap fitxer ni cap bloc de codi. No expliquis el que \
+faries ni prometis-ho per a després: EMET el resultat real. Per a cada fitxer \
+nou o modificat escriu «@file: ruta/real» i, JUST a la línia de seguida, el \
+contingut COMPLET (imports, funcions, lògica real; res de «…», res de TODO). \
+Si la tasca demanava proves, crea també els fitxers de prova. Quan acabis els \
+fitxers, si cal compilar, executar o provar res, escriu «RUN|<comanda>» i \
+atura el torn. Comença ara mateix pel primer fitxer.";
+
 /// Un torn de xat amb les EINES DE NOORBIT connectades: qualsevol resposta
 /// del model que continga directrius «NB|…» (navegador) o «RUN|…» / «IMG|…»
 /// (terminal del projecte i generador d'imatges) s'executa de veritat, se'n
@@ -189,11 +263,14 @@ async fn chat_with_tools(
     app: AppHandle,
     ai: &Arc<AiManager>,
     computer: &Arc<ComputerController>,
+    learning: &Arc<crate::learning::LearningStore>,
+    cfg: &Arc<tokio::sync::RwLock<crate::config::AppConfig>>,
     prompt: &str,
     system: Option<&str>,
     mut opts: ChatOpts,
     sid: &str,
     streaming: bool,
+    question: Option<&str>,
 ) -> Result<String, String> {
     use crate::agent::runtools;
     use crate::browser::tools;
@@ -222,6 +299,23 @@ async fn chat_with_tools(
         Some(s) => format!("{}\n\n{}", s, manual),
         None => manual,
     };
+    // ── Aprenentatge local ──────────────────────────────────────────────
+    // Les lliçons que l'IA ja ha APRÈS (de les converses anteriors amb
+    // qualsevol IA: la local, les remotes, els especialistes) entren al
+    // system prompt: la IA sap el que l'usuari ja li ha ensenyat i no
+    // torna a preguntar-ho. Tot local — cap servei al núvol hi participa.
+    let learn_cfg = { cfg.read().await.learning.clone() };
+    let learning_on = learn_cfg.enabled;
+    let lessons_block = if learning_on && learn_cfg.inject {
+        learning.context_for(prompt, 5)
+    } else {
+        String::new()
+    };
+    let sys = if lessons_block.is_empty() {
+        sys
+    } else {
+        format!("{}\n\n{}", sys, lessons_block)
+    };
     let mut current = prompt.to_string();
     let mut text = String::new();
     let mut nudged = false;
@@ -230,6 +324,9 @@ async fn chat_with_tools(
     let mut img_nudged = false;
     // «Emet tot el projecte» (README + pla sense codi): un sol recordatori.
     let mut project_nudged = false;
+    // Tasca de codi/proves respost amb prosa i cap fitxer: un sol recordatori.
+    let mut code_nudged = false;
+    let mut tests_nudged = false;
     let t0 = std::time::Instant::now();
     for round in 0..=MAX_ROUNDS {
         let res = if streaming {
@@ -302,6 +399,40 @@ async fn chat_with_tools(
                     continue;
                 }
             }
+            // I si l'usuari ha demanat PROVES i la resposta només les explica
+            // (cap «@file:»)? És el cas «fes els tests»: la prova ha d'existir
+            // com a fitxer real, no com a prosa. Un recordatori UNA vegada.
+            if round < MAX_ROUNDS
+                && !tests_nudged
+                && asks_for_code(prompt)
+                && asks_for_tests(prompt)
+                && !has_file_blocks(&text)
+            {
+                tests_nudged = true;
+                opts.history.push(HistoryTurn {
+                    role: "assistant".into(),
+                    content: text.clone(),
+                });
+                current = TESTS_NUDGE.to_string();
+                continue;
+            }
+            // I si l'usuari ha demanat FER codi (implementar, crear, modificar,
+            // arreglar…) i la resposta no té ni fitxers ni cap bloc de codi?
+            // Un recordatori imperatiu perquè emeta els fitxers de veritat.
+            if round < MAX_ROUNDS
+                && !code_nudged
+                && asks_for_code(prompt)
+                && !has_file_blocks(&text)
+                && !has_code_fence(&text)
+            {
+                code_nudged = true;
+                opts.history.push(HistoryTurn {
+                    role: "assistant".into(),
+                    content: text.clone(),
+                });
+                current = CODE_NUDGE.to_string();
+                continue;
+            }
             // I si ha demanat CREAR UNA IMATGE però ha respost amb prosa sense
             // emetre cap «IMG|»? UN recordatori imperatiu: que la generi el
             // sistema amb la directriu, i ell tan sols la copie.
@@ -354,7 +485,50 @@ async fn chat_with_tools(
         });
         current = report;
     }
+    // ── Aprenentatge local: es recorda el torn ──────────────────────────
+    // La pregunta de l'usuari i la resposta de la IA queden al registre
+    // local: serviran per destil·lar lliçons (en segon pla) i per exportar
+    // un dataset per entrenar un model local (LoRA) més endavant.
+    if learning_on {
+        if let Some(q) = extract_question(prompt, question) {
+            let (provider, model) = ai.session_labels(sid).await;
+            learning.record(&q, &text, &provider, &model);
+            // Destil·lació en segon pla: l'IA aprén sola, el xat NO espera.
+            crate::commands::learning::maybe_auto_distill(
+                app.clone(),
+                ai.clone(),
+                learning.clone(),
+                cfg.clone(),
+            );
+        }
+    }
     Ok(text)
+}
+
+/// La pregunta «real» de l'usuari dins del prompt enviat. El frontend la
+/// passa explícitament; si no, es treu del final del prompt (on el frontend
+/// posa «PREGUNTA / TASCA:»).
+fn extract_question(prompt: &str, question: Option<&str>) -> Option<String> {
+    if let Some(q) = question {
+        let t = q.trim();
+        if !t.is_empty() {
+            return Some(t.chars().take(2000).collect());
+        }
+    }
+    if let Some(idx) = prompt.rfind("PREGUNTA / TASCA:") {
+        let tail = prompt[idx + "PREGUNTA / TASCA:".len()..].trim();
+        if !tail.is_empty() {
+            return Some(tail.chars().take(2000).collect());
+        }
+    }
+    // Sense marca: si el prompt és curt, el mateix és la pregunta.
+    if prompt.chars().count() <= 800 {
+        let t = prompt.trim();
+        if !t.is_empty() {
+            return Some(t.to_string());
+        }
+    }
+    None
 }
 
 #[command]
@@ -368,6 +542,7 @@ pub async fn send_prompt(
     model: Option<String>,
     history: Option<Vec<HistoryTurn>>,
     images: Option<Vec<String>>,
+    question: Option<String>,
 ) -> Result<String, String> {
     let ai: Arc<AiManager> = state.ai_manager.clone();
     let opts = ChatOpts {
@@ -377,7 +552,20 @@ pub async fn send_prompt(
         images: images.unwrap_or_default(),
     };
     // Dins del xat: els events i la cancel·lació són d'aquell xat, no globals.
-    chat_with_tools(app, &ai, &state.computer, &prompt, system.as_deref(), opts, &sid_of(session), false).await
+    chat_with_tools(
+        app,
+        &ai,
+        &state.computer,
+        &state.learning,
+        &state.config,
+        &prompt,
+        system.as_deref(),
+        opts,
+        &sid_of(session),
+        false,
+        question.as_deref(),
+    )
+    .await
 }
 
 /// Envia un prompt i va emetent fragments amb l'event «ai://chunk» mentre el
@@ -397,6 +585,7 @@ pub async fn send_prompt_stream(
     model: Option<String>,
     history: Option<Vec<HistoryTurn>>,
     images: Option<Vec<String>>,
+    question: Option<String>,
 ) -> Result<String, String> {
     let ai: Arc<AiManager> = state.ai_manager.clone();
     let opts = ChatOpts {
@@ -412,11 +601,14 @@ pub async fn send_prompt_stream(
         app,
         &ai,
         &state.computer,
+        &state.learning,
+        &state.config,
         &prompt,
         system.as_deref(),
         opts,
         &sid_of(session),
         true,
+        question.as_deref(),
     )
     .await
 }
@@ -1337,4 +1529,33 @@ pub async fn ia_catalog(state: State<'_, AppState>) -> Result<Vec<IaCatalogEntry
     }
     drop(guard);
     Ok(out)
+}
+
+#[cfg(test)]
+mod nudge_tests {
+    use super::*;
+
+    #[test]
+    fn detects_code_requests_including_tests() {
+        assert!(asks_for_code("fes els tests de la calculadora"));
+        assert!(asks_for_code("implementa el login amb JWT"));
+        assert!(asks_for_code("crea el component Boto.tsx"));
+        assert!(asks_for_code("arregla src/app.py"));
+        assert!(asks_for_tests("fes els tests de la calculadora"));
+        assert!(asks_for_tests("escriu proves unitàries"));
+        // Una pregunta o una xarrada no és una ordre de codi.
+        assert!(!asks_for_code("què és un test unitari?"));
+        assert!(!asks_for_code("explica'm com funciona el login"));
+    }
+
+    #[test]
+    fn detects_announced_files_with_markdown_variants() {
+        assert!(has_file_blocks("@file: src/app.py\nprint(1)\n"));
+        assert!(has_file_blocks("### @file: tests/test_app.py\nprint(1)\n"));
+        assert!(has_file_blocks("1. @file: src/app.py\n"));
+        assert!(has_file_blocks("**@file: src/app.py**\n"));
+        assert!(!has_file_blocks("He creat el fitxer src/app.py"));
+        assert!(has_code_fence("prova:\n```python\nx = 1\n```"));
+        assert!(!has_code_fence("només prosa"));
+    }
 }

@@ -358,6 +358,59 @@
   font-size: 11px;
 }
 
+/* ---- Comptador de TOKENS i ocupació del CONTEXT ----
+   Sota cada resposta de la IA: quants tokens d'entrada i de sortida ha
+   costat el torn i quin percentatge de la finestra de context s'ha ocupat.
+   Amb les APIs de núvol és la dada clau per saber què val cada resposta. */
+.chat-usage {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  font-size: 10.5px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  width: fit-content;
+  max-width: 100%;
+}
+.chat-usage svg {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.chat-usage-sep {
+  color: var(--text-3);
+  opacity: 0.6;
+}
+.chat-usage-model {
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+/* Barreta del context ocupat: es veu d'un cop d'ull si el torn s'acosta al
+   límit (i és el que avisa abans de que el model talli la resposta). */
+.chat-usage-bar {
+  display: inline-block;
+  width: 54px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-4);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.chat-usage-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width var(--speed) var(--ease-out);
+}
+
 /* ---- Tutorial «Servidor d'IA remot» (ajuda pas a pas) ---- */
 .remote-tut {
   margin: 2px 0 10px;

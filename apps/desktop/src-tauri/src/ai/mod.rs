@@ -2579,6 +2579,30 @@ impl AiManager {
         self.ctl(session).error_shown()
     }
 
+    /// Xat **NOMÉS local** (Ollama): mai no remeteix la conversa a cap
+    /// proveïdor en línia, ni quan el model local falla (aquí no hi ha cap
+    /// reserva a l'IA remota).
+    ///
+    /// Serveix per a l'APRENENATGE: les converses de l'usuari es destil·len
+    /// amb el model de la màquina i no suren mai de l'ordinador.
+    pub async fn chat_local_only(
+        &self,
+        prompt: &str,
+        system: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<String> {
+        let ctl = self.ctl_now();
+        if let Some(m) = model {
+            if !m.trim().is_empty() {
+                ctl.set_model(Some(m)).await;
+            }
+        }
+        ctl.begin().await;
+        // Proveïdor «ollama» = camí local SEMPRE (dins `chat_inner`).
+        self.chat_inner(prompt, system, &ctl, "ollama", &ChatOpts::default())
+            .await
+    }
+
     /// Envia un prompt de xat i retorna la resposta completa.
     /// Si hi ha un proveïdor remot actiu, enruta cap a ell; si no, usa Ollama.
     pub async fn chat(&self, prompt: &str, system: Option<&str>) -> Result<String> {
