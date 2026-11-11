@@ -331,6 +331,17 @@ async fn chat_with_tools(
                     pre.join(", ")
                 ));
             }
+            // Edicions quirúrgiques «@edit:» (CERCA/NOU): aplicar-les TAMBÉ
+            // abans d'executar perquè «RUN|python3 x.py» vega el codi ja
+            // modificat. L'informe torna al model perquè corregeixi els CERCA
+            // que no han coincidit.
+            let edits = runtools::apply_edit_blocks(&app, &text);
+            if !edits.is_empty() {
+                report.push_str(&format!(
+                    "RUN|RESULTAT| edicions aplicades: {}\n",
+                    edits.join(" · ")
+                ));
+            }
             report.push_str(&runtools::execute(&app, computer, ai, &runs).await);
             report.push('\n');
         }

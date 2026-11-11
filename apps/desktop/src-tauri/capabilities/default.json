@@ -1,11 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capacitats per defecte de NoOrbit",
+  "description": "Capacitats per defecte de NoOrbit. fs:allow-read-file/write-file són les comandes BINÀRIES del plugin fs (la captura del viewport d'Unreal llegeix el PNG amb readFile binari); l'scope «**» cobreix totes les rutes.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "core:window:allow-close",
+    "core:window:allow-destroy",
     "core:window:allow-minimize",
     "core:window:allow-maximize",
     "core:window:allow-start-dragging",
@@ -13,6 +14,8 @@
     "shell:allow-open",
     "fs:allow-read-text-file",
     "fs:allow-write-text-file",
+    "fs:allow-read-file",
+    "fs:allow-write-file",
     "fs:allow-read-dir",
     "fs:allow-exists",
     "fs:allow-mkdir",

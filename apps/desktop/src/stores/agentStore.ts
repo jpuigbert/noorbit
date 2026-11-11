@@ -377,7 +377,12 @@ const MEMORY_SYSTEM =
   "Quan generes o modifiquis codi d'un projecte, emet cada fitxer amb una " +
   "línia «@file: ruta/real» seguida del contingut COMPLET: NoOrbit el crea o " +
   "sobreescriu SOL al projecte obert. Per modificar un fitxer existent usa " +
-  "la seua ruta EXACTA. Respon sempre en català.";
+  "la seua ruta EXACTA.\n" +
+  "PER EDITAR només un tros d'un fitxer (millor que reemetre'l sencer): " +
+  "«@edit: ruta» + marcador «<<<<<<< CERCA» + el text EXACTE que vols canviar " +
+  "+ «=======» + el text NOU (buit = ESBORRAR-lo) + «>>>>>>>».\n" +
+  "PER ESBORRAR un fitxer sencer: una línia «@delete: ruta». " +
+  "Respon sempre en català.";
 
 /// Nota curta que acompanya el context del projecte: demana al model que
 /// s'hi basi i responga en català. S'usa només quan «Inclou el codi» és actiu.
@@ -396,6 +401,11 @@ const CONTEXT_SYSTEM =
   "reemet el MATEIX camí amb «@file:» i el codi COMPLET ja amb els canvis " +
   "aplicats (NoOrbit el sobreescriurà). No inventes un nom nou per a una " +
   "versió modificada: usa la ruta exacta del fitxer existent.\n\n" +
+  "MÉS FÀCIL I MILLOR per a canvis PETITS: «@edit: ruta» + «<<<<<<< CERCA» " +
+  "+ el text EXACTE del fitxer a canviar + «=======» + el text NOU (buit = " +
+  "esborrar-lo) + «>>>>>>>». NoOrbit aplica el canvi al fitxer real.\n" +
+  "PER ESBORRAR UN FITXER SENCER (o codi que falla): una línia «@delete: " +
+  "ruta». Ho esborra de veritat al projecte.\n\n" +
   "MEMÒRIA DE LA CONVERSA: tens el historial de les consultes anteriors " +
   "d'aquest xat. Si el missatge actual CONTINUA una tasca prèvia (p. ex. " +
   "«ara afegeix…», «millora-ho», «nova versió»), usa'l com a base. Si en " +
@@ -463,6 +473,7 @@ function parseFileBlocks(raw: string): { path: string; content: string }[] {
     // ve després ja no és contingut d'aquest fitxer.
     if (
       /^[ \t>*-]*@?(dir|directori|carpeta|folder|delete|esborra|borra|elimina|remove|rm)\w*:/i.test(line) ||
+      /^[ \t>*-]*@?(edit|modifica|substitueix|reemplaça)\w*:/i.test(line) ||
       /^[ \t>*-]*(RUN|IMG|NB)\|/i.test(line)
     ) {
       flush();
@@ -995,10 +1006,215 @@ function applyTodoDirectives(raw: string): string | null {
 /// reals (blocs @file: o ``` amb nom), els escriu SOLA al projecte obert
 /// (creant també l'estructura de carpetes). Sense clics de l'usuari.
 /// Retorna un resum llegible (què ha canviat + tasques pendents) o null.
+/// Extensions de fitxers de codi/document que reconeixem quan l'usuari les
+/// esmenta al xat («modifica src/app.py»).
+const REF_EXTS = new Set([
+  "py", "js", "jsx", "ts", "tsx", "json", "md", "txt", "css", "scss", "html",
+  "toml", "yaml", "yml", "ini", "cfg", "rs", "go", "java", "c", "h", "cpp",
+  "hpp", "sh", "sql", "csv", "xml", "svg", "swift", "kt", "env",
+]);
+
+/// Detecta rutes de fitxers del projecte esmentades al text de l'usuari i
+/// n'adjunta el contingut (màx 3 fitxers, 8 KB cadascun): és el que permet
+/// que un model LOCAL editi codi real sense activar «Inclou el codi».
+/// També resol NOMS SENSE RUTA («app.py», «index.html») cercant-los al
+/// projecte: l'usuari no sempre escriu la ruta completa.
+async function attachReferencedFiles(
+  userText: string,
+  root: string
+): Promise<string | null> {
+  const cand = new Set<string>();
+  for (const m of userText.matchAll(/[A-Za-z0-9_./\\-]+\.[A-Za-z0-9]{1,6}/g)) {
+    let t = m[0]
+      .replace(/^[./\\]+/, "")
+      .replace(/[.,;:)»"']+$/, "")
+      .replace(/\\/g, "/");
+    const ext = t.split(".").pop()?.toLowerCase() ?? "";
+    if (!REF_EXTS.has(ext)) continue;
+    if (t.split("/").includes("..")) continue;
+    cand.add(t);
+  }
+  if (cand.size === 0) return null;
+  const parts: string[] = [];
+  let n = 0;
+  for (const rel of cand) {
+    if (n >= 3) break;
+    let resolved = rel;
+    if (!rel.includes("/")) {
+      // Nom sense ruta: el BUSQUEM al projecte (primer resultati amb el
+      // mateix nom de fitxer; evita node_modules/target/build).
+      try {
+        const hits = await invoke<{ path: string }[]>("search_files", {
+          query: rel,
+          limit: 20,
+        });
+        const hit =
+          hits.find((h) => h.path.endsWith(`/${rel}`) || h.path === rel) ??
+          hits.find((h) => h.path.split("/").pop() === rel);
+        if (hit) resolved = hit.path.replace(/^\/+/, "");
+      } catch {
+        /* sense coincidències: provem la ruta tal qual */
+      }
+    }
+    try {
+      const content = await invoke<string>("read_file", {
+        path: `${root.replace(/\/+$/, "")}/${resolved}`,
+      });
+      if (content.length > 8000) continue; // massa gran per al context local
+      parts.push(
+        `FITXER DEL PROJECTE «${resolved}» (contingut actual):\n\`\`\`\n${content}\n\`\`\``
+      );
+      n++;
+    } catch {
+      /* la ruta no existeix al projecte: la ignorem */
+    }
+  }
+  return parts.length > 0 ? parts.join("\n\n") : null;
+}
+
+/// Extreu els blocs «@edit: ruta» amb seccions CERCA/NOU (edicions
+/// quirúrgiques). Tolerant amb marcadors >>> (guerra de conflict marks),
+/// talls de resposta i seccions sense tancar. NOU buit = esborrar codi.
+interface EditSection {
+  find: string;
+  replace: string;
+}
+interface EditBlock {
+  path: string;
+  edits: EditSection[];
+}
+function parseEditBlocks(raw: string): EditBlock[] {
+  const lines = raw.split(/\r?\n/);
+  const out: EditBlock[] = [];
+  let cur: EditBlock | null = null;
+  let sec: { find: string[]; rep: string[]; phase: 0 | 1 } | null = null;
+  const flushSec = () => {
+    if (cur && sec) {
+      const find = sec.find.join("\n").replace(/^\n+|\s+$/g, "");
+      const replace = sec.rep.join("\n").replace(/^\n+|\s+$/g, "");
+      if (find.trim()) cur.edits.push({ find, replace });
+    }
+    sec = null;
+  };
+  for (const line of lines) {
+    const m = line.match(/^[ \t>*-]*@?(?:edit|modifica|substitueix|reempla[çc]a)\w*:\s*(.+?)\s*$/i);
+    if (m) {
+      flushSec();
+      const newPath = m[1]
+        .replace(/^[`'"*«]+|[`'"*»;:.,\s]+$/g, "")
+        .trim();
+      // Rutes repetides (dos @edit: del mateix fitxer): s'accumulen al
+      // mateix bloc (una sola lectura/escriptura i un sol informe).
+      if (!(cur && newPath && cur.path === newPath)) {
+        if (cur) out.push(cur);
+        cur = { path: newPath, edits: [] };
+      }
+      continue;
+    }
+    const t = line.trim();
+    if (t.startsWith("<<<<<<<")) {
+      flushSec();
+      sec = { find: [], rep: [], phase: 0 };
+      continue;
+    }
+    if (t.startsWith("=======")) {
+      if (sec) sec.phase = 1;
+      continue;
+    }
+    if (t.startsWith(">>>>>>>")) {
+      flushSec();
+      continue;
+    }
+    if (!cur || !sec) continue;
+    // Les tanques de codi NO interrompen una secció (el codi pot contenir-les).
+    if (sec.phase === 0) sec.find.push(line);
+    else sec.rep.push(line);
+  }
+  flushSec();
+  if (cur) out.push(cur);
+  return out.filter((b) => b.path && b.edits.length > 0);
+}
+
+/// Aplica els blocs «@edit:» al fitxer REAL: cerca el text CERCA (exacte o
+/// per línies retallades —tolera indentació—) i el substitueix per NOU.
+/// Retorna un informe per al xat: què s'ha aplicat i què no s'ha trobat.
+async function applyEditBlocks(
+  base: string,
+  blocks: EditBlock[]
+): Promise<{ edited: string[]; failed: string[] }> {
+  const edited: string[] = [];
+  const failed: string[] = [];
+  for (const block of blocks) {
+    const rel = block.path.replace(/^\/+/, "").replace(/\\/g, "/");
+    if (rel.split("/").some((s) => s === "..")) continue;
+    const abs = `${base}/${rel}`;
+    let old: string;
+    try {
+      old = await invoke<string>("read_file", { path: abs });
+    } catch {
+      failed.push(`${rel}: el fitxer no existeix (no es pot editar)`);
+      continue;
+    }
+    let updated = old;
+    let ok = 0;
+    let fail = 0;
+    for (const ed of block.edits) {
+      if (updated.includes(ed.find)) {
+        updated = updated.replace(ed.find, ed.replace);
+        ok++;
+        continue;
+      }
+      // Coincidència per línies retallades (models que canvien indentació):
+      const findLines = ed.find.split("\n").map((l) => l.trim());
+      const contentLines = updated.split("\n");
+      let hit = -1;
+      outer: for (let i = 0; i + findLines.length <= contentLines.length; i++) {
+        for (let k = 0; k < findLines.length; k++) {
+          if (contentLines[i + k].trim() !== findLines[k]) continue outer;
+        }
+        hit = i;
+        break;
+      }
+      if (hit >= 0) {
+        const replLines = ed.replace ? ed.replace.split("\n") : [];
+        contentLines.splice(hit, findLines.length, ...replLines);
+        updated = contentLines.join("\n");
+        ok++;
+      } else {
+        fail++;
+      }
+    }
+    if (ok > 0) {
+      try {
+        const prev = await captureOriginal(abs);
+        await invoke("write_file", { path: abs, content: updated });
+        noteFileEdited(abs, updated, prev.original, prev.existed);
+        edited.push(`${rel} (${ok} edició${ok === 1 ? "" : "s"}${fail ? `, ${fail} no trobades` : ""})`);
+      } catch {
+        failed.push(`${rel}: no s'ha pogut escriure`);
+      }
+    } else if (fail > 0) {
+      failed.push(`${rel}: el text CERCA no coincideix amb el fitxer real — cal el text EXACTE`);
+    }
+  }
+  return { edited, failed };
+}
+
 async function autoMaterialize(raw: string): Promise<string | null> {
   const ws = useWorkspaceStore.getState();
   const root = ws.root;
-  if (!root || !raw) return null;
+  if (!root || !raw) {
+    // Sense projecte obert NO es pot escriure res: ho DIEM al xat (abans
+    // callàvem i semblava que la IA «no editava codi» per sí sola).
+    if (raw && /```/.test(raw)) {
+      return (
+        "⚠️ He generat codi, però NO HI HA CAP PROJECTE OBERT on escriure'l. " +
+        "Obre una carpeta (Fitxer → Obre carpeta) i torna a demanar-m'ho: " +
+        "aleshores els fitxers es crearan i modificaran de veritat."
+      );
+    }
+    return null;
+  }
 
   let files = parseFileBlocks(raw);
   if (files.length === 0) {
@@ -1013,11 +1229,39 @@ async function autoMaterialize(raw: string): Promise<string | null> {
   files = files
     .filter((f) => !isUnnamed(f.path) || !/\.(md|txt)$/i.test(f.path))
     .map((f) => (isUnnamed(f.path) ? { ...f, path: `codi_ia/${f.path}` } : f));
+  // EDICIÓ D'UN SOL FITXER: si la resposta porta UN sol bloc sense nom i la
+  // prosa esmenta UNA única ruta coneguda (p. ex. «he modificat src/app.py»),
+  // aquest bloc ÉS aquell fitxer: l'escrivim a la seva ruta REAL en lloc de
+  // deixar-lo a codi_ia/ amb un nom automàtic (l'usuari demanava editar).
+  if (files.length === 1 && isUnnamed(files[0].path.split("/").pop() || "")) {
+    const mentioned = new Set<string>();
+    for (const m of raw.matchAll(/[A-Za-z0-9_./\\-]+\.[A-Za-z0-9]{1,6}/g)) {
+      let t = m[0]
+        .replace(/^[./\\]+/, "")
+        .replace(/[.,;:)»"']+$/, "")
+        .replace(/\\/g, "/");
+      const ext = t.split(".").pop()?.toLowerCase() ?? "";
+      if (!REF_EXTS.has(ext) || t.startsWith("codi_ia/")) continue;
+      mentioned.add(t);
+    }
+    if (mentioned.size === 1) {
+      files = [{ ...files[0], path: [...mentioned][0] }];
+    }
+  }
   // Carpetes que la IA ha demanat explícitament (estructura buida, sense fitxer).
   const dirReqs = parseDirDirectives(raw);
   // Fitxers/carpetes que la IA ha demanat ESBORRAR (l'opció contraria a @file:).
   const delReqs = parseDeleteDirectives(raw);
-  if (files.length === 0 && dirReqs.length === 0 && delReqs.length === 0) return null;
+  // Edicions QUIRÚRGIQUES «@edit:» (CERCA/NOU): modificar o esborrar codi
+  // existent sense reemetre fitxers sencers (els models locals els tallen).
+  const editBlocks = parseEditBlocks(raw);
+  if (
+    files.length === 0 &&
+    dirReqs.length === 0 &&
+    delReqs.length === 0 &&
+    editBlocks.length === 0
+  )
+    return null;
 
   const base = root.replace(/\/+$/, "");
   const written: string[] = [];
@@ -1061,7 +1305,8 @@ async function autoMaterialize(raw: string): Promise<string | null> {
       /* si un fitxer falla, continua amb la resta */
     }
   }
-  if (written.length === 0 && createdDirs.length === 0 && delReqs.length === 0) return null;
+  if (written.length === 0 && createdDirs.length === 0 && delReqs.length === 0 && editBlocks.length === 0)
+    return null;
 
   // 3) Esborra el que la IA ha demanat amb «@delete:/@esborra:». Va DESPRÉS
   //    de les escriptures: si un fitxer s'ha reescrit i alhora s'ha demanat
@@ -1078,6 +1323,13 @@ async function autoMaterialize(raw: string): Promise<string | null> {
     } catch {
       /* si falla (p. ex. no existeix), continua */
     }
+  }
+  // 4) Edicions quirúrgiques «@edit:» (CERCA/NOU): modificar codi existent
+  //    o ESBORRAR-ne fragments (NOU buit). Van DESPRÉS de les escriptures:
+  //    un @file: complet mana sobre un @edit del mateix fitxer.
+  let editReport: { edited: string[]; failed: string[] } | null = null;
+  if (editBlocks.length > 0) {
+    editReport = await applyEditBlocks(base, editBlocks);
   }
   await ws.refreshTree();
   // La materialització definitiva ha acabat: els fitxers escrits en directe
@@ -1122,6 +1374,20 @@ async function autoMaterialize(raw: string): Promise<string | null> {
       `🗑 Esborrats del projecte (${deleted.length}):\n` +
         deleted.map((p) => `• ${p}`).join("\n")
     );
+  }
+  if (editReport && (editReport.edited.length > 0 || editReport.failed.length > 0)) {
+    if (editReport.edited.length > 0) {
+      parts.push(
+        `✏️ Edicions aplicades al codi existent (${editReport.edited.length}):\n` +
+          editReport.edited.map((p) => `• ${p}`).join("\n")
+      );
+    }
+    if (editReport.failed.length > 0) {
+      parts.push(
+        `⚠️ Edicions NO aplicades (el text CERCA no coincideix):\n` +
+          editReport.failed.map((p) => `• ${p}`).join("\n")
+      );
+    }
   }
   // El que s'ha esborrat ja no és cap tasca pendent.
   const pend = Array.from(new Set([...pending, ...todos])).filter((p) => !deleted.includes(p));
@@ -2545,6 +2811,24 @@ export const useAgentStore = create<AgentState>((set, get) => {
 
       let msg = text;
       let sys: string | null = null;
+      // Sense «Inclou el codi», un model local NO veu el fitxer que l'usuari
+      // demana editar: el detectem al missatge («modifica src/app.py», «al
+      // fitxer index.html…») i n'adjuntem el contingut COMPLET al prompt.
+      // Sense això, la IA local «no edita codi» — només pot inventar-lo.
+      if (!sess.includeContext) {
+        const wsRoot = useWorkspaceStore.getState().root;
+        if (wsRoot) {
+          const attached = await attachReferencedFiles(text, wsRoot);
+          if (attached) {
+            msg = `${attached}\n\n---\nPREGUNTA / TASCA:\n${text}`;
+            get().pushStep(sid, {
+              label: "ia",
+              detail: "Fitxer esmentat adjuntat com a context per poder-lo editar.",
+              ok: true,
+            });
+          }
+        }
+      }
       // Pista de plataforma: s'afegeix al system prompt perquè els xats
       // normals (no només «Crea al projecte») també generin codi NATIU.
       const platformPreamble =

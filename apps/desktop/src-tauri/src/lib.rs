@@ -207,6 +207,7 @@ pub fn run() {
             commands::system::open_terminal,
             commands::system::reveal_in_finder,
             commands::system::open_externally,
+            commands::system::exit_app,
             commands::system::system_total_memory,
             commands::system::system_memory_status,
             // Mode portàtil (USB / disc extern)

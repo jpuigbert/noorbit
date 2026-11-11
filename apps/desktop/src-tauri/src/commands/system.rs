@@ -139,6 +139,15 @@ pub async fn reveal_in_finder(path: String) -> Result<(), String> {
     result.map(|_| ()).map_err(|e| format!("No s'ha pogut mostrar al Finder: {}", e))
 }
 
+/// Tanca el programa DEL TOT: mata el procés (no deixa l'app penjada al
+/// Dock sense finestres, que és el comportament per defecte de macOS).
+/// S'usa quan l'usuari confirma el tancament a la finestra «Segur?».
+#[command]
+pub async fn exit_app(app: tauri::AppHandle) -> Result<(), String> {
+    app.exit(0);
+    Ok(())
+}
+
 /// Obre un fitxer (o carpeta) amb l'aplicació per defecte del sistema: «open»
 /// a macOS, «start» a Windows, «xdg-open» a Linux. Serveix per a que l'usuari
 /// EXPORTE un fitxer generat (imatge, PDF…) cap a un altre programa des del

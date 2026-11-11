@@ -33,6 +33,8 @@ pot confirmar-la) i et torna el resultat en un missatge nou.\n\
   RUN|UNREAL|codi python       (Unreal, via Remote Control)\n\
   IMG|descripció|ruta/caixa.png    (genera una imatge i la desa al projecte)\n\
   @delete: ruta/relativa       (esborra el fitxer o carpeta del projecte)\n\
+  @edit: ruta + «<<<<<<< CERCA» + text antic + «=======» + text nou + «>>>>>>>»\n\
+              (modifica NOMÉS aquest tros del fitxer real; text nou buit = esborra'l)\n\
 REGLES:\n\
 - ABANS d'empaquetar o llançar, verifica amb «RUN|ls -la» que el projecte està \
 COMPLET; si falta un fitxer emet-lo SENCER amb «@file:» (mai a mitges, «…» o buits).\n\
@@ -150,7 +152,7 @@ pub fn extract_file_blocks(text: &str) -> Vec<(String, String)> {
         return Vec::new();
     };
     let Ok(stop_re) = regex::Regex::new(
-        r"(?i)^[ \t>*-]*@?(dir|directori|carpeta|folder|delete|esborra|borra|elimina|remove|rm)\w*:|^[ \t>*-]*(run|img|nb)\|",
+        r"(?i)^[ \t>*-]*@?(dir|directori|carpeta|folder|delete|esborra|borra|elimina|remove|rm)\w*:|^[ \t>*-]*@?(edit|modifica|substitueix|reemplaça)\w*:|^[ \t>*-]*(run|img|nb)\|",
     ) else {
         return Vec::new();
     };
@@ -214,6 +216,173 @@ pub fn extract_file_blocks(text: &str) -> Vec<(String, String)> {
         })
         .filter(|(_, c)| !c.trim().is_empty())
         .collect()
+}
+
+/// Extreu els blocs «@edit: ruta» (edicions QUIRÚRGIQUES) de la resposta:
+/// cada bloc porta una o més seccions «CERCA / NOU» que NoOrbit substitueix
+/// dins del fitxer REAL. És la forma que poden seguir els models locals
+/// menuts per MODIFICAR o ESBORRAR codi (NOU buit = esborrar) sense haver
+/// de reemetre el fitxer sencer amb «@file:» (que tallen o inventen).
+///
+/// Format tolerat:
+///   @edit: ruta/relativa
+///   <<<<<<< CERCA
+///   codi antic
+///   =======
+///   codi nou (buit = esborrar)
+///   >>>>>>>
+pub struct EditBlock {
+    pub path: String,
+    /// (cerca, nou) per cada secció del bloc.
+    pub edits: Vec<(String, String)>,
+}
+
+pub fn extract_edit_blocks(text: &str) -> Vec<EditBlock> {
+    let Ok(edit_re) = regex::Regex::new(r"(?i)^[ \t>*-]*@?(edit|modifica|substitueix|reemplaça)\w*:\s*(.+?)\s*$")
+    else {
+        return Vec::new();
+    };
+    let is_marker = |l: &str, m: &str| -> bool {
+        let t = l.trim();
+        (t.starts_with("<<<<<<<") && (m == "open"))
+            || (t.starts_with("=======") && (m == "mid"))
+            || (t.starts_with(">>>>>>>") && (m == "close"))
+    };
+    let mut blocks: Vec<EditBlock> = Vec::new();
+    let mut cur: Option<EditBlock> = None;
+    let mut section: Option<(Vec<String>, Vec<String>, u8)> = None; // 0=cerca 1=nou
+    let flush_section = |cur: &mut Option<EditBlock>, s: &mut Option<(Vec<String>, Vec<String>, u8)>| {
+        if let (Some(b), Some((find, rep, _))) = (cur.as_mut(), s.take()) {
+            let f = find.join("\n").trim_matches('\n').to_string();
+            let r = rep.join("\n").trim_matches('\n').to_string();
+            if !f.trim().is_empty() {
+                b.edits.push((f, r));
+            }
+        } else {
+            *s = None;
+        }
+    };
+    for line in text.lines() {
+        if let Some(c) = edit_re.captures(line) {
+            flush_section(&mut cur, &mut section);
+            let new_path = clean_file_path(c.get(2).map(|m| m.as_str()).unwrap_or(""));
+            let same = matches!(
+                cur.as_ref(),
+                Some(b) if !new_path.is_empty() && b.path == new_path
+            );
+            if !same {
+                if let Some(b) = cur.take() {
+                    blocks.push(b);
+                }
+                cur = Some(EditBlock {
+                    path: new_path,
+                    edits: Vec::new(),
+                });
+            }
+            continue;
+        }
+        if is_marker(line, "open") {
+            flush_section(&mut cur, &mut section);
+            section = Some((Vec::new(), Vec::new(), 0));
+            continue;
+        }
+        if is_marker(line, "mid") {
+            if let Some((_, _, phase)) = section.as_mut() {
+                *phase = 1;
+            }
+            continue;
+        }
+        if is_marker(line, "close") {
+            flush_section(&mut cur, &mut section);
+            continue;
+        }
+        let Some(s) = section.as_mut() else { continue };
+        if cur.is_none() {
+            continue;
+        }
+        match s.2 {
+            0 => s.0.push(line.to_string()),
+            _ => s.1.push(line.to_string()),
+        }
+    }
+    flush_section(&mut cur, &mut section);
+    if let Some(b) = cur.take() {
+        blocks.push(b);
+    }
+    blocks.into_iter().filter(|b| !b.path.is_empty() && !b.edits.is_empty()).collect()
+}
+
+/// Aplica els blocs «@edit:» AL DISC (abans d'executar les «RUN|»): cerca el
+/// text CERCA dins el fitxer real (exacte, o per línies retallades —tolera
+/// diferències d'indentació—) i el substitueix per NOU (buit = esborrar).
+/// Retorna un informe «ruta: …» per tornar-lo al model com a RESULTAT.
+pub fn apply_edit_blocks(app: &AppHandle, text: &str) -> Vec<String> {
+    let Some(root) = crate::commands::workspace::current_root() else {
+        return Vec::new();
+    };
+    let mut report: Vec<String> = Vec::new();
+    for block in extract_edit_blocks(text) {
+        let Some(rel) = safe_rel(&block.path) else { continue };
+        let path = root.join(&rel);
+        let Ok(old) = std::fs::read_to_string(&path) else {
+            report.push(format!("{}: ERROR no existeix (no es pot editar)", rel));
+            continue;
+        };
+        let mut new_content = old.clone();
+        let mut ok = 0usize;
+        let mut fail = 0usize;
+        for (find, replace) in &block.edits {
+            if old.contains(find.as_str()) {
+                new_content = new_content.replacen(find.as_str(), replace, 1);
+                ok += 1;
+                continue;
+            }
+            // Coincidència per LÍNIES retallades (tolera indentació distinta):
+            let find_lines: Vec<String> = find.lines().map(|l| l.trim().to_string()).collect();
+            let content_lines: Vec<String> = new_content.lines().map(|l| l.to_string()).collect();
+            let n = find_lines.len();
+            let mut hit: Option<usize> = None;
+            if n > 0 && n <= content_lines.len() {
+                for i in 0..=(content_lines.len() - n) {
+                    if (0..n).all(|k| content_lines[i + k].trim() == find_lines[k]) {
+                        hit = Some(i);
+                        break;
+                    }
+                }
+            }
+            if let Some(i) = hit {
+                let repl_lines: Vec<String> = if replace.is_empty() {
+                    Vec::new()
+                } else {
+                    replace.lines().map(|l| l.to_string()).collect()
+                };
+                let mut out: Vec<String> = Vec::new();
+                out.extend_from_slice(&content_lines[..i]);
+                out.extend(repl_lines);
+                out.extend_from_slice(&content_lines[i + n..]);
+                new_content = out.join("\n");
+                if !new_content.ends_with('\n') {
+                    new_content.push('\n');
+                }
+                ok += 1;
+            } else {
+                fail += 1;
+            }
+        }
+        if ok > 0 && std::fs::write(&path, &new_content).is_ok() {
+            report.push(format!("{}: {} edició/ons aplicades{}", rel, ok,
+                if fail > 0 { format!(" ({} no trobades)", fail) } else { String::new() }));
+        } else if fail > 0 {
+            report.push(format!(
+                "{}: ERROR el text CERCA no coincideix amb el fitxer real ({} seccions). Reemet amb el text EXACTE.",
+                rel, fail
+            ));
+        }
+    }
+    if !report.is_empty() {
+        progress(app, &format!("✏️ Edicions: {}", clip(&report.join(" · "), 160)), true);
+    }
+    report
 }
 
 /// Escriu AL DISC, dins el projecte obert, els fitxers anunciats amb «@file:»
@@ -668,4 +837,35 @@ pub async fn tools_status_line(computer_enabled: bool) -> String {
     });
     l.push_str("• Per obrir una app des del xat, usa la comanda REAL (p. ex. «RUN|open -a Blender»), no llenguatge natural.\n");
     l
+}
+
+#[cfg(test)]
+mod edit_tests {
+    use super::*;
+
+    #[test]
+    fn parses_edit_blocks_and_deletions() {
+        let text = "Vaig a modificar-ho:\n\
+@edit: src/app.py\n\
+<<<<<<< CERCA\n\
+old_line\n\
+=======\n\
+new_line\n\
+>>>>>>>\n\
+I ara esborro el codi trencat:\n\
+@edit: src/app.py\n\
+<<<<<<< CERCA\n\
+del_me()\n\
+=======\n\
+>>>>>>>\n";
+        let blocks = extract_edit_blocks(text);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].path, "src/app.py");
+        assert_eq!(blocks[0].edits.len(), 2);
+        assert_eq!(blocks[0].edits[0].0, "old_line");
+        assert_eq!(blocks[0].edits[0].1, "new_line");
+        // NOU buit = esborrar: el replacement ha d'arribar buit.
+        assert_eq!(blocks[0].edits[1].0, "del_me()");
+        assert_eq!(blocks[0].edits[1].1, "");
+    }
 }

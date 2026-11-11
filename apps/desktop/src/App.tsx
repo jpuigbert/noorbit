@@ -9,6 +9,7 @@ import { registerTaskListeners } from "./stores/taskStore";
 import { useComputerStore } from "./stores/computerStore";
 import { installConsoleCapture, logBackend } from "./stores/consoleStore";
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { actions } from "./actions";
 import { useT } from "./i18n";
@@ -117,8 +118,20 @@ export default function App() {
 
   const closeNow = () => {
     setAskClose(false);
-    void actions["file.saveAll"]();
-    void getCurrentWebviewWindow().destroy();
+    // Desem tot abans de tancar, però SENSE permetre que un desat encallat
+    // bloquegi el tancament per sempre (màxim 1,5 s d'espera).
+    const save = Promise.resolve()
+      .then(() => actions["file.saveAll"]())
+      .catch(() => undefined);
+    const timeout = new Promise((r) => setTimeout(r, 1500));
+    void Promise.race([save, timeout]).then(() => {
+      // Sortida del TOT del procés: només destruir la finestra deixaria
+      // l'app viva al Dock sense cap finestra (comportament de macOS).
+      void invoke("exit_app").catch(() => {
+        // Sense l'ordre (config antiga): destruim la finestra al menys.
+        void getCurrentWebviewWindow().destroy().catch(() => undefined);
+      });
+    });
   };
 
   // Arrencada: inicialitza integracions i mostra la pantalla d'inici
