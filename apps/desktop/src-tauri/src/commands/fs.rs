@@ -36,7 +36,11 @@ pub async fn write_file(path: String, content: String) -> Result<(), String> {
     // fora del projecte legitimament (diàleg del sistema).
     let p = super::workspace::resolve_in_root(&path);
     if p.components().any(|c| matches!(c, Component::ParentDir)) {
-        return Err("Ruta no vàlida.".into());
+        return Err(format!(
+            "Ruta no vàlida: «{}» conté «..» (salts de carpeta cap enfora). \
+             Usa la ruta respecte de l'arrel del projecte o una ruta absoluta.",
+            display
+        ));
     }
     tauri::async_runtime::spawn_blocking(move || {
         if let Some(parent) = p.parent() {
@@ -46,7 +50,38 @@ pub async fn write_file(path: String, content: String) -> Result<(), String> {
     })
     .await
     .map_err(|e| e.to_string())?
-    .map_err(|e| format!("No s'ha pogut escriure {}: {}", display, e))
+    .map_err(|e| {
+        // ERROR EXPLICAT (no un «Permission denied (os error 13)» sec): cada
+        // cas típic diu QUÈ fer. El darrer cas cobreix el resta (ruta
+        // inexistent, volum expulsat…).
+        let os = e.raw_os_error().unwrap_or(0);
+        match e.kind() {
+            std::io::ErrorKind::PermissionDenied => format!(
+                "El sistema no deixa escriure a {}: la carpeta és de NOMÉS LECTURA \
+                 o protegida (p. ex. «Program Files»/«/usr»/carpetes de sistema). \
+                 Desa-ho a la carpeta del projecte o tria una altra ruta \
+                 (codi {})",
+                display, os
+            ),
+            std::io::ErrorKind::NotFound => format!(
+                "La carpeta de destinació no existeix o el volum no és muntat: {}. \
+                 Comprova que el disc/pendrive estigui connectat (codi {})",
+                display, os
+            ),
+            std::io::ErrorKind::StorageFull => format!(
+                "El DISC és PLE: no hi ha espai per escriure {}. Allibera espai i \
+                 torna a desar (codi {})",
+                display, os
+            ),
+            _ if os == 30 => format!(
+                "El volum on vols escriure {} és de NOMÉS LECTURA \
+                 (p. ex. un DMG obert o un pendrive protegit). Tria una altra \
+                 carpeta (codi 30)",
+                display
+            ),
+            _ => format!("No s'ha pogut escriure {}: {}", display, e),
+        }
+    })
 }
 
 #[tauri::command]
