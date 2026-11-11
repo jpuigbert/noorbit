@@ -188,8 +188,6 @@ export default function LocalAIStatus() {
     <div className={"lps lps-" + h.state}>
       {h.state === "downloading" ? (
         <Loader2 size={13} className="spin" />
-      ) : h.state === "ready" ? (
-        <CheckCircle2 size={13} />
       ) : (
         <AlertTriangle size={13} />
       )}

@@ -55,6 +55,7 @@ export default function SetupCheckModal() {
   const pulling = useAIStore((s) => s.pulling);
   const models = useAIStore((s) => s.models);
   const loadModels = useAIStore((s) => s.loadModels);
+  const baixant = Object.keys(pulling).length > 0;
   /// Obertura manual (barra d'estat): l'usuari pot demanar l'assistent
   /// quan vulgui, encara que l'hagi silenciat.
   const showSetupCheck = useUIStore((s) => s.showSetupCheck);
@@ -134,7 +135,7 @@ export default function SetupCheckModal() {
             ? "ok"
             : !ollamaUp
               ? "skip"
-              : pulling.length > 0
+              : baixant
                 ? "busy"
                 : "todo",
         progress,
