@@ -222,11 +222,57 @@ print(json.dumps({
     /// add-on escolta al 9876: el pont propi de NoOrbit o el comunitari
     /// blender-mcp. Així l'usuari pot instal·lar qualsevol dels dos.
     pub fn execute_auto(&self, code: &str) -> Result<String> {
+        guard_python(code)?;
         if self.is_mcp_addon() {
             return self.execute_mcp(code);
         }
         self.execute(code)
     }
+}
+
+/// Heurística: diu si un text sembla CODI PYTHON executable (no una frase en
+/// llenguatge natural). El Python real gairebé sempre conté «import», crides
+/// `(...)` o assignacions `=`; una petició com «crea una imatge vermella» no
+/// té cap d'aquests senyals. Sense aquesta guarda la frase arribava a exec()
+/// dins Blender i provocava un SyntaxError criptic que l'usuari no entenia.
+pub fn looks_like_python(code: &str) -> bool {
+    let c = code.trim();
+    if c.is_empty() {
+        return false;
+    }
+    // Ruta d'un script .py (sense espais): el contingut ja es llegeix abans,
+    // però si la lectura falla la crua ruta també val com as "codi" perquè
+    // el missatge de guard expliqui el problema i no un SyntaxError aleatori.
+    if c.ends_with(".py") && !c.contains(char::is_whitespace) {
+        return true;
+    }
+    if ["(", ")", "=", "import ", "bpy.", "bmesh.", "\n    "]
+        .iter()
+        .any(|s| c.contains(s))
+    {
+        return true;
+    }
+    // Sense cap senyal: una frase. Només acceptem una única paraula ambigua
+    // (la guard no la pot classificar; Blender donarà un error explícit).
+    c.split_whitespace().count() <= 1
+}
+
+/// Comprovació amb missatge d'error homogeni per a allò que s'intenta
+/// executar a Blender sense ser codi Python (directrius RUN|BLENDER| del xat,
+/// panell de Blender, agent 3D dedicat…). El missatge torna a l'IA com a
+/// RESULTAT perquè es corregeixi SOL i torni a emetre codi bpy de veritat.
+pub fn guard_python(code: &str) -> Result<()> {
+    if looks_like_python(code) {
+        return Ok(());
+    }
+    let shown: String = code.trim().chars().take(100).collect();
+    Err(anyhow!(
+        "«{}» NO és codi Python: no s'ha executat res a Blender. Per editar \
+l'escena cal codi bpy que comenci per «import bpy» (instruccions separades \
+amb «;» o una ruta d'script .py). Les imatges NO es fan amb Blender: per \
+generar-ne emet «IMG|descripció detallada|ruta/imatge.png».",
+        shown
+    ))
 }
 
 const SCREENSHOT_CODE: &str = r#"
@@ -284,6 +330,7 @@ pub fn detect_blender_binary() -> Option<String> {
 
 /// Executa un script headless amb el binari de Blender.
 pub fn run_blender_headless(code: &str) -> Result<String> {
+    guard_python(code)?;
     let binary = detect_blender_binary().ok_or_else(|| anyhow!("Blender no instal·lat"))?;
     let tmp = std::env::temp_dir().join(format!("noorbit_blender_{}.py", uuid::Uuid::new_v4()));
     std::fs::write(&tmp, code)?;
@@ -328,6 +375,67 @@ pub fn status() -> BlenderStatus {
         binary,
     }
 }
+
+/// Renderitza l'animació d'un fitxer `.blend` en un procés Blender apart
+/// (headless). El vídeo és llarg de renderitzar: MAI ho fem dins l'editor
+/// connectat (bloquejaria Blender i el pont donaria «sense resultat»). El
+/// flux correcte és: la IA anima l'escena + desa una còpia .blend i imprimeix
+/// el marcador NOORBIT_VIDEO_OK amb la ruta; NoOrbit mira el marcador i fa
+/// aquest render en segon pla, i et dona la ruta del .mp4 final.
+pub fn render_blender_video(blend_path: &str) -> Result<String> {
+    let binary = detect_blender_binary().ok_or_else(|| anyhow!("Blender no instal·lat"))?;
+    let script = std::env::temp_dir().join(format!("noorbit_video_{}.py", uuid::Uuid::new_v4()));
+    std::fs::write(&script, VIDEO_RENDER_CODE)?;
+    let out = std::process::Command::new(&binary)
+        .arg("-b")
+        .arg(blend_path)
+        .arg("-P")
+        .arg(&script)
+        .output()?;
+    let _ = std::fs::remove_file(&script);
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    if let Some(line) = stdout.lines().rev().find(|l| l.contains(VIDEO_DONE_MARKER)) {
+        if let Some(path) = line.split(VIDEO_DONE_MARKER).nth(1) {
+            return Ok(path.trim().trim_matches('"').to_string());
+        }
+    }
+    Err(anyhow!(
+        "Blender no ha acabat el render del vídeo: {}",
+        String::from_utf8_lossy(&out.stderr)
+            .lines()
+            .rev()
+            .take(5)
+            .collect::<Vec<_>>()
+            .join(" | ")
+    ))
+}
+
+/// Marcador que la IA imprimeix quan l'escena està llesta per renderitzar-se
+/// (animada + còpia .blend desada). NoOrbit l'agafa per llençar el render.
+pub const VIDEO_MARKER: &str = "NOORBIT_VIDEO_OK:";
+
+const VIDEO_DONE_MARKER: &str = "NOORBIT_VIDEO_DONE:";
+
+/// Script headless que executa `render_blender_video`: força FFMPEG/MPEG-4
+/// perquè `animation=True` no renderitzi fotogrames PNG solts. Si l'engine
+/// de l'escena no pot renderitzar sense pantalla (EEVEE/Workbench), fallback
+/// a Cycles amb pocs samples perquè el render acabi abans de caure.
+const VIDEO_RENDER_CODE: &str = r#"
+import bpy
+sc = bpy.context.scene
+sc.render.image_settings.file_format = 'FFMPEG'
+sc.render.ffmpeg.format = 'MPEG4'
+if sc.frame_end > 300:
+    sc.frame_end = 300
+try:
+    bpy.ops.render.render(animation=True)
+except Exception:
+    sc.render.engine = 'CYCLES'
+    sc.cycles.samples = 32
+    sc.cycles.device = 'CPU'
+    bpy.ops.render.render(animation=True)
+print("NOORBIT_VIDEO_DONE:%s" % sc.render.filepath)
+"#;
 
 /// Localitza el script pont `blender-scripts/noorbit_bridge.py`, ja siga dins
 /// del bundle (recursos) o a la carpeta del repo en desenvolupament.

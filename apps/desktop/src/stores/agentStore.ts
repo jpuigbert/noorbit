@@ -1236,6 +1236,9 @@ interface AgentState {
   forkChat: (id: string, upToIndex: number) => string;
   closeChat: (id: string) => Promise<void>;
   setActive: (id: string) => void;
+  /// Crea el xat amb l'id EXACT de la sessió de l'equip d'especialistes
+  /// (sense canviar l'actiu) perquè els fragments del stream s'acumulin.
+  ensureChat: (id: string, title: string) => void;
   setChatProvider: (id: string, provider: string | null) => void;
   setChatModel: (id: string, model: string | null) => void;
   setChatExpert: (id: string, expertId: string) => void;
@@ -1261,6 +1264,9 @@ interface AgentState {
   /// Fragment de text en directe (event «ai://chunk» etiquetat amb el xat).
   /// A més d'acumular-lo al xat, materialitza EN VIU els fitxers ja completes.
   appendStream: (sessionId: string, chunk: string) => void;
+  /// Esborra el stream acumulat d'un xat (el fa servir l'equip d'especialistes:
+  /// el backend condueix les sessions «team:*» i ningú més les tanca).
+  clearStream: (sessionId: string) => void;
   buildContext: (id?: string, limit?: number, taskText?: string) => Promise<string>;
   beginTurn: (id: string, text: string, images?: string[]) => void;
   finalizeTurn: (id: string) => void;
@@ -1500,6 +1506,16 @@ export const useAgentStore = create<AgentState>((set, get) => {
 
     setActive: (id) => {
       set({ activeId: id });
+      get().persistChats();
+    },
+
+    /// Garanteix que existeix un xat amb EXACTAMENT aquest id (títol donat),
+    /// SENSE canviar l'actiu. El fan servir els especialistes de l'equip:
+    /// el backend emet els fragments «ai://chunk» amb la sessió «team:<id>»
+    /// i appendStream només els acumula si la sessió ja existeix.
+    ensureChat: (id, title) => {
+      if (get().sessions.some((x) => x.id === id)) return;
+      set((st) => ({ sessions: [...st.sessions, blankSession(id, { title })] }));
       get().persistChats();
     },
 
@@ -2194,6 +2210,16 @@ export const useAgentStore = create<AgentState>((set, get) => {
         const stream = sessOf(sessionId)?.stream ?? "";
         scheduleLiveMaterialize(stream);
       }
+    },
+
+    // Neteja el stream d'un xat (l'equip d'especialistes ho fa al principi de
+    // cada «run»: el backend condueix eixes sessions i ningú més les tanca,
+    // així sense eixò el text de runs anteriors s'hi acumularia a l'infinit).
+    clearStream: (sessionId) => {
+      if (!sessOf(sessionId)) return;
+      set((s) => ({
+        sessions: s.sessions.map((x) => (x.id === sessionId ? { ...x, stream: null } : x)),
+      }));
     },
 
     // Llegeix els fitxers reals del projecte obert i en forma un bloc de context

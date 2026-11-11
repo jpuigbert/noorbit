@@ -428,7 +428,8 @@ pub struct LoadedModel {
     pub size_vram: u64,
 }
 
-/// Model disponible al núvol d'Ollama (ollama.com), per navegar-lo i baixar-lo.
+/// Model disponible al núvol (ollama.com, Hugging Face, CivitAI…), per
+/// navegar-lo i baixar-lo.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CloudModel {
     pub name: String,
@@ -438,6 +439,11 @@ pub struct CloudModel {
     /// `None` quan la font no la diu: la UI no mostra res.
     #[serde(default)]
     pub size: Option<u64>,
+    /// URL de descàrrega DIRECTA del fitxer (CivitAI i altres fonts no
+    /// natives d'Ollama): la UI la passa a «image_cpu_download_model» per
+    /// desar-la a la carpeta del rodet de CPU. `None` per a fonts natives.
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1038,7 +1044,7 @@ fn parse_cloud_models(html: &str) -> Vec<CloudModel> {
         // La mida que ollama.com mostra a la fitxa («7.6GB», «2.1TB», «404MB»):
         // el que pesa la descàrrega ABANS de fer-la.
         let size = extract_size(chunk);
-        out.push(CloudModel { name, description, size });
+        out.push(CloudModel { name, description, size, url: None });
         if out.len() >= 80 {
             break;
         }
@@ -1871,9 +1877,19 @@ impl AiManager {
             // MoE molt eficients; el 120b demana ~60 GB de RAM/VRAM.
             ("gpt-oss:20b", "OpenAI de pesos oberts — MoE 20B, qualitat/velocitat", 13_000_000_000),
             ("gpt-oss:120b", "OpenAI de pesos oberts — MoE 120B, màxima qualitat local", 64_000_000_000),
+            // GLM Z.ai natiu multimodal «flash» (està a ollama.com, descarregable
+            // amb `ollama pull`): no donem mida perquè canvia per quantització.
+            ("glm-5.3-flash", "Z.ai GLM-5.3 Flash — MoE multimodal 18B actius, codi/agents de primer nivell; veu imatges", 0),
+            ("glm-ocr", "Z.ai GLM OCR — llegeix text de fitxes, captures i documents en imatge", 0),
         ]
         .iter()
         .map(|(name, desc, size)| {
+            // Mida 0 = no la sabem: serialitzem null i la UI no mostra xip.
+            let size = if *size == 0 {
+                serde_json::Value::Null
+            } else {
+                serde_json::json!(*size)
+            };
             serde_json::json!({ "name": name, "description": desc, "size": size })
         })
         .collect()
@@ -1978,12 +1994,117 @@ impl AiManager {
                                     .sum::<u64>()
                             })
                             .filter(|s| *s > 0);
-                        Some(CloudModel { name, description, size })
+                        Some(CloudModel { name, description, size, url: None })
                     })
                     .collect()
             })
             .unwrap_or_default();
         Ok(models)
+    }
+
+    /// Cerca models d'IMATGE a CivitAI (civitai.com), la tercera font del
+    /// gestor juntament amb Hugging Face i Ollama: checkpoints de
+    /// stable-diffusion, LoRAs… L'API pública no cal token. Retorna un model
+    /// per fitxer descarregable amb la seva URL DIRECTA: la UI el passa a
+    /// «image_cpu_download_model» i el fitxer va a parar a la carpeta
+    /// «sd-models/» del rodet de CPU (funciona també en Mac Intel).
+    pub async fn search_civitai(&self, query: &str) -> Result<Vec<CloudModel>> {
+        let q = query.trim();
+        if q.is_empty() {
+            return Ok(Vec::new());
+        }
+        let url = format!(
+            "https://civitai.com/api/v1/models?query={}&limit=30&types=Checkpoint",
+            urlencoding::encode(q)
+        );
+        let resp = self
+            .http
+            .get(&url)
+            .timeout(std::time::Duration::from_secs(20))
+            .header("User-Agent", "NoOrbit")
+            .send()
+            .await
+            .map_err(|e| anyhow!("No s'ha pogut contactar amb civitai.com: {}", e))?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(anyhow!("civitai.com ha respost {}", status));
+        }
+        let value: serde_json::Value = resp.json().await?;
+        let items = value
+            .get("items")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        Ok(items
+            .iter()
+            .filter_map(|m| {
+                let title = m.get("name").and_then(|n| n.as_str())?.trim();
+                if title.is_empty() {
+                    return None;
+                }
+                let mid = m.get("id").and_then(|i| i.as_f64()).unwrap_or(0.0);
+                // Primera versió publicada + el seu fitxer principal (el que
+                // es pot baixar i posar al rodet de CPU).
+                let v0 = m
+                    .get("modelVersions")
+                    .and_then(|v| v.as_array())
+                    .and_then(|a| a.first())
+                    .cloned()
+                    .unwrap_or_default();
+                let file = v0
+                    .get("files")
+                    .and_then(|f| f.as_array())
+                    .and_then(|a| a.first())
+                    .cloned()
+                    .unwrap_or_default();
+                let fname = file
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let dl = file
+                    .get("downloadUrl")
+                    .and_then(|d| d.as_str())
+                    .map(|d| d.to_string())
+                    .map(|d| if d.is_empty() {
+                        format!("https://civitai.com/api/download/models/{}",
+                            v0.get("id").and_then(|i| i.as_f64()).unwrap_or(0.0))
+                    } else {
+                        d
+                    });
+                let size = file
+                    .get("sizeKB")
+                    .and_then(|s| s.as_f64())
+                    .map(|kb| (kb * 1_000.0) as u64)
+                    .filter(|s| *s > 0);
+                // Descripció curta: tipus + model + base + subtítols sense HTML.
+                let brief = {
+                    let base = v0
+                        .get("baseModel")
+                        .and_then(|b| b.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let creator = m
+                        .get("creator")
+                        .and_then(|c| c.get("username"))
+                        .and_then(|u| u.as_str())
+                        .unwrap_or("CivitAI");
+                    if base.is_empty() {
+                        format!("CivitAI · {}", creator)
+                    } else {
+                        format!("CivitAI · base {} · {}", base, creator)
+                    }
+                };
+                Some(CloudModel {
+                    name: if fname.is_empty()
+                        { format!("civitai-{}.safetensors", mid) }
+                        else { fname },
+                    description: format!("{} — {}", title, brief),
+                    size,
+                    url: dl,
+                })
+            })
+            .collect())
     }
 
     /// Retorna el control d'un xat concret, creant-lo si és nou.

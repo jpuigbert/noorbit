@@ -3,8 +3,9 @@
 use crate::ai::{AiManager, ChatOpts, HistoryTurn, OllamaModel};
 use crate::computer::ComputerController;
 use crate::AppState;
+use serde::Serialize;
 use std::sync::Arc;
-use tauri::{command, AppHandle, State};
+use tauri::{command, AppHandle, Emitter, State};
 
 /// Xat on s'executa una crida sense `session` explícita.
 fn sid_of(session: Option<String>) -> String {
@@ -146,6 +147,37 @@ a la línia de seguida, el codi COMPLET (res de promeses, res de «…», res de
 «després configuraríem»). Un @file: per cada fitxer, tots els que calguin, \
 fins acabar el pla. Comença ara mateix pel primer fitxer pendent.";
 
+/// Detecta quan l'usuari ha demanat CREAR/generar una IMATGE i el model ha
+/// respost amb prosa (l'ha «explicada» o promesa) sense emetre cap directriu
+/// «IMG|». Els models menuts ho fan molt sovint: descriuen la imatge amb
+/// paraules en lloc de demanar al sistema que la generar. Criteri: prompt
+/// de creació d'imatge + resposta sense cap «IMG|» que parle d'imatges.
+fn image_requested(prompt: &str, text: &str) -> bool {
+    use regex::Regex;
+    let user_re = match Regex::new(
+        r"(?i)(crea|crear|fes|genera|generar|dibuixa|dibuix|pinta|il\.?lustra|munt[ae]|disenya|dissenya|fotografia|retrat)(\w*)\s+(una\s+|un\s+|la\s+|el\s+|me\s+|\w+){0,3}(imatge|imagen|foto|pictura|dibuix|il\.?lustraci[oó]|icona|logotip|logo|p[oó]ster|cartell|retrat|escena|avat[aà]r)",
+    ) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    if !user_re.is_match(prompt) {
+        return false;
+    }
+    // Si el model JA ha emés una directriu «IMG|» (o la conversa ja parla de
+    // rodet/imatge generada), no cal cap recordatori.
+    !text.contains("IMG|")
+}
+
+/// Recordatori per quan ha parlat de la imatge sense fer-la: que emet CLIC
+/// la directriu «IMG|» i ature el torn — la generació la fa el sistema.
+const IMG_NUDGE: &str = "NoOrbit: l'usuari ha demanat CREAR una IMATGE i no has \
+emés cap directriu «IMG|». NO l'expliquis ni la descrigues amb paraules: \
+escriu UNA línia «IMG|<descripció detallada de l'escena>|<ruta/fitxer.png>» \
+(sense comandes de shell, sense «després», sense promeses) i ATURA el torn. \
+La generació la fa el sistema: rodet local en CPU (també en Mac Intel) o \
+proveïdor en línia amb token. El resultat et tornarà la RUTA real del fitxer \
+per copiar-la a la resposta final.";
+
 /// Un torn de xat amb les EINES DE NOORBIT connectades: qualsevol resposta
 /// del model que continga directrius «NB|…» (navegador) o «RUN|…» / «IMG|…»
 /// (terminal del projecte i generador d'imatges) s'executa de veritat, se'n
@@ -194,6 +226,8 @@ async fn chat_with_tools(
     let mut text = String::new();
     let mut nudged = false;
     let mut files_nudged = false;
+    // «Crea una imatge» respost amb prosa sense IMG|: un sol recordatori.
+    let mut img_nudged = false;
     // «Emet tot el projecte» (README + pla sense codi): un sol recordatori.
     let mut project_nudged = false;
     let t0 = std::time::Instant::now();
@@ -267,6 +301,18 @@ async fn chat_with_tools(
                     current = PROJECT_NUDGE.to_string();
                     continue;
                 }
+            }
+            // I si ha demanat CREAR UNA IMATGE però ha respost amb prosa sense
+            // emetre cap «IMG|»? UN recordatori imperatiu: que la generi el
+            // sistema amb la directriu, i ell tan sols la copie.
+            if round < MAX_ROUNDS && !img_nudged && image_requested(prompt, &text) {
+                img_nudged = true;
+                opts.history.push(HistoryTurn {
+                    role: "assistant".into(),
+                    content: text.clone(),
+                });
+                current = IMG_NUDGE.to_string();
+                continue;
             }
             break;
         }
@@ -494,6 +540,83 @@ pub async fn ollama_search_huggingface(
         .map_err(|e| e.to_string())
 }
 
+/// Cerca models d'imatge a CivitAI (tercera font, amb URL de descàrrega
+/// directa cap al rodet de CPU «sd-models/»).
+#[command]
+pub async fn civitai_search(
+    state: State<'_, AppState>,
+    query: String,
+) -> Result<Vec<crate::ai::CloudModel>, String> {
+    let ai = state.ai_manager.clone();
+    ai.search_civitai(&query).await.map_err(|e| e.to_string())
+}
+
+/// Instal·la una ALTRA IA LOCAL apart d'Ollama: LM Studio, GPT4All, Jan
+/// (cask de Homebrew en macOS; pàgina de descàrrega a Linux/Windows) o
+/// llama.cpp (formula). NoOrbit les DETECTA sols un cop instal·lades
+/// («Descobreix IA locals externes»).
+#[command]
+pub async fn install_local_ai(app: AppHandle, which: String) -> Result<String, String> {
+    let (cask_names, url) = match which.as_str() {
+        "lmstudio" => (Some("--cask lm-studio"), "https://lmstudio.ai/"),
+        "gpt4all" => (Some("--cask gpt4all"), "https://gpt4all.io/"),
+        "jan" => (Some("--cask jan"), "https://jan.ai/"),
+        "llamacpp" => (Some("--formula llama.cpp"), "https://github.com/ggml-org/llama.cpp"),
+        _ => return Err(format!("IA local desconeguda: {}", which)),
+    };
+
+    #[cfg(target_os = "macos")]
+    {
+        let _ = &app;
+        if which::which("brew").is_ok() {
+            let script = format!(
+                "tell application \"Terminal\" to do script \"brew install {}\"",
+                cask_names.unwrap_or_default()
+            );
+            std::process::Command::new("osascript")
+                .arg("-e")
+                .arg(&script)
+                .spawn()
+                .map_err(|e| format!("No s'ha pogut obrir el Terminal: {}", e))?;
+            return Ok(format!(
+                "S'ha obert el Terminal per instal·lar {}. Quan acabi, NoOrbit \
+                 el detectarà automàticament.",
+                which
+            ));
+        }
+        std::process::Command::new("open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| format!("No s'ha pogut obrir el navegador: {}", e))?;
+        return Ok("S'ha obert la pàgina de descàrrega.".into());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = &app;
+        std::process::Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| format!("No s'ha pogut obrir el navegador: {}", e))?;
+        return Ok("S'ha obert la pàgina de descàrrega.".into());
+    }
+
+    #[cfg(windows)]
+    {
+        let _ = &app;
+        std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("start")
+            .arg(url)
+            .spawn()
+            .map_err(|e| format!("No s'ha pogut obrir el navegador: {}", e))?;
+        return Ok("S'ha obert la pàgina de descàrrega.".into());
+    }
+
+    #[allow(unreachable_code)]
+    Err("Instal·lació no suportada en aquest sistema".into())
+}
+
 /// Diu si el binari/app d'Ollama és al sistema (per oferir instal·lar-lo).
 #[command]
 pub async fn ollama_installed() -> Result<bool, String> {
@@ -655,20 +778,21 @@ pub async fn start_comfyui() -> Result<(), String> {
 #[command]
 pub async fn install_comfyui() -> Result<String, String> {
     let download_url = "https://www.comfy.org/download";
-
     #[cfg(target_os = "macos")]
     {
         // ComfyUI oficial només funciona en Apple Silicon. En un Mac Intel
-        // (x86_64) no cal intentar instal·lar-lo: recomanem un proveïdor
-        // d'imatges en línia (que NoOrbit usa per a «IMG|» i el xat).
+        // (x86_64) no cal intentar instal·lar-lo: hi ha el rodet de CPU
+        // (stable-diffusion.cpp), que roda natiu, o un proveïdor en línia.
         #[cfg(target_arch = "x86_64")]
         {
             let _ = download_url;
             return Err(
-                "ComfyUI no està disponible per a Mac Intel (només Apple Silicon). \
-                 Per generar imatges en aquest ordinador, registra un proveïdor en \
-                 línia amb token al menú «Proveïdors d'IA» (p. ex. OpenAI amb el \
-                 model «dall-e-3») o Venice; després el xat i «IMG|» funcionaran."
+                "ComfyUI no està disponible per a Mac Intel (només Apple \
+                 Silicon). Alternatives que SÍ funcionen ací: 1) el rodet \
+                 d'imatges en CPU — botó «Instal·la» de la secció «Rodet \
+                 d'imatges en CPU» del Gestor de models (stable-diffusion.cpp, \
+                 instal·la'l amb Homebrew) —; 2) un proveïdor en línia amb \
+                 token (Configuració ▸ Proveïdors ▸ model d'imatges)."
                     .into(),
             );
         }
@@ -715,7 +839,87 @@ pub async fn install_comfyui() -> Result<String, String> {
     Err("Instal·lació no suportada en aquest sistema".into())
 }
 
-/// Triat el model d'Ollama actiu per a tots els xats i agents.
+/// EDITORS DE VÍDEO amb IA, descarregables amb 1 clic (mateix patre que
+/// ComfyUI: Homebrew en macOS Apple Silicon, pàgina de descàrrega en
+/// la resta). El que s'instal·la és l'editor REAL (Kdenlive, OpenShot,
+/// DaVinci Resolve); la part d'IA del xat (NoOrbit) hi pot treballar
+/// per damunt: el vídeo es genera amb «IMG|»/ComfyUI i es munta aquí.
+#[derive(Debug, Clone, Serialize)]
+pub struct VideoEditorInfo {
+    pub id: String,
+    pub cask: String,
+    pub url: String,
+}
+
+fn video_editor_spec(id: &str) -> Option<VideoEditorInfo> {
+    let (cask, url) = match id {
+        "kdenlive" => ("kdenlive", "https://kdenlive.org/download/"),
+        "openshot" => ("openshot", "https://www.openshot.org/download/"),
+        "davinci" => ("davinci-resolve", "https://www.blackmagicdesign.com/products/davinciresolve"),
+        "shotcut" => ("shotcut", "https://shotcut.org/download/"),
+        _ => return None,
+    };
+    Some(VideoEditorInfo {
+        id: id.to_string(),
+        cask: cask.to_string(),
+        url: url.to_string(),
+    })
+}
+
+#[command]
+pub async fn install_video_editor(editor: String) -> Result<String, String> {
+    let spec = video_editor_spec(&editor)
+        .ok_or_else(|| format!("Editor de vídeo desconegut: {}", editor))?;
+
+    #[cfg(target_os = "macos")]
+    {
+        if which::which("brew").is_ok() {
+            let script = format!(
+                "tell application \"Terminal\" to do script \"brew install --cask {}\"",
+                spec.cask
+            );
+            std::process::Command::new("osascript")
+                .arg("-e")
+                .arg(&script)
+                .spawn()
+                .map_err(|e| format!("No s'ha pogut obrir el Terminal: {}", e))?;
+            return Ok(format!(
+                "S'ha obert el Terminal per instal·lar {} amb Homebrew. Quan acabi, obre'l des del Launchpad.",
+                editor
+            ));
+        }
+        std::process::Command::new("open")
+            .arg(&spec.url)
+            .spawn()
+            .map_err(|e| format!("No s'ha pogut obrir el navegador: {}", e))?;
+        return Ok("S'ha obert la pàgina de descàrrega.".into());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&spec.url)
+            .spawn()
+            .map_err(|e| format!("No s'ha pogut obrir el navegador: {}", e))?;
+        return Ok("S'ha obert la pàgina de descàrrega.".into());
+    }
+
+    #[cfg(windows)]
+    {
+        std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("start")
+            .arg(&spec.url)
+            .spawn()
+            .map_err(|e| format!("No s'ha pogut obrir el navegador: {}", e))?;
+        return Ok("S'ha obert la pàgina de descàrrega.".into());
+    }
+
+    #[allow(unreachable_code)]
+    Err("Instal·lació no suportada en aquest sistema".into())
+}
+
+/// Defineix el model actiu d'Ollama per a tots els xats i agents.
 #[command]
 pub async fn ollama_set_model(
     state: State<'_, AppState>,
@@ -742,6 +946,162 @@ pub async fn ai_last_thinking(
 ) -> Result<Option<String>, String> {
     let ai = state.ai_manager.clone();
     Ok(ai.last_thinking(&sid_of(session)).await)
+}
+
+/// Instal·la el RODET D'IMATGES EN CPU (stable-diffusion.cpp): roda a
+/// qualsevol Mac — també Intel, on ComfyUI no està publicat — i els models
+/// són fitxers .gguf/.safetensors a la carpeta «sd-models/». El xat fa servir
+/// el binari «sd» directament per a la directriu «IMG|».
+#[command]
+pub async fn install_image_cpu() -> Result<String, String> {
+    let releases = "https://github.com/leejet/stable-diffusion.cpp/releases";
+
+    #[cfg(target_os = "macos")]
+    {
+        if which::which("brew").is_ok() {
+            let script = "tell application \"Terminal\" to do script \
+                          \"brew install stable-diffusion.cpp\"";
+            std::process::Command::new("osascript")
+                .arg("-e")
+                .arg(&script)
+                .spawn()
+                .map_err(|e| format!("No s'ha pogut obrir el Terminal: {}", e))?;
+            return Ok(
+                "S'ha obert el Terminal per instal·lar el rodet d'imatges en \
+                 CPU (stable-diffusion.cpp). Quan acabi, torna al Gestor de \
+                 models per baixar el model inicial."
+                    .into(),
+            );
+        }
+        std::process::Command::new("open")
+            .arg(releases)
+            .spawn()
+            .map_err(|e| format!("No s'ha pogut obrir el navegador: {}", e))?;
+        return Ok("S'ha obert la pàgina de descàrrega del rodet de CPU.".into());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(releases)
+            .spawn()
+            .map_err(|e| format!("No s'ha pogut obrir el navegador: {}", e))?;
+        return Ok("S'ha obert la pàgina de descàrrega del rodet de CPU.".into());
+    }
+
+    #[cfg(windows)]
+    {
+        std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("start")
+            .arg(releases)
+            .spawn()
+            .map_err(|e| format!("No s'ha pogut obrir el navegador: {}", e))?;
+        return Ok("S'ha obert la pàgina de descàrrega del rodet de CPU.".into());
+    }
+
+    #[allow(unreachable_code)]
+    Err("Instal·lació no suportada en aquest sistema".into())
+}
+
+/// Estat del rodet d'imatges en CPU, perquè el Gestor de models el mostre:
+/// binari instal·lat, carpeta de models i el model disponible (si n'hi ha).
+#[command]
+pub async fn image_cpu_info() -> Result<crate::imgen::SdInfo, String> {
+    crate::imgen::sd_info()
+}
+
+/// Model d'imatge per defecte per al rodet de CPU: SD 1.5 en safetensors.
+const CPU_MODEL_DEFAULT_URL: &str =
+    "https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors";
+const CPU_MODEL_DEFAULT_NAME: &str = "sd-v1-5-pruned-emaonly.safetensors";
+
+/// Baixa un model d'imatge (.gguf/.safetensors) a la carpeta del rodet de CPU
+/// amb progrés a «ai://sd-model». Per defecte, el SD 1.5 llest per CPU (≈2 GB).
+#[command]
+pub async fn image_cpu_download_model(
+    app: AppHandle,
+    url: Option<String>,
+    name: Option<String>,
+) -> Result<String, String> {
+    let url = url
+        .filter(|u| !u.trim().is_empty())
+        .unwrap_or_else(|| CPU_MODEL_DEFAULT_URL.to_string());
+    let name = name
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| CPU_MODEL_DEFAULT_NAME.to_string());
+    let dir = crate::imgen::sd_models_dir().map_err(|e| e.to_string())?;
+    let final_path = dir.join(&name);
+    if final_path.exists() {
+        return Ok(format!("El model «{}» ja era a la carpeta de models.", name));
+    }
+    let part_path = dir.join(format!("{}.part", name));
+    let progress = std::sync::Arc::new(tokio::sync::Mutex::new(0u64));
+    let emit = {
+        let app = app.clone();
+        let progress = progress.clone();
+        tokio::spawn(async move {
+            loop {
+                let n = *progress.lock().await;
+                let msg = format!("Baixant el model: {} MB…", n / 1_000_000);
+                let _ = app.emit("ai://sd-model", serde_json::json!({ "message": msg }));
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            }
+        })
+    };
+    let res: Result<String, String> = (async {
+        let client = reqwest::Client::builder()
+            .user_agent("NoOrbit")
+            .build()
+            .map_err(|e| e.to_string())?;
+        let mut resp = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| format!("No s'ha pogut iniciar la descàrrega: {}", e))?;
+        resp.error_for_status_ref()
+            .map_err(|e| format!("La descàrrega ha fallat: {}", e))?;
+        let mut file = tokio::fs::File::create(&part_path)
+            .await
+            .map_err(|e| format!("No s'ha pogut crear «{}»: {}", part_path.display(), e))?;
+        use tokio::io::AsyncWriteExt;
+        let mut total: u64 = 0;
+        loop {
+            match resp.chunk().await {
+                Ok(Some(bytes)) if !bytes.is_empty() => {
+                    file.write_all(&bytes)
+                        .await
+                        .map_err(|e| format!("No s'han pogut desar bytes: {}", e))?;
+                    *progress.lock().await += bytes.len() as u64;
+                    total += bytes.len() as u64;
+                }
+                _ => break,
+            }
+        }
+        file.flush().await.map_err(|e| e.to_string())?;
+        drop(file);
+        if total < 10_000_000 {
+            return Err(format!(
+                "La descàrrega és massa petita ({:.1} MB): la URL pot ser \
+                 incorrecta o el fitxer bloquejat. S'ha descartat.",
+                total as f64 / 1_000_000.0
+            ));
+        }
+        tokio::fs::rename(&part_path, &final_path)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(format!(
+            "Model desat a «{}» ({} MB). Ja pot generar imatges en CPU.",
+            final_path.display(),
+            total / 1_000_000
+        ))
+    })
+    .await;
+    emit.abort();
+    if res.is_err() {
+        let _ = tokio::fs::remove_file(&part_path).await;
+    }
+    res
 }
 
 /// Descobreix les IAs locals EXTERNALS presents al sistema (Ollama, LM

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { X, Download, Trash2, RefreshCw, Check, Search, Cloud, Play, HardDrive, Zap, Globe, MemoryStick } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { X, Download, Trash2, RefreshCw, Check, Search, Cloud, Play, HardDrive, Zap, Globe, MemoryStick, Cpu, Film } from "lucide-react";
 import { useT } from "../../i18n";
 import { useUIStore } from "../../stores/uiStore";
 import { useAIStore, OLLAMA_CLOUD_MODELS, OLLAMA_CLOUD_URL } from "../../stores/aiStore";
@@ -30,6 +31,11 @@ export default function ModelManagerModal() {
     ollamaInstalled,
     comfyRunning,
     comfyInstalled,
+    imageCpu,
+    imageCpuProgress,
+    loadImageCpu,
+    installImageCpu,
+    downloadCpuModel,
     selectedModel,
     pulling,
     lastMessage,
@@ -55,6 +61,9 @@ export default function ModelManagerModal() {
     loadModelsDir,
     setModelsDir,
     migrateModels,
+    internetSource,
+    setInternetSource,
+    installLocalAi,
     loadLoaded,
     unloadModels,
     setKeepAlive,
@@ -67,6 +76,11 @@ export default function ModelManagerModal() {
   const [internetQuery, setInternetQuery] = useState("");
   // Connexió a Ollama Cloud (models gratuïts al núvol, sense descàrrega).
   const [cloudKey, setCloudKey] = useState("");
+  // Model gran pendent de descarregar quan cal decidir ON (disc extern o
+  // disc intern): ≥ 8 GB i cap carpeta de models triada encara.
+  const [askDisk, setAskDisk] = useState<{ name: string; size: number | null } | null>(null);
+  // Avís de la instala·lació d'editors de vídeo (per si el Terminal falla).
+  const [videoMsg, setVideoMsg] = useState("");
   // El catàleg del núvol és molt més llarg que la llista base: qualsevol nom
   // allotjat a ollama.com es pot usar sense baixar-lo res al disc.
   const [cloudCustom, setCloudCustom] = useState("");
@@ -90,6 +104,7 @@ export default function ModelManagerModal() {
       checkOllama();
       checkInstalled();
       checkComfy();
+      loadImageCpu();
       loadModels();
       loadModelsDir();
       loadLoaded();
@@ -112,7 +127,10 @@ export default function ModelManagerModal() {
 
   // Baixa un model del núvol. Si Ollama no roda, intenta arrencar-lo
   // (o instal·lar-lo si no existeix) abans de descarregar.
-  const pullCloud = async (name: string) => {
+  // ABANS DE DESCARREGAR-HO TOT: si el model pesa molt (≥ 8 GB) i encara no
+  // has triat cap disc extern, PREGUNTEM on el vols — els models grans no
+  // caben sempre al disc intern, i Ollama pot treballar des d'un USB/SSD.
+  const pullCloud = async (name: string, size?: number | null) => {
     if (!ollamaRunning) {
       if (ollamaInstalled) await startOllama();
       else {
@@ -120,13 +138,41 @@ export default function ModelManagerModal() {
         return;
       }
     }
+    if ((size ?? 0) >= 8_000_000_000 && !modelsDir) {
+      setAskDisk({ name, size: size ?? null });
+      return;
+    }
     await pullModel(name);
+  };
+
+  // La decisió de disc presa: baixa al destí triat.
+  const pullTo = (dir: string | null) => {
+    const ask = askDisk;
+    setAskDisk(null);
+    if (!ask) return;
+    if (dir) {
+      void setModelsDir(dir).then(() => pullModel(ask.name));
+    } else {
+      void pullModel(ask.name);
+    }
   };
 
   // Tria on viuran els models (p. ex. un USB extern) i l'aplica.
   const pickModelsDir = async () => {
     const selected = await open({ directory: true });
     if (typeof selected === "string") await setModelsDir(selected);
+  };
+
+  // Instal·la un editor de vídeo IA descarregable (Kdenlive, OpenShot,
+  // DaVinci, Shotcut) amb el mateix camí que ComfyUI: Terminal + cask.
+  const installEditor = async (id: string) => {
+    try {
+      const msg = await invoke<string>("install_video_editor", { editor: id });
+      setVideoMsg(msg);
+    } catch (e) {
+      setVideoMsg(String(e));
+    }
+    setTimeout(() => setVideoMsg(""), 15_000);
   };
 
   // Connecta/actualitza el proveïdor del núvol d'Ollama amb el model triat i
@@ -209,6 +255,137 @@ export default function ModelManagerModal() {
               )}
             </div>
           )}
+
+          {/* Rodet d'imatges en CPU (stable-diffusion.cpp): genera amb el
+              processador. L'única via LOCAL en Mac Intel (ComfyUI oficial
+              només Apple Silicon), però útil a qualsevol ordinador. */}
+          <div className="field">
+            <label>
+              <Cpu size={13} style={{ verticalAlign: -2, marginRight: 5 }} />
+              {t("ai.cpuTitle")}
+            </label>
+            <p className="lp-hint">{t("ai.cpuHint")}</p>
+            <div className="mm-custom">
+              <input
+                readOnly
+                value={imageCpu?.installed ? t("ai.cpuInstalled") : t("ai.cpuMissing")}
+              />
+              <button className="btn sm" onClick={() => void installImageCpu()}>
+                <Download size={12} /> {t("ai.cpuInstall")}
+              </button>
+            </div>
+            <div className="mm-custom" style={{ marginTop: 6 }}>
+              <input readOnly value={imageCpu?.model ?? t("ai.cpuNoModel")} />
+              <button
+                className="btn primary sm"
+                disabled={!!imageCpuProgress}
+                onClick={() => void downloadCpuModel()}
+              >
+                <Download size={12} /> {imageCpuProgress || t("ai.cpuGetModel")}
+              </button>
+            </div>
+          </div>
+
+          {/* PREGUNTA DE DISC: si el model pesa ≥ 8 GB i no hi ha cap carpeta
+              de models triada, demanem ON desar-lo abans de baixar-lo — un
+              model gran no sempre cap al disc intern. */}
+          {askDisk && (
+            <div
+              className="mm-warn"
+              style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}
+            >
+              <span>
+                {t("ai.askDisk").replace(
+                  "{size}",
+                  askDisk.size ? fmtSize(askDisk.size) : "?"
+                )}{" "}
+                <b>{askDisk.name}</b>
+              </span>
+              {volumes.length > 0 && (
+                <div className="mm-volumes">
+                  {volumes.map((v) => (
+                    <button
+                      key={v}
+                      className="btn sm primary"
+                      onClick={() => pullTo(v + "/ollama-models")}
+                    >
+                      <HardDrive size={11} />{" "}
+                      {v.replace("/Volumes/", "").replace("/media/", "")}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="mm-ollama-actions">
+                <button
+                  className="btn sm"
+                  onClick={async () => {
+                    const ask = askDisk;
+                    const sel = await open({ directory: true });
+                    if (typeof sel === "string" && ask) {
+                      setAskDisk(null);
+                      await setModelsDir(sel);
+                      void pullModel(ask.name);
+                    }
+                  }}
+                >
+                  <Search size={12} /> {t("ai.askDiskFolder")}
+                </button>
+                <button className="btn sm" onClick={() => pullTo(null)}>
+                  {t("ai.askDiskInternal")}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Editors de vídeo IA descarregables: el material s'obté amb
+              «IMG|»/rodets i es munta amb un editor REAL, en 1 clic. */}
+          <div className="field">
+            <label>
+              <Film size={13} style={{ verticalAlign: -2, marginRight: 5 }} />
+              {t("ai.videoEditorsTitle")}
+            </label>
+            <p className="lp-hint">{t("ai.videoEditorsHint")}</p>
+            <div className="mm-volumes">
+              {[
+                { id: "kdenlive", k: "ai.videoKdenlive" },
+                { id: "openshot", k: "ai.videoOpenshot" },
+                { id: "davinci", k: "ai.videoDavinci" },
+                { id: "shotcut", k: "ai.videoShotcut" },
+              ].map(({ id, k }) => (
+                <button key={id} className="btn sm" onClick={() => void installEditor(id)}>
+                  <Download size={12} /> {t(k)}
+                </button>
+              ))}
+            </div>
+            {videoMsg && (
+              <p className="lp-hint" style={{ marginTop: 6 }}>
+                {videoMsg}
+              </p>
+            )}
+          </div>
+
+          {/* ALTRES IA locals, apart d'Ollama: en 1 clic (Homebrew en macOS,
+              pàgina de descàrrega a la resta). Un cop instal·lades, NoOrbit
+              les detecta soles al descobridor «IA locals externes». */}
+          <div className="field">
+            <label>
+              <Cpu size={13} style={{ verticalAlign: -2, marginRight: 5 }} />
+              {t("ai.localAppsTitle")}
+            </label>
+            <p className="lp-hint">{t("ai.localAppsHint")}</p>
+            <div className="mm-volumes">
+              {[
+                { id: "lmstudio", k: "ai.localLmstudio" },
+                { id: "jan", k: "ai.localJan" },
+                { id: "gpt4all", k: "ai.localGpt4all" },
+                { id: "llamacpp", k: "ai.localLlamacpp" },
+              ].map(({ id, k }) => (
+                <button key={id} className="btn sm" onClick={() => void installLocalAi(id)}>
+                  <Download size={12} /> {t(k)}
+                </button>
+              ))}
+            </div>
+          </div>
 
           {/* Carpeta dels models: per posar-los en un USB extern quan el disc
               va curt d'espai. Cal reiniciar Ollama perquè ho tinga en compte. */}
@@ -503,7 +680,7 @@ export default function ModelManagerModal() {
                       ) : (
                         <button
                           className="btn sm"
-                          onClick={() => void pullCloud(s.name)}
+                          onClick={() => void pullCloud(s.name, s.size)}
                         >
                           <Download size={12} /> {t("ai.pull")}
                         </button>
@@ -577,7 +754,7 @@ export default function ModelManagerModal() {
                       ) : (
                         <button
                           className="btn sm"
-                          onClick={() => void pullCloud(c.name)}
+                          onClick={() => void pullCloud(c.name, c.size)}
                         >
                           <Download size={12} /> {t("ai.pull")}
                         </button>
@@ -598,9 +775,21 @@ export default function ModelManagerModal() {
               {t("ai.internetTitle")}
             </label>
             <p className="lp-hint">{t("ai.internetHint")}</p>
+            {/* Font de la cerca: Hugging Face per a LLM (GGUF que Ollama
+                baixa natiu) o CivitAI per a models d'imatge (URL directa cap
+                al rodet de CPU «sd-models/», útil fins i tot en Mac Intel). */}
+            <select
+              className="ex-input"
+              value={internetSource}
+              onChange={(e) => void setInternetSource(e.target.value as "hf" | "civitai")}
+              style={{ marginBottom: 6 }}
+            >
+              <option value="hf">{t("ai.sourceHf")}</option>
+              <option value="civitai">{t("ai.sourceCivitai")}</option>
+            </select>
             <div className="mm-custom">
               <input
-                placeholder={t("ai.internetSearchPh")}
+                placeholder={internetSource === "hf" ? t("ai.internetSearchPh") : t("ai.civitaiSearchPh")}
                 value={internetQuery}
                 onChange={(e) => setInternetQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && searchInternet(internetQuery)}
@@ -608,7 +797,7 @@ export default function ModelManagerModal() {
               <button
                 className="btn primary sm"
                 onClick={() => searchInternet(internetQuery)}
-                disabled={internetLoading || !internetQuery.trim()}
+                disabled={internetLoading || (internetSource === "hf" ? false : !internetQuery.trim())}
               >
                 <Search size={13} /> {t("ai.internetSearch")}
               </button>
@@ -629,15 +818,15 @@ export default function ModelManagerModal() {
             ) : (
               <div className="mm-list">
                 {internet.map((c) => {
-                  const prog = pulling[c.name];
+                  const prog = pulling[c.name] || (imageCpuProgress && c.url ? imageCpuProgress : null);
                   return (
                     <div key={c.name} className="mm-row">
                       <div className="mm-cloud-info">
                         <div className="mm-name-static">
                           {c.name}
                           {/* Quant pesa ABANS de baixar-lo: suma dels .gguf
-                              (HF) o la fitxa d'ollama.com. Si no se sap,
-                              no es mostra res. */}
+                              (HF) o el fitxer del model (CivitAI). Si no se
+                              sap, no es mostra res. */}
                           {c.size ? (
                             <span className="mm-size" style={{ marginLeft: 8 }}>
                               {fmtSize(c.size)}
@@ -648,10 +837,23 @@ export default function ModelManagerModal() {
                       </div>
                       {prog ? (
                         <span className="mm-prog">{prog}</span>
+                      ) : c.url ? (
+                        <button
+                          className="btn sm"
+                          title={t("ai.civitaiDownloadHint")}
+                          onClick={() =>
+                            void downloadCpuModel(
+                              c.url ?? undefined,
+                              c.name.split(/[\\/]/).pop() ?? undefined
+                            )
+                          }
+                        >
+                          <Download size={12} /> {t("ai.civitaiDownload")}
+                        </button>
                       ) : (
                         <button
                           className="btn sm"
-                          onClick={() => void pullCloud(c.name)}
+                          onClick={() => void pullCloud(c.name, c.size)}
                         >
                           <Download size={12} /> {t("ai.pull")}
                         </button>

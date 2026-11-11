@@ -115,12 +115,23 @@ pub async fn expert_run(
     .map_err(|e| e.to_string())
 }
 
+/// La sessió d'un especialista DINS el treball en equip: cada un té el seu
+/// propi fil, així el frontend (ai://chunk amb «session») pot mostrar EN
+/// DIRECTE el que escriu cada especialista, igual que amb el xat principal.
+fn team_sid(expert_id: &str) -> String {
+    format!("{}:{}", TEAM_SESSION, expert_id)
+}
+
 /// Atura el treball en equip en curs (botó «Atura» de la interfície).
 #[command]
 pub async fn experts_team_stop(state: State<'_, AppState>) -> Result<(), String> {
     state.team.cancel();
-    // A més de la bandera pròpia, atura la generació del xat intern de l'equip.
+    // A més de la bandera pròpia, atura la generació del xat intern de l'equip:
+    // la del planificador/fusió i les pròpies de cada especialista.
     state.ai_manager.request_stop(Some(TEAM_SESSION));
+    for e in state.experts.list() {
+        state.ai_manager.request_stop(Some(team_sid(&e.id).as_str()));
+    }
     Ok(())
 }
 
@@ -221,10 +232,7 @@ async fn run_team(
             provider: Some(provider.clone()),
             ..Default::default()
         };
-        match crate::ai::in_session(
-            TEAM_SESSION,
-            ai.chat_opts(&plan_prompt, Some(PLANNER_SYSTEM), &opts),
-        )
+        match crate::ai::in_session("team:plan", ai.chat_opts(&plan_prompt, Some(PLANNER_SYSTEM), &opts))
         .await
         {
             Ok(text) => parse_plan(&text, &team),
@@ -241,12 +249,15 @@ async fn run_team(
         })
     };
 
-    // 2) Execució. Local: d'un en un (menys RAM). Remot: fins a 3 alhora.
+    // 2) Execució. Local: d'un en un (per torns, igual de prou RAM); remot:
+    // fins a 3 alhora. Cada subtaska corre dins la SEUA sessió perquè el
+    // xat en mostre el text en viu amb el stream per sessió.
     let batch = if local { 1 } else { 3 };
+    let total_subs = plan.len();
     let mut subtasks: Vec<SubtaskResult> = Vec::new();
     let mut cancelled = false;
 
-    for chunk in plan.chunks(batch) {
+    for (chunk_idx, chunk) in plan.chunks(batch).enumerate() {
         if ctl.is_cancelled() {
             cancelled = true;
             break;
@@ -257,6 +268,11 @@ async fn run_team(
             let provider = provider.clone();
             let item = item.clone();
             let expert = team.iter().find(|e| e.id == item.expert_id).cloned();
+            let turn_label = if batch == 1 {
+                format!("Torn {}/{} · ", chunk_idx + 1, total_subs)
+            } else {
+                String::new()
+            };
             async move {
                 let Some(expert) = expert else {
                     return SubtaskResult {
@@ -272,7 +288,7 @@ async fn run_team(
                     Progress {
                         stage: "running".into(),
                         expert: Some(expert.name.clone()),
-                        detail: format!("Treballant: {}", truncate(&item.task)),
+                        detail: format!("{}Treballant: {}", turn_label, truncate(&item.task)),
                         elapsed_ms: started.elapsed().as_millis() as u64,
                     },
                 );
@@ -288,10 +304,13 @@ async fn run_team(
                 } else {
                     std::time::Duration::from_secs(300)
                 };
+                // Sessió PRÒPIA de l'especialista: el seu fil/stream és visible
+                // des del panell d'especialistes i des del xat («Obre al xat»).
+                let sid = team_sid(&expert.id);
                 let outcome = tokio::time::timeout(
                     limit,
                     crate::ai::in_session(
-                        TEAM_SESSION,
+                        &sid,
                         ai.chat_opts(&item.task, Some(&expert.system_prompt), &opts),
                     ),
                 )
@@ -318,6 +337,19 @@ async fn run_team(
                         elapsed_ms: started.elapsed().as_millis() as u64,
                     },
                 );
+                // RAM: en proves locals, ALLIBERA el model just acabat d'usar
+                // abans del torn següent. Així, amb prou RAM el següent
+                // especialista del torn no troba la memòria plena del model
+                // de l'anterior (que pot ser un de més gran o diferent).
+                if local {
+                    let target: Option<String> = match &expert.model {
+                        Some(m) => Some(m.clone()),
+                        None => ai.selected_model().await,
+                    };
+                    if let Some(m) = target {
+                        let _ = ai.unload_models(Some(&m)).await;
+                    }
+                }
                 SubtaskResult {
                     expert_id: expert.id,
                     expert_name: expert.name,
@@ -361,12 +393,7 @@ async fn run_team(
             provider: Some(provider),
             ..Default::default()
         };
-        match crate::ai::in_session(
-            TEAM_SESSION,
-            ai.chat_opts(&merge_prompt, Some(MERGER_SYSTEM), &opts),
-        )
-        .await
-        {
+        match crate::ai::in_session("team:final", ai.chat_opts(&merge_prompt, Some(MERGER_SYSTEM), &opts)).await {
             Ok(text) => text,
             Err(_) => digest, // si no pot consolidar, mostra els resultats en brut
         }

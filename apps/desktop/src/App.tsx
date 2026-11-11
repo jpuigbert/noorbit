@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import "./App.css";
 import { useUIStore, applyTheme } from "./stores/uiStore";
 import { useWorkspaceStore } from "./stores/workspaceStore";
@@ -9,7 +9,9 @@ import { registerTaskListeners } from "./stores/taskStore";
 import { useComputerStore } from "./stores/computerStore";
 import { installConsoleCapture, logBackend } from "./stores/consoleStore";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { actions } from "./actions";
+import { useT } from "./i18n";
 import MenuBar from "./components/MenuBar";
 import StatusBar from "./components/StatusBar";
 import Sidebar from "./components/Sidebar";
@@ -87,8 +89,34 @@ export default function App() {
   const rightPanelOpen = useUIStore((s) => s.rightPanelOpen);
   const zoom = useUIStore((s) => s.zoom);
   const theme = useUIStore((s) => s.theme);
+  const { t } = useT();
+  // Confirmació abans de tancar el programa: el sistema intercepta el
+  // tancament, ens pregunta i només tanquem si l'usuari ho confirma
+  // (deseant primer el que hi hagi de brut).
+  const [askClose, setAskClose] = useState(false);
 
   useAutosave();
+
+  // Interceptem el tancament de la finestra (creu X, ⌘Q, tancar des de la
+  // resta de finestres): preventDefault + modal propi. Sense plugin extern.
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    void getCurrentWebviewWindow()
+      .onCloseRequested((e) => {
+        e.preventDefault();
+        setAskClose(true);
+      })
+      .then((u) => {
+        un = u;
+      });
+    return () => un?.();
+  }, []);
+
+  const closeNow = () => {
+    setAskClose(false);
+    void actions["file.saveAll"]();
+    void getCurrentWebviewWindow().destroy();
+  };
 
   // Arrencada: inicialitza integracions i mostra la pantalla d'inici
   // (projectes recents) quan no hi ha cap carpeta oberta.
@@ -297,6 +325,29 @@ export default function App() {
       <QuickOpen />
       <SearchPalette />
       <StartupScreen />
+
+      {/* SEGUR QUE VOLS TANCAR? El tancament s'ha interceptat a
+          onCloseRequested: només es tanca de veritat si es confirma ací. */}
+      {askClose && (
+        <div className="modal-overlay" onClick={() => setAskClose(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <span>{t("app.closeAskTitle")}</span>
+            </div>
+            <div className="modal-body">
+              <p className="lp-hint">{t("app.closeAskHint")}</p>
+              <div className="mm-ollama-actions" style={{ justifyContent: "flex-end" }}>
+                <button className="btn sm" onClick={() => setAskClose(false)}>
+                  {t("common.cancel")}
+                </button>
+                <button className="btn sm primary" onClick={closeNow}>
+                  {t("common.close")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

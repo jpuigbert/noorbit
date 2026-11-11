@@ -29,7 +29,7 @@ UNA directriu sola en una línia i ATURA el torn. NoOrbit l'executa (l'usuari \
 pot confirmar-la) i et torna el resultat en un missatge nou.\n\
   RUN|<comanda de shell>       (dins el projecte i espera la sortida)\n\
   RUN|BG|<comanda>             (desconnectat: servidors/apps que queden obertes)\n\
-  RUN|BLENDER|codi bpy o ruta/script.py    (Blender: editor connectat o headless)\n\
+   RUN|BLENDER|«import bpy; ...» codi d'UNA línia o ruta/script.py   (Blender: editor connectat o headless)\n\
   RUN|UNREAL|codi python       (Unreal, via Remote Control)\n\
   IMG|descripció|ruta/caixa.png    (genera una imatge i la desa al projecte)\n\
   @delete: ruta/relativa       (esborra el fitxer o carpeta del projecte)\n\
@@ -40,6 +40,17 @@ COMPLET; si falta un fitxer emet-lo SENCER amb «@file:» (mai a mitges, «…»
 un @file: sense codi crea un fitxer buit.\n\
 - Escrius i TU executeixes («RUN|pip install -r requirements.txt», «RUN|python3 \
 main.py»): no diguis a l'usuari que ho faci ell.\n\
+- Si l'usuari demana CREAR/generar/dibuixar una imatge, respón UNA línia \
+«IMG|descripció detallada|ruta/imatge.png» i ATURA el torn: la generació la \
+fa el sistema (rodet local en CPU —també Mac Intel— o proveïdor en línia); \
+MAI no l'expliquis amb prosa ni la promesis per a «després».\n\
+- «RUN|BLENDER|» SEMPRE és codi Python real de Blender: comença per «import bpy»
+i separa instruccions amb «;» (o dona una ruta .py). MAI frases en llenguatge
+natural dins de BLENDER: les imatges es creen amb «IMG|descripció|ruta.png».
+- VÍDEO/ANIMACIÓ a Blender: anima amb keyframes i fer NOMÉS això al final:
+desa una còpia del fitxer amb bpy.ops.wm.save_as_mainfile(..., copy=True) i
+imprimeix «NOORBIT_VIDEO_OK:<ruta_blend>» — MAI cridis render(animation=True)
+en viu (bloqueja Blender): NoOrbit renderitza headless i dona la ruta .mp4.
 - Una directriu per torn; llegix «RUN|RESULTAT|…» abans del pas següent. Si \
 falla: corregeix amb @file: i torna a executar; mai no declare èxit sense \
 haver vist eixir=0.\n\
@@ -398,6 +409,12 @@ pub async fn execute(
                     }
                     _ => arg.clone(),
                 };
+                // Guarda: mai enviem a Blender text que no sigui codi Python.
+                // Abans una frase («crea una imatge…») arribava a exec() dins
+                // Blender i provocava un SyntaxError que la IA no sabia corregir.
+                if let Err(e) = crate::blender::guard_python(&code) {
+                    return format!("RUN|RESULTAT| BLENDER| NO EXECUTADA: {}", e);
+                }
                 let st = blender::status();
                 let exec = if st.running {
                     let code2 = code.clone();
@@ -417,11 +434,42 @@ pub async fn execute(
                     Err("Blender no està instal·lat en aquest ordinador.".to_string())
                 };
                 match exec {
-                    Ok(out) => format!(
-                        "RUN|RESULTAT| BLENDER| ({}) eixit=0 — sortida:\n{}",
-                        if st.running { "editor connectat" } else { "headless" },
-                        clip(out.trim(), 2000)
-                    ),
+                    Ok(out) => {
+                        let base = format!(
+                            "RUN|RESULTAT| BLENDER| ({}) eixit=0 — sortida:\n{}",
+                            if st.running { "editor connectat" } else { "headless" },
+                            clip(out.trim(), 2000)
+                        );
+                        // Vídeo: si l'script ha imprimit el marcador
+                        // NOORBIT_VIDEO_OK (animació + còpia .blend desada),
+                        // llença el render headless i afegeix el resultat:
+                        if let Some(blend) = out.lines().find_map(|l| {
+                            l.split(blender::VIDEO_MARKER).nth(1).map(|p| {
+                                p.trim().trim_matches('"').split_whitespace().next().unwrap_or("").to_string()
+                            })
+                        }).filter(|p| !p.is_empty()) {
+                            progress(app, "Blender: 🎬 render del vídeo (pot trigar)…", true);
+                            match tokio::task::spawn_blocking(move || {
+                                blender::render_blender_video(&blend)
+                            })
+                            .await
+                            .map_err(|e| e.to_string())
+                            .and_then(|r| r.map_err(|e| e.to_string()))
+                            {
+                                Ok(video) => {
+                                    progress(app, "🎬 Vídeo renderitzat", true);
+                                    return format!("{}\n\n🎬 Vídeo renderitzat: {}", base, video);
+                                }
+                                Err(e) => {
+                                    return format!(
+                                        "{}\n\n⚠️ El render del vídeo ha fallat: {}",
+                                        base, e
+                                    );
+                                }
+                            }
+                        }
+                        base
+                    }
                     Err(e) => {
                         progress(app, &format!("Blender: {}", clip(&e, 70)), false);
                         format!("RUN|RESULTAT| BLENDER| error: {}", e)
@@ -584,13 +632,30 @@ pub async fn tools_status_line(computer_enabled: bool) -> String {
 
     let intel_mac = cfg!(all(target_os = "macos", target_arch = "x86_64"));
     let comfy = crate::ai::comfyui_running();
-    l.push_str(if intel_mac {
-        "• Imatges: ComfyUI local NO és compatible amb aquest Mac Intel. Per a «IMG|» cal un proveïdor en línia amb token (Configuració ▸ Proveïdors ▸ model d'imatges).\n"
+    let sd_status = crate::imgen::sd_status_text();
+    let img_line: String = if intel_mac {
+        match &sd_status {
+            Some(desc) if desc.starts_with("model") => format!(
+                "• Imatges: rodet de CPU «sd» LLEST ({}); «IMG|» genera en local \
+                 (més lent: treballa amb el processador).\n",
+                desc
+            ),
+            Some(_) => "• Imatges: rodet de CPU «sd» instal·lat però SENSE MODEL: \
+                        demana a l'usuari que el baixe al Gestor de models \
+                        (secció «Rodet d'imatges en CPU») abans de fer «IMG|».\n"
+                .to_string(),
+            None => "• Imatges: aquest Mac Intel no pot usar ComfyUI. «IMG|» cal \
+                     el rodet de CPU (botó «Instal·la», secció «Rodet d'imatges \
+                     en CPU» del Gestor de models) o un proveïdor en línia amb \
+                     token (Configuració ▸ Proveïdors ▸ model d'imatges).\n"
+                .to_string(),
+        }
     } else if comfy {
-        "• Imatges: ComfyUI local en marxa (port 8188); «IMG|» funcionarà en local.\n"
+        "• Imatges: ComfyUI local en marxa (port 8188); «IMG|» funcionarà en local.\n".into()
     } else {
-        "• Imatges: sense ComfyUI local en marxa; «IMG|» requerix un proveïdor en línia amb token o arrencar ComfyUI.\n"
-    });
+        "• Imatges: sense ComfyUI local en marxa; «IMG|» requerix un proveïdor en línia amb token o arrencar ComfyUI.\n".into()
+    };
+    l.push_str(&img_line);
 
     l.push_str(if computer_enabled {
         "• Control de l'ordinador: PERMÉS per l'usuari. Les RUN| s'executen (pot \n      aparéixer un diàleg de confirmació en pantalla: és normal, l'usuari l'ha \n      d'acceptar o rebutjar).\n"

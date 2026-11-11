@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Undo2, Redo2 } from "lucide-react";
 import { useT } from "../i18n";
 import { actions } from "../actions";
 import { useAIActivity } from "../stores/activityStore";
@@ -176,6 +176,22 @@ export default function MenuBar() {
         {t("app.name")}
       </div>
       {Object.keys(titles).map(renderMenu)}
+      {/* Desfés/Refés SEMPRES a ma: val per a edicions manuals de l'editor
+          i per al codi que la IA ha tocat (redactat al buffer de Monaco). */}
+      <button
+        className="icon-btn"
+        title={`${t("menu.undo")} (⌘Z)`}
+        onClick={actions["edit.undo"]}
+      >
+        <Undo2 size={14} />
+      </button>
+      <button
+        className="icon-btn"
+        title={`${t("menu.redo")} (⇧⌘Z)`}
+        onClick={actions["edit.redo"]}
+      >
+        <Redo2 size={14} />
+      </button>
       <div className="spacer" />
       {activity.working && (
         <div className="menubar-activity" title={activity.detail ?? undefined}>

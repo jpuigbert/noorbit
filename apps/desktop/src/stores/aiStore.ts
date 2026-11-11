@@ -20,6 +20,9 @@ export interface CloudModel {
   description: string;
   /// Mida de la descàrrega en bytes, si la font la diu (null: no es mostra).
   size?: number | null;
+  /// URL de descàrrega directe (CivitAI): es desa al rodet de CPU amb
+  /// «downloadCpuModel». Absent a les fonts natives d'Ollama.
+  url?: string | null;
 }
 
 export interface PullStatus {
@@ -62,11 +65,24 @@ export interface LoadedModel {
   sizeVram: number;
 }
 
+/// Estat del rodet d'imatges en CPU (stable-diffusion.cpp) que retorna
+/// «image_cpu_info»: binari instal·lat, carpeta de models i model disponible.
+export interface ImageCpuInfo {
+  installed: boolean;
+  modelsDir: string;
+  model: string | null;
+}
+
 interface AIState {
   ollamaRunning: boolean;
   ollamaInstalled: boolean;
   comfyRunning: boolean;
   comfyInstalled: boolean;
+  /// Rodet d'imatges en CPU (stable-diffusion.cpp): funciona fins i tot en
+  /// Mac Intel, on ComfyUI no està publicat. idem info del binari + model.
+  imageCpu: ImageCpuInfo | null;
+  /// Progrés de la baixada del model inicial del rodet de CPU.
+  imageCpuProgress: string | null;
   models: OllamaModel[];
   /// Models carregats ARA a la RAM (per poder-los alliberar).
   loaded: LoadedModel[];
@@ -103,10 +119,22 @@ interface AIState {
   refreshProviders: () => Promise<void>;
   searchCloud: (query: string) => Promise<void>;
   searchInternet: (query: string) => Promise<void>;
+  /// Origen de la cerca «a internet»: Hugging Face (LLM GGUF) o CivitAI
+  /// (models d'imatge per al rodet de CPU).
+  internetSource: "hf" | "civitai";
+  setInternetSource: (s: "hf" | "civitai") => void;
+  /// Instal·la una ALTRA IA local apart d'Ollama (LM Studio, GPT4All, Jan,
+  /// llama.cpp); NoOrbit la detecta sols un cop instal·lada.
+  installLocalAi: (which: string) => Promise<void>;
   installOllama: () => Promise<void>;
   startOllama: () => Promise<void>;
   installComfy: () => Promise<void>;
   startComfy: () => Promise<void>;
+  /// Rodet d'imatges en CPU: llegeix l'estat, n'instal·la el binari i baixa
+  /// el model inicial (per defecte SD 1.5, ≈2 GB) amb progrés a la UI.
+  loadImageCpu: () => Promise<void>;
+  installImageCpu: () => Promise<void>;
+  downloadCpuModel: (url?: string, name?: string) => Promise<void>;
   loadModelsDir: () => Promise<void>;
   setModelsDir: (path: string | null) => Promise<void>;
   migrateModels: () => Promise<void>;
@@ -137,8 +165,11 @@ export function pickBestFittingModel(
 export const useAIStore = create<AIState>((set, get) => ({
   ollamaRunning: false,
   ollamaInstalled: false,
+  internetSource: "hf",
   comfyRunning: false,
   comfyInstalled: false,
+  imageCpu: null,
+  imageCpuProgress: null,
   models: [],
   loaded: [],
   keepAlive: "",
@@ -307,14 +338,33 @@ export const useAIStore = create<AIState>((set, get) => ({
   /// (Hugging Face). No cal Ollama en marxa: només consulta l'API pública.
   /// Els resultats tenen noms «hf.co/…» que pullModel baixa en natiu.
   searchInternet: async (query) => {
+    const source = get().internetSource;
     set({ internetLoading: true, internetError: null });
     try {
-      const internet = await invoke<CloudModel[]>("ollama_search_huggingface", {
-        query: query ?? "",
-      });
+      // Hugging Face: GGUF que Ollama baixa natiu («hf.co/…»). CivitAI:
+      // models d'imatge amb URL directa cap al rodet de CPU.
+      const internet = await invoke<CloudModel[]>(
+        source === "hf" ? "ollama_search_huggingface" : "civitai_search",
+        { query: query ?? "" }
+      );
       set({ internet, internetLoading: false });
     } catch (e) {
       set({ internet: [], internetLoading: false, internetError: String(e) });
+    }
+  },
+
+  setInternetSource: (s) => {
+    set({ internetSource: s, internet: [] });
+    // En canviar a CivitAI fem una cerca d'exemple perquè la llista no qüedi
+    // buida; Hugging Face espera la consulta de l'usuari.
+    if (s === "civitai") void get().searchInternet("stable diffusion");
+  },
+
+  installLocalAi: async (which) => {
+    try {
+      await invoke<string>("install_local_ai", { which });
+    } catch (e) {
+      set({ lastMessage: String(e) });
     }
   },
 
@@ -337,6 +387,49 @@ export const useAIStore = create<AIState>((set, get) => ({
     // El servidor triga uns segons a escoltar el port 8188.
     await new Promise((r) => setTimeout(r, 2000));
     await get().checkComfy();
+  },
+
+  /// Estat del rodet d'imatges en CPU (stable-diffusion.cpp).
+  loadImageCpu: async () => {
+    try {
+      const info = await invoke<ImageCpuInfo>("image_cpu_info");
+      set({ imageCpu: info });
+    } catch {
+      /* ignore */
+    }
+  },
+
+  /// Instal·la el binari del rodet de CPU (Homebrew / pàgina de descàrrega).
+  installImageCpu: async () => {
+    try {
+      await invoke<string>("install_image_cpu");
+    } catch {
+      /* ignore */
+    }
+    // Homebrew triga: tornem a consultar d'aquí uns segons per refrescar l'estat.
+    await new Promise((r) => setTimeout(r, 5000));
+    await get().loadImageCpu();
+  },
+
+  /// Baixa el model inicial del rodet de CPU amb progrés a la UI.
+  /// Per defecte és el SD 1.5 (≈2 GB), suficient per començar a generar.
+  downloadCpuModel: async (url, name) => {
+    if (get().imageCpuProgress) return;
+    set({ imageCpuProgress: "Iniciant la baixada del model…" });
+    const { listen } = await import("@tauri-apps/api/event");
+    const unlisten = listen<{ message: string }>("ai://sd-model", (evt) => {
+      set({ imageCpuProgress: evt.payload.message });
+    });
+    try {
+      await invoke("image_cpu_download_model", {
+        url: url ?? null,
+        name: name ?? null,
+      });
+      await get().loadImageCpu();
+    } finally {
+      (await unlisten)();
+      set({ imageCpuProgress: null });
+    }
   },
 
   /// Arrenca el servei local (aplicant la carpeta de models configurada,

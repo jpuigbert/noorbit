@@ -493,6 +493,76 @@
   font-size: 11px;
   color: var(--text-1);
 }
+/* EN DIRECTE: mini-chats per especialista (el mateix format del xat). */
+.ex-live {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px;
+  margin-top: 4px;
+}
+.ex-live-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.ex-live-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border);
+}
+.ex-live-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ex-live-status {
+  flex: 1;
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+.ex-live-body {
+  padding: 6px 8px;
+  max-height: 190px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ex-live-msg {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-1);
+  word-break: break-word;
+}
+.ex-live-msg[data-role="user"] {
+  color: var(--text-0);
+}
+.ex-live-msg pre {
+  margin: 2px 0;
+  padding: 5px 6px;
+  font-size: 10.5px;
+  background: var(--bg-1);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+.ex-live-msg pre code {
+  font-size: 10.5px;
+}
 .ex-results {
   display: flex;
   flex-direction: column;

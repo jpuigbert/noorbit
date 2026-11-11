@@ -902,6 +902,11 @@ export default function AgentPanel() {
         </button>
       </div>
 
+      {/* Checklist compartida FIXADA A DAMUNT DEL XAT: tasques de la IA i de
+          l'usuari que no s'han de perdre amb l'scroll. S'injecta al context de
+          la principal i dels agents perquè ningú es perda cap punt del treball. */}
+      <TaskChecklist />
+
       <div
         className="agent-body"
         ref={bodyRef}
@@ -911,10 +916,6 @@ export default function AgentPanel() {
           setShowJump(!nearBottom);
         }}
       >
-        {/* Checklist compartida: tasques a complir que la IA (amb @todo/@done) i
-            l'usuari mantenen visible. S'injecta al context de la principal i dels
-            agents perquè ningú es perga cap punt del treball. */}
-        <TaskChecklist />
         {/* Capçalera discreta del xat amb l'opció de buidar-lo (només aquest). */}
         {messages.length > 0 && (
           <div className="chat-head">

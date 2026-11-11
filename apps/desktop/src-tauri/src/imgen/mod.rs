@@ -520,9 +520,242 @@ async fn edit_online(
     Err(anyhow!("Cap proveïdor en línia ha editat la imatge ({})", last_err))
 }
 
-// ── API pública ─────────────────────────────────────────────────────────────
+// ── Rodet de CPU (stable-diffusion.cpp) ─────────────────────────────────────
+//
+// Camí LOCAL alternatiu a ComfyUI: el binari `sd` de stable-diffusion.cpp
+// treballa amb el processador (CPU), sense cap servei en marxa ni graf:
+// un procés i un PNG. És més lent, però roda a qualsevol Mac — també en
+// Mac Intel (x86_64), on ComfyUI oficial no està publicat — i a Linux i
+// Windows. El model és un fitxer .gguf/.safetensors a «sd-models/».
 
-/// Genera una imatge a partir de text. Tria el backen segons la potència:
+/// Binari `sd` (stable-diffusion.cpp) si està instal·lat (Homebrew o PATH).
+pub fn sd_binary() -> Option<PathBuf> {
+    which::which("sd").ok()
+}
+
+/// Carpeta on viuen els models del rodet de CPU («sd-models/» a les dades).
+pub fn sd_models_dir() -> Result<PathBuf> {
+    let dir = AppConfig::data_dir()
+        .ok_or_else(|| anyhow!("No es pot determinar la carpeta de dades de NoOrbit"))?
+        .join("sd-models");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| anyhow!("No es pot crear la carpeta sd-models: {}", e))?;
+    Ok(dir)
+}
+
+/// Primer model .gguf/.safetensors complet (no «.part») del rodet de CPU.
+pub fn sd_model_path() -> Option<PathBuf> {
+    let dir = sd_models_dir().ok()?;
+    let mut candidates: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            let name = p
+                .file_name()
+                .and_then(|f| f.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            name.ends_with(".gguf") || name.ends_with(".safetensors")
+        })
+        .collect();
+    candidates.sort();
+    candidates.into_iter().find(|p| {
+        !p.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("part"))
+            .unwrap_or(false)
+    })
+}
+
+/// Estat del rodet de CPU per al Gestor de models i el manual del model.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SdInfo {
+    /// Binari `sd` present.
+    pub installed: bool,
+    /// Carpeta de models en format llegible.
+    pub models_dir: String,
+    /// Nom del model disponible (o None si encara no n'hi ha cap).
+    pub model: Option<String>,
+}
+
+pub fn sd_info() -> Result<SdInfo, String> {
+    Ok(SdInfo {
+        installed: sd_binary().is_some(),
+        models_dir: sd_models_dir()
+            .map_err(|e| e.to_string())?
+            .to_string_lossy()
+            .to_string(),
+        model: sd_model_path()
+            .map(|p| p.file_name().unwrap_or_default().to_string_lossy().to_string()),
+    })
+}
+
+/// Línia d'estat curt per al manual del model: Some(«sd (CPU) amb el model
+/// X») si Hi ha binari i model; Some amb missatge sense model si només hi ha
+/// binari; None si no hi ha rodet.
+pub fn sd_status_text() -> Option<String> {
+    if sd_binary().is_none() {
+        return None;
+    }
+    Some(match sd_model_path() {
+        Some(p) => format!(
+            "model {}",
+            p.file_name().unwrap_or_default().to_string_lossy()
+        ),
+        None => "instal·lat però sense cap model a la carpeta «sd-models»".to_string(),
+    })
+}
+
+/// Genera una imatge amb el binari `sd` en CPU mateix fil de treball que
+/// ComfyUI però sense servidor: una comanda, un PNG.
+async fn sd_txt2img(o: &GenOpts, seed: u64) -> Result<(Vec<u8>, String)> {
+    let bin = sd_binary().ok_or_else(|| anyhow!("El rodet de CPU no està instal·lat"))?;
+    let model = sd_model_path().ok_or_else(|| {
+        anyhow!(
+            "El rodet de CPU no té cap model: baixa'n un al Gestor de models \
+             (botó «Baixa el model inicial» de la secció «Rodet d'imatges en CPU»)"
+        )
+    })?;
+    let stamp = chrono::Utc::now().timestamp_millis();
+    let out = sd_models_dir()?.join(format!("sd-{}-{}.png", seed, stamp));
+    let steps = o.steps.clamp(1, 60);
+    let mut cmd = tokio::process::Command::new(&bin);
+    cmd.arg("-m")
+        .arg(&model)
+        .arg("-p")
+        .arg(&o.prompt)
+        .arg("-o")
+        .arg(&out)
+        .arg("--steps")
+        .arg(steps.to_string())
+        .arg("-W")
+        .arg(o.width.to_string())
+        .arg("-H")
+        .arg(o.height.to_string())
+        .arg("--seed")
+        .arg(seed.to_string())
+        .arg("--threads")
+        .arg("4");
+    if !o.negative.trim().is_empty() {
+        cmd.arg("-n").arg(&o.negative);
+    }
+    let outp = cmd
+        .output()
+        .await
+        .map_err(|e| anyhow!("No s'ha pogut executar «sd»: {}", e))?;
+    if outp.status.success() {
+        let bytes = std::fs::read(&out)
+            .map_err(|e| anyhow!("«sd» no ha deixat PNG llegible: {}", e))?;
+        let _ = std::fs::remove_file(&out);
+        return Ok((
+            bytes,
+            model
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+        ));
+    }
+    // En error, ens quedem amb l'ÚLTIMA línia no buida de stderr: és on el
+    // binari explica la causa real (model corrupt, OOM, format no suportat…).
+    let tail = String::from_utf8_lossy(&outp.stderr)
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .last()
+        .unwrap_or_default()
+        .to_string();
+    if tail.is_empty() {
+        return Err(anyhow!("«sd» ha fallat (exit {:?}) sense detall", outp.status.code()));
+    }
+    Err(anyhow!("«sd» ha fallat (exit {:?}): {}", outp.status.code(), tail))
+}
+
+/// Edita una imatge amb el rodet de CPU: image→image amb el binari `sd`
+/// amb la imatge original com a «-i» i el «-strength» de la força.
+async fn sd_img2img(
+    init_bytes: &[u8],
+    init_name: &str,
+    o: &GenOpts,
+    seed: u64,
+    strength: f64,
+) -> Result<(Vec<u8>, String)> {
+    let bin = sd_binary().ok_or_else(|| anyhow!("El rodet de CPU no està instal·lat"))?;
+    let model = sd_model_path().ok_or_else(|| {
+        anyhow!(
+            "El rodet de CPU no té cap model: baixa'n un al Gestor de models \
+             (secció «Rodet d'imatges en CPU»)"
+        )
+    })?;
+    let dir = sd_models_dir()?;
+    let stamp = chrono::Utc::now().timestamp_millis();
+    // Nom sanejat del fitxer origen (mai no deixem caràcters rars a l'shell
+    // del binari; un path simple és suficient).
+    let safe_init: String = init_name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '_' || *c == '-')
+        .collect();
+    let init_path = dir.join(format!("sd-in-{}-{}", stamp, safe_init));
+    std::fs::write(&init_path, init_bytes)
+        .map_err(|e| anyhow!("No s'ha pogut preparar la imatge origen: {}", e))?;
+    let out = dir.join(format!("sd-edit-{}-{}.png", seed, stamp));
+    let steps = o.steps.clamp(1, 60);
+    let mut cmd = tokio::process::Command::new(&bin);
+    cmd.arg("-m")
+        .arg(&model)
+        .arg("-i")
+        .arg(&init_path)
+        .arg("--strength")
+        .arg(strength.clamp(0.05, 0.95).to_string())
+        .arg("-p")
+        .arg(&o.prompt)
+        .arg("-o")
+        .arg(&out)
+        .arg("--steps")
+        .arg(steps.to_string())
+        .arg("-W")
+        .arg(o.width.to_string())
+        .arg("-H")
+        .arg(o.height.to_string())
+        .arg("--seed")
+        .arg(seed.to_string())
+        .arg("--threads")
+        .arg("4");
+    if !o.negative.trim().is_empty() {
+        cmd.arg("-n").arg(&o.negative);
+    }
+    let outp = cmd
+        .output()
+        .await
+        .map_err(|e| anyhow!("No s'ha pogut executar «sd»: {}", e))?;
+    let _ = std::fs::remove_file(&init_path);
+    if let Ok(bytes) = std::fs::read(&out) {
+        if bytes.len() > 100 {
+            let _ = std::fs::remove_file(&out);
+            return Ok((
+                bytes,
+                model
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string(),
+            ));
+        }
+    }
+    let tail = String::from_utf8_lossy(&outp.stderr)
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .last()
+        .unwrap_or_default()
+        .to_string();
+    if tail.is_empty() {
+        return Err(anyhow!("«sd» ha fallat (exit {:?}) sense detall", outp.status.code()));
+    }
+    Err(anyhow!("«sd» ha fallat (exit {:?}): {}", outp.status.code(), tail))
+}
+
+// ── API pública ─────────────────────────────────────────────────────────────
 /// ComfyUI local si hi ha servidor + RAM, si no, proveïdors amb token.
 pub async fn generate(
     remote: Option<Arc<Mutex<ApiManager>>>,
@@ -572,6 +805,22 @@ pub async fn generate(
         };
     }
 
+    // 1b) Rodet de CPU (stable-diffusion.cpp): l'única via LOCAL en Mac Intel,
+    // però útil a QUALSEVOL ordinador quan ComfyUI no està en marxa.
+    if sd_binary().is_some() {
+        match sd_txt2img(o, seed).await {
+            Ok((bytes, model)) => {
+                let path = save_png(&bytes, "imatge")?;
+                return Ok(GeneratedImage {
+                    path,
+                    backend: "sd (CPU)".into(),
+                    model,
+                });
+            }
+            Err(e) => note = format!("{} / rodet de CPU: {}", note, e),
+        }
+    }
+
     // 2) En línia amb les credencials explícites de l'usuari.
     if let Some(remote) = remote {
         match generate_online(&remote, o).await {
@@ -585,10 +834,13 @@ pub async fn generate(
         note = format!("{} / sense proveïdors en línia registrats", note);
     }
     let local_hint = if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
-        "En aquest Mac Intel, la generació local amb ComfyUI NO és possible: \
-         registra un proveïdor d'imatges en línia amb token al menú \
-         «Proveïdors d'IA» (p. ex. OpenAI amb «dall-e-3», o Venice) i indica el \
-         model d'imatges; el xat i la directriu IMG| l'usaran sols."
+        "En aquest Mac Intel, ComfyUI local NO és possible, però hi ha un rodet \
+         d'imatges en CPU que SÍ funciona: instal·la'l amb el botó «Instal·la» \
+         de la secció «Rodet d'imatges en CPU» del Gestor de models i baixa el \
+         model inicial («Baixa el model inicial», ≈2 GB). Aleshores «IMG|» \
+         funciona en local acabat d'engegar el xat. També pots registrar un \
+         proveïdor en línia amb token al menú «Proveïdors d'IA» (p. ex. OpenAI \
+         amb «dall-e-3», o Venice)."
     } else {
         "Arrenca ComfyUI amb «start_comfyui» (o instal·la'l amb \
          «install_comfyui») per fer-ho en local, o registra un proveïdor en \
@@ -660,6 +912,22 @@ pub async fn edit(
         }
     } else {
         note = "ComfyUI no està en marxa".into();
+    }
+
+    // 1b) Rodet de CPU: l'única via LOCAL en Mac Intel (i alternativa a
+    // ComfyUI a qualsevol màquina sense servidor encès).
+    if sd_binary().is_some() {
+        match sd_img2img(&bytes, &name, o, seed, strength).await {
+            Ok((out, model)) => {
+                let path = save_png(&out, "edicio")?;
+                return Ok(GeneratedImage {
+                    path,
+                    backend: "sd (CPU)".into(),
+                    model,
+                });
+            }
+            Err(e) => note = format!("{} / rodet de CPU: {}", note, e),
+        }
     }
 
     // 2) En línia (OpenAI-compatible /images/edits).

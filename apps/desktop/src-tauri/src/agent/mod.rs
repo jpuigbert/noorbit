@@ -796,6 +796,36 @@ impl AgentOrchestrator {
         reply.trim().to_string()
     }
 
+    /// Si el codi executat ha imprimit el marcador NOORBIT_VIDEO_OK (l'IA ha
+    /// animat l'escena i ha desat una còpia .blend), llença el render del
+    /// vídeo headless i afegeix el resultat (o l'avís) al missatge final.
+    async fn maybe_render_video(app: &tauri::AppHandle, stdout: &str, base: String) -> String {
+        let path = stdout
+            .lines()
+            .find_map(|l| {
+                l.split(crate::blender::VIDEO_MARKER).nth(1).map(|p| {
+                    p.trim().trim_matches('"').split_whitespace().next().unwrap_or("").to_string()
+                })
+            })
+            .filter(|p| !p.is_empty());
+        let Some(blend) = path else {
+            return base;
+        };
+        progress(app, "blender", "🎬 Renderitzant el vídeo (pot trigar uns minuts)…", true);
+        let res = tauri::async_runtime::spawn_blocking(move || {
+            crate::blender::render_blender_video(&blend)
+        })
+        .await;
+        match res {
+            Ok(Ok(video)) => format!("{}\n\n🎬 Vídeo renderitzat: {}", base, video),
+            Ok(Err(e)) => format!(
+                "{}\n\n⚠️ L'animació ja és a l'escena, però el render del vídeo ha fallat: {}",
+                base, e
+            ),
+            Err(e) => format!("{}\n\n⚠️ Render del vídeo: {}", base, e),
+        }
+    }
+
     /// Text curt que informa de la variació d'objectes a l'escena entre
     /// l'execució (abans → després). Buit si no es pot calcular.
     fn count_delta(before: Option<usize>, after: Option<usize>) -> String {
@@ -889,6 +919,55 @@ if "NoOrbit_Esfera" in bpy.data.objects:
     bpy.data.objects.remove(bpy.data.objects["NoOrbit_Esfera"], do_unlink=True)
     print("Esborrat NoOrbit_Esfera")
 ```
+- EDITAR UNA FIGURA DE VÀRIES PECES en viu (la majoria d'ordres de l'usuari
+seran d'aquest tipus: «fes-lo més petit», «mou-lo aquí», «posa'l verd»,
+«borra'l»). Cada peça té el PREFIX del propi nom de la figura (p. ex.
+«Nan_»): troba-les TOTES per prefix i actua sobre el grup sencer.
+```python
+import bpy
+peces = [o for o in bpy.data.objects if o.name.startswith("Nan_")]
+# MOURE TOTA LA FIGURA (mateix desplaçament per cada peça):
+from mathutils import Vector
+dx, dy, dz = 2.0, 0.0, 0.0
+for ob in peces:
+    ob.matrix_world.translation = ob.matrix_world.translation + Vector((dx, dy, dz))
+# ESCALAR TOTA LA FIGURA (anant bé: escala des del peu de la figura):
+pivot = min(ob.matrix_world.translation.z for ob in peces)
+s = 0.5
+for ob in peces:
+    t = ob.matrix_world.translation
+    t.x = (t.x * s); t.y = (t.y * s)
+    t.z = pivot + (t.z - pivot) * s
+    ob.scale = (ob.scale[0]*s, ob.scale[1]*s, ob.scale[2]*s)
+print("Editades %d peces del grup Nan_" % len(peces))
+```
+- CANVIAR EL COLOR d'una figura/peça (el material ja existeix: retoca'l
+  sense crear-ne cap de nou — reaproveu amb correctament el nom):
+```python
+import bpy
+verd = (0.1, 0.75, 0.15, 1.0)
+for ob in bpy.data.objects:
+    if ob.name.startswith("Nan_"):
+        for slot in ob.material_slots:
+            m = slot.material
+            if m and m.use_nodes:
+                b = next((nd for nd in m.node_tree.nodes
+                          if nd.type == "BSDF_PRINCIPLED"), None)
+                if b:
+                    b.inputs["Base Color"].default_value = verd
+                    m.name = "Nan_Retocat_Verd"
+print("Color canviat a verd per a Nan_")
+```
+- BORRAR UNA FIGURA SENCERA pel seu PREFIX (per exemple «borra el nan»):
+```python
+import bpy
+esborrats = []
+for nom in list(bpy.data.objects.keys()):
+    if nom.startswith("Nan_"):
+        bpy.data.objects.remove(bpy.data.objects[nom], do_unlink=True)
+        esborrats.append(nom)
+print("Esborrats: %s" % esborrats)
+```
 - MODIFICADORS (bevel + subdivision en un objecte JA creat):
 ```python
 import bpy
@@ -900,6 +979,105 @@ if "Bevel" not in ob.modifiers:
     ob.modifiers["Subsurf"].levels = 2
 print("Aplicats modificadors a NoOrbit_Cub")
 ```
+- FIGURA COMPLEXA DE VARIES PECES (nan de jardí, personatge, objecte que
+demani més d'una forma) — SEMPRE així: MOLTES primitives (una per cada
+peça, cada una amb la seva ubicació/escala/rotació i el seu material),
+apartades dels objectes existents (p. ex. X = 3.0), alineades entre sí
+(mateix eix X, base al terra z=0), i al final selecciona-les i apunta la
+vista amb view3d.view_selected + ombrejat MATERIAL per veure'n els colors.
+```python
+import bpy
+def nanmat(n, c, rough=0.6):
+    m = bpy.data.materials.new(n); m.use_nodes = True
+    b = next(nd for nd in m.node_tree.nodes if nd.type == "BSDF_PRINCIPLED")
+    b.inputs["Base Color"].default_value = (*c, 1.0)
+    b.inputs["Roughness"].default_value = rough
+    return m
+M_ROG = nanmat("Nan_Vermell", (0.80, 0.05, 0.03))
+M_PELL = nanmat("Nan_Pell", (0.90, 0.70, 0.58))
+M_BARBA = nanmat("Nan_Barba", (0.95, 0.95, 0.92), rough=0.85)
+M_BOTA = nanmat("Nan_Bota", (0.28, 0.18, 0.10))
+M_ULL = nanmat("Nan_Ull", (0.02, 0.02, 0.02), rough=0.3)
+X = 3.0
+def nanpeça(nom, add, loc, scale=(1,1,1), rot=(0,0,0), material=None):
+    add(); ob = bpy.context.view_layer.objects.active; ob.name = nom
+    ob.location = loc; ob.rotation_euler = rot; ob.scale = scale
+    if material:
+        ob.data.materials.clear(); ob.data.materials.append(material)
+    return ob
+nomop = {  # NOM → (operador bpy.ops.mesh, lloc, escala, rotació, material)
+  "Peu_Esq": (lambda: bpy.ops.mesh.primitive_uv_sphere_add(radius=0.18), (X-0.18,0,0.12), (1.4,1.0,0.65), (0,0,0), M_BOTA),
+  "Peu_Dte": (lambda: bpy.ops.mesh.primitive_uv_sphere_add(radius=0.18), (X+0.18,0,0.12), (1.4,1.0,0.65), (0,0,0), M_BOTA),
+  "Cos": (lambda: bpy.ops.mesh.primitive_cone_add(radius1=0.58, radius2=0.36, depth=1.05, vertices=32), (X,0,0.66), (1,1,1), (0,0,0), M_ROG),
+  "Cinto": (lambda: bpy.ops.mesh.primitive_cylinder_add(radius=0.53, depth=0.09, vertices=32), (X,0,0.34), (1,1,1), (0,0,0), M_ROG),
+  "Brac_Esq": (lambda: bpy.ops.mesh.primitive_uv_sphere_add(radius=0.12), (X-0.55,0,0.83), (1.9,1.0,1.1), (0,-1.15,0), M_ROG),
+  "Brac_Dte": (lambda: bpy.ops.mesh.primitive_uv_sphere_add(radius=0.12), (X+0.55,0,0.83), (1.9,1.0,1.1), (0,1.15,0), M_ROG),
+  "Cap": (lambda: bpy.ops.mesh.primitive_uv_sphere_add(radius=0.28), (X,0,1.42), (1,1,1), (0,0,0), M_PELL),
+  "Barba": (lambda: bpy.ops.mesh.primitive_uv_sphere_add(radius=0.28), (X,-0.13,1.18), (0.75,0.55,0.95), (0,0,0), M_BARBA),
+  "Nas": (lambda: bpy.ops.mesh.primitive_uv_sphere_add(radius=0.07), (X,-0.29,1.33), (1,1,1), (0,0,0), M_PELL),
+  "Ull_Esq": (lambda: bpy.ops.mesh.primitive_uv_sphere_add(radius=0.028), (X-0.09,-0.25,1.47), (1,1,1), (0,0,0), M_ULL),
+  "Ull_Dte": (lambda: bpy.ops.mesh.primitive_uv_sphere_add(radius=0.028), (X+0.09,-0.25,1.47), (1,1,1), (0,0,0), M_ULL),
+  "Gorra": (lambda: bpy.ops.mesh.primitive_cone_add(radius1=0.30, radius2=0.02, depth=0.80, vertices=32), (X,0.02,1.78), (1,1,1), (0.16,0,0), M_ROG),
+}
+for nom, (op, loc, sc, rot, mat) in nomop.items():
+    nanpeça("Nan_" + nom, op, loc, sc, rot, mat)
+bpy.ops.object.select_all(action="DESELECT")
+for o in bpy.data.objects:
+    if o.name.startswith("Nan_"):
+        o.select_set(True)
+bpy.context.view_layer.objects.active = bpy.data.objects["Nan_Cos"]
+for area in bpy.context.screen.areas:
+    if area.type == "VIEW_3D":
+        region = next(r for r in area.regions if r.type == "WINDOW")
+        with bpy.context.temp_override(area=area, region=region):
+            bpy.ops.view3d.view_selected()
+            bpy.context.space_data.shading.type = "MATERIAL"
+print("Nan de jardí creat amb %d peces" % len(nomop))
+```
+- ANIMAR I FER UN VÍDEO 3D (quan l'usuari demani vídeo, animació o pel·lícula
+de la seva escena): 1) anima amb KEYFRAMES les peces de la figura (EL GRUP
+sencer, no una peça sola), 2) ajusta l'escena (frame_start/frame_end, fps,
+resolució 960x540 perquè el render sigui ràpid) i la càmera mirant l'acció
+(si no hi ha càmera: bpy.ops.object.camera_add + scene.camera), 3) desa una
+CÒPIA del fitxer (bpy.ops.wm.save_as_mainfile(filepath=ruta, copy=True)) i
+4) acaba amb print("NOORBIT_VIDEO_OK:<ruta.blend>") — NO cridis mai
+bpy.ops.render.render(animation=True) dins l'editor: bloquejaria Blender.
+NoOrbit mira el marcador i renderitza el vídeo ELL SOL (headless) i et
+retornarà la ruta del .mp4 en un missatge nou (feina feta).
+```python
+import bpy, math
+sc = bpy.context.scene
+sc.frame_start = 1; sc.frame_end = 96; sc.render.fps = 24
+peces = [o for o in bpy.data.objects if o.name.startswith("Nan_")]
+# Gira el grup complet una volta sencera entre frame 1 i 96:
+for ob in peces:
+    ob.keyframe_insert(data_path="location", frame=1)
+    ob.keyframe_insert(data_path="rotation_euler", frame=1)
+    ob.rotation_euler = (0.0, 0.0, math.radians(360))
+    ob.keyframe_insert(data_path="rotation_euler", frame=96)
+sc.render.resolution_x = 960; sc.render.resolution_y = 540
+sc.render.image_settings.file_format = 'FFMPEG'
+sc.render.ffmpeg.format = 'MPEG4'
+if sc.camera is None:
+    bpy.ops.object.camera_add(location=(4.5, -5.5, 3.2),
+        rotation=(1.15, 0.0, 0.75))
+    sc.camera = bpy.context.view_layer.objects.active
+bpy.ops.wm.save_as_mainfile(filepath="/tmp/noorbit_video.blend", copy=True)
+print("NOORBIT_VIDEO_OK:/tmp/noorbit_video.blend")
+```
+REGLS DE FIGURES (fonts principals d'error):
+- Primitius DISPONIBLES (Blender 4.x): primitive_uv_sphere_add,
+  primitive_cone_add, primitive_cylinder_add, primitive_torus_add,
+  primitive_plane_add, primitive_cube_add, primitive_circle_add,
+  primitive_grid_add. ⚠️ primitive_capsule_add NO sempre existeix: no la
+  fagis servir (usa uv_sphere, escalem (1.9,1,1) per braços o pals).
+- Materials: agafa el node BSDF per TIPUS (nd.type == "BSDF_PRINCIPLED"),
+  MAI per nom (el node «Principled BSDF» pot no existir).
+- Si demanen un personatge/objecte real, MAI lliuris una única primitiva:
+  «una esfera sobre un con» NO és un nan. Compon peça a peça (barba, gorra,
+  nas, botes…) i no diguis que està acabat sense les peces i la vista.
+- Al final, SEMPRE: selecciona les peces, view3d.view_selected i
+  shading.type = "MATERIAL", perquè l'usuari vegi el color real.
 REGLS PER QUE NO FALLI (errors típics a Blender):
 - Després de crear un objecte amb un operator, NO depengues de bpy.context.active_object;
   agafa'l amb ob = bpy.context.view_layer.objects.active o crea'l amb bpy.data.objects.new +
@@ -992,6 +1170,15 @@ demanar i ho aplicaré.",
         progress(app, "ia", "La IA està escrivint l'script per a Blender…", true);
         let reply = ai.chat(prompt, Some(system)).await?;
         let code = Self::extract_code(&reply);
+        // Guarda: si la IA no ha generat codi Python (resposta en prosa,
+        // sense bloc ```python), no ho executem — evita el SyntaxError a Blender.
+        if let Err(e) = crate::blender::guard_python(&code) {
+            progress(app, "blender", "La IA no ha generat codi Python", false);
+            return Ok((
+                format!("❓ No puc aplicar a Blender: {}\n\nResposta de la IA:\n{}", e, reply.trim()),
+                false,
+            ));
+        }
         progress(app, "ia", "Script generat", true);
         // L'execució és blocant (socket): va al thread blocking.
         progress(app, "blender", "Executant l'script a Blender…", true);
@@ -1023,12 +1210,10 @@ demanar i ho aplicaré.",
                 .unwrap_or(None);
                 progress(app, "blender", "Canvis aplicats a Blender", true);
                 let delta = Self::count_delta(before, after);
-                Ok((
-                    format!("✅ Blender: canvis aplicats.\n\n{}{}", stdout, delta)
-                        .trim_end()
-                        .to_string(),
-                    true,
-                ))
+                let base = format!("✅ Blender: canvis aplicats.\n\n{}{}", stdout, delta)
+                    .trim_end()
+                    .to_string();
+                Ok((Self::maybe_render_video(app, &stdout, base).await, true))
             }
             Err(e) => {
                 progress(app, "blender", "L'script ha fallat; la IA el corregeix…", false);
@@ -1039,6 +1224,16 @@ demanar i ho aplicaré.",
                 );
                 let reply2 = ai.chat(&retry_prompt, Some(system)).await?;
                 let code2 = Self::extract_code(&reply2);
+                if let Err(e) = crate::blender::guard_python(&code2) {
+                    progress(app, "blender", "El 2n intent tampoc és codi Python", false);
+                    return Ok((
+                        format!(
+                            "❓ El 2n intent tampoc ha generat codi Python: {}",
+                            e
+                        ),
+                        false,
+                    ));
+                }
                 let code2_for_msg = code2.clone();
                 let out2 = tauri::async_runtime::spawn_blocking(move || {
                     crate::blender::BlenderSocketClient::new(crate::blender::DEFAULT_SOCKET_PORT)
@@ -1060,15 +1255,13 @@ demanar i ho aplicaré.",
                         .unwrap_or(None);
                         progress(app, "blender", "Canvis aplicats (2n intent)", true);
                         let delta = Self::count_delta(before, after);
-                        Ok((
-                            format!(
-                                "✅ Blender (2n intent): canvis aplicats.\n\n{}{}",
-                                stdout, delta
-                            )
-                            .trim_end()
-                            .to_string(),
-                            true,
-                        ))
+                        let base = format!(
+                            "✅ Blender (2n intent): canvis aplicats.\n\n{}{}",
+                            stdout, delta
+                        )
+                        .trim_end()
+                        .to_string();
+                        Ok((Self::maybe_render_video(app, &stdout, base).await, true))
                     }
                     Err(e2) => {
                         progress(app, "blender", "Blender ha fallat", false);

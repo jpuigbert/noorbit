@@ -1,10 +1,72 @@
 import { useEffect, useState } from "react";
-import { Loader2, Plus, Trash2, Pencil, Users, X, Square } from "lucide-react";
+import { Loader2, Plus, Trash2, Pencil, Users, X, Square, MessagesSquare } from "lucide-react";
 import { useT } from "../../i18n";
-import { useExpertStore, type ExpertInput } from "../../stores/expertStore";
+import { useExpertStore, type Expert, type ExpertInput } from "../../stores/expertStore";
 import { useAIStore } from "../../stores/aiStore";
+import { useAgentStore } from "../../stores/agentStore";
+import { usePreviewStore } from "../../stores/previewStore";
+import { ChatMarkdown } from "../Agent/ChatMarkdown";
 
 const EMPTY: ExpertInput = { name: "", role: "", systemPrompt: "", model: null };
+
+/// La miniaturà del mini-chat d'un especialista: sessió «team:<id>», el
+/// mateix format del xat principal (ChatMarkdown), passos al sobre i bom.
+function ExpertLiveCard({ expert }: { expert: Expert }) {
+  const { t } = useT();
+  const sid = `team:${expert.id}`;
+  const sess = useAgentStore((s) => s.sessions.find((x) => x.id === sid));
+  const steps = useExpertStore((s) => s.teamProgress.filter((p) => p.expert === expert.name));
+  const lastStep = steps[steps.length - 1];
+  const teamRunning = useExpertStore((s) => s.teamRunning);
+
+  const openInChat = () => {
+    const a = useAgentStore.getState();
+    a.ensureChat(sid, t("experts.liveTitle").replace("{name}", expert.name));
+    a.setActive(sid);
+    usePreviewStore.getState().setAgentSub("chat");
+  };
+
+  // El que mostrarem: els ÚLTIMS 2 torns del fil + el que s'està escrivint
+  // ara (stream, quan la IA encara treballa).
+  const visible = sess?.messages.slice(-2) ?? [];
+  const streaming = (sess?.stream?.length ?? 0) > 0;
+  return (
+    <div className="ex-live-card">
+      <div className="ex-live-head">
+        <span className="ex-live-name">
+          {expert.name}
+          {teamRunning && streaming && (
+            <Loader2 size={11} className="spin" style={{ marginLeft: 6, verticalAlign: -1 }} />
+          )}
+        </span>
+        <span className="ex-live-status" title={lastStep?.detail}>
+          {lastStep ? lastStep.detail : "—"}
+        </span>
+        <button
+          className="icon-btn"
+          title={t("experts.openChat")}
+          onClick={openInChat}
+        >
+          <MessagesSquare size={12} />
+        </button>
+      </div>
+      {(visible.length > 0 || streaming) && (
+        <div className="ex-live-body">
+          {visible.map((m) => (
+            <div key={String(m.at)} className="ex-live-msg" data-role={m.role}>
+              <ChatMarkdown text={m.text} />
+            </div>
+          ))}
+          {streaming && (
+            <div className="ex-live-msg" data-role="assistant">
+              <ChatMarkdown text={sess!.stream!} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /// Panell d'especialistes: l'usuari crea agents d'IA amb rol i model propis,
 /// i pot fer-los treballar junts en paral·lel (treball múltiple).
@@ -228,6 +290,20 @@ export default function ExpertsPanel() {
               .map((id) => s.experts.find((e) => e.id === id)?.name)
               .filter(Boolean)
               .join(", ")}
+          </div>
+        )}
+
+        {/* EN DIRECTE: el que cada especialista està escrivint ara mateix,
+            amb el mateix format del xat principal (sessió «team:<id>»).
+            Es veu mentre corre l'equip i fins que es tanca el panell. */}
+        {(s.teamRunning || s.teamProgress.length > 0) && (
+          <div className="ex-live">
+            {[...(picked.length > 0 ? picked : s.experts.map((e) => e.id))]
+              .map((id) => s.experts.find((e) => e.id === id))
+              .filter((e): e is Expert => Boolean(e))
+              .map((e) => (
+                <ExpertLiveCard key={e.id} expert={e} />
+              ))}
           </div>
         )}
 

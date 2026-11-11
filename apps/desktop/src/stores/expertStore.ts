@@ -158,8 +158,25 @@ export const useExpertStore = create<ExpertState>((set, get) => ({
 
   /// Treball múltiple: l'equip reparteix l'objectiu i treballa (en sèrie si
   /// el model és local, per estalviar RAM; en paral·lel si és al núvol).
+  /// ABANS de llançar-ho, garantim un xat PROPI per a cada especialista
+  /// («team:<id>», amb el mateix id que fa servir el backend): el flux de
+  /// «ai://chunk» s'acumula a eixe xat i l'usuari veu EN DIRECTE el que
+  /// escriu cada especialista, amb el mateix format del xat principal.
   runTeam: async (goal, expertIds, opts) => {
     if (!goal.trim()) return;
+    const agent = (await import("./agentStore").then((m) => m.useAgentStore)).getState();
+    agent.ensureChat("team:plan", "Equip · planificació");
+    for (const id of expertIds) {
+      const e = get().experts.find((x) => x.id === id);
+      agent.ensureChat(`team:${id}`, e ? `Especialista · ${e.name}` : `Especialista ${id}`);
+    }
+    agent.ensureChat("team:final", "Equip · resposta final");
+    // Neteja els streams anteriors: sense eixò el text de runs previs es
+    // quedaria acumulat a cada xat d'especialista (el backend condueix
+    // eixes sessions i ningú més fa el «finalize» del xat principal).
+    agent.clearStream("team:plan");
+    agent.clearStream("team:final");
+    for (const id of expertIds) agent.clearStream(`team:${id}`);
     set({
       teamRunning: true,
       teamProgress: [],
