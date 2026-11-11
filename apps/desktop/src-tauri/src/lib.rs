@@ -340,6 +340,7 @@ pub fn run() {
             commands::agent::agent_status,
             commands::agent::agent_stop,
             commands::agent::agent_apply_blender,
+            commands::agent::agent_compact_context,
             commands::agent::agent_apply_unreal,
             commands::agent::agent_deep_think,
             commands::agent::agent_forge,

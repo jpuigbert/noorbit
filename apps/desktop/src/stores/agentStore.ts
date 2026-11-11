@@ -267,7 +267,7 @@ function toErrorText(e: unknown): string {
   if (isOOM(e))
     return "Memòria insuficient: el model és massa gran per a aquest ordinador. NoOrbit ho ha tornat a provar amb MENYS context i ha continuat fallant. Prova un model més lleuger (p. ex. :3b o quantitzat q4).";
   if (isBodyCut(e))
-    return "La memòria no ha abastat tot el context i la resposta s'ha tallat. NoOrbit ho ha reintentat AUTOMÀTICAMENT amb context REDUÏT → SENSE codi → SENSE historial, i ha tornat a fallar. Desactiva «Inclou el codi» o usa un model més lleuger.";
+    return "La memòria no ha abastat tot el context i la resposta s'ha tallat. NoOrbit ho ha reintentat AUTOMÀTICAMENT alliberant RAM i COMPACTANT el context (resum dens que conserva l'objectiu, el pla i l'esquelet del codi) → sense codi → sense historial, i ha tornat a fallar. Desactiva «Inclou el codi» o usa un model més lleuger.";
   return String(e);
 }
 
@@ -1778,7 +1778,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
             label: "memòria",
             detail:
               level === 1
-                ? "⚠️ El context era massa gran: reintentant amb context REDUÏT (≈ 1.500 caràcters)…"
+                ? "⚠️ El context era massa gran: ALLIBERANT RAM i COMPACTANT la conversa (resum dens que conserva l'objectiu, el pla i l'esquelet del codi) perquè la IA CONTINUI programant a trossos…"
                 : level === 2
                 ? "⚠️ Continua sense prou memòria: reintentant SENSE adjuntar el codi del projecte…"
                 : "⚠️ Últim recurs: reintentant amb NOMÉS el fil bàsic de la conversa (últims torns retallats)…",
@@ -1798,13 +1798,13 @@ export const useAgentStore = create<AgentState>((set, get) => {
   };
 
   /// Nota que s'afegeix al resultat quan la resposta ha vingut amb el context
-  /// REDUÏT: sense ella, l'usuari no sabia per què la IA «no recordava» el
+  /// COMPACTAT: sense ella, l'usuari no sabia per què la IA «no recordava» el
   /// que estaven fent (sobretot en CANVIAR de IA i pujar el context).
   const oomNote = (level: number): string =>
     level >= 3
       ? "\n\n⚠️ La IA ha anat justa de memòria i ha respost amb NOMÉS el fil bàsic de la conversa. Si ha perdut el detall, digues-li «repren el pla anterior»."
       : level > 0
-      ? "\n\n⚠️ La IA ha anat justa de memòria: ha respost amb el context reduït. Si nota que ha perdut el fil, digues-li «repren el pla anterior»."
+      ? "\n\n⚠️ La IA ha anat justa de memòria: ha respost amb el context COMPACTAT (un resum dens que conserva l'objectiu, el pla i l'esquelet del codi — no és una retallada). Si nota que ha perdut algun detall, digues-li «repren el pla anterior»."
       : "";
 
   return {
@@ -2110,7 +2110,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
         // «ai://chunk» (gestiona «appendStream»); aquí només cal l'escriptura
         // DEFINITIVA un cop acabat el text (netega blocs sense tancar).
         // Si l'intent falla per OOM/tall de context, NOORBIT reintenta
-        // AUTOMÀTICAMENT: context REDUÏT → sense context → sense històrial.
+        // AUTOMÀTICAMENT: alliberar RAM + context COMPACTAT → sense context → sense històrial.
         const quickStart =
           (sessOf(sid)?.provider ?? "").toLowerCase() === "" ||
           (sessOf(sid)?.provider ?? "").toLowerCase() === "ollama"
@@ -2998,14 +2998,15 @@ export const useAgentStore = create<AgentState>((set, get) => {
       if (taskCtx) sys = taskCtx + sys;
 
       // Millora de consum de memòria/tokens: si el proveïdor és local i el
-      // context (amb codi del projecte) és gran, COMMENÇA amb context REDUÏT
+      // context (amb codi del projecte) és gran, COMMENÇA amb el context COMPACTAT
       // per això no esperar al primer intent que falli per OOM.
       const sendStart = (() => {
         const sp = sessOf(sid);
         const prov = (sp?.provider ?? "").toLowerCase();
         const local = prov === "" || prov === "ollama";
         // Context adjunt actiu (l'usuari va activar «inclou el codi») →
-        // per a models locals COMMENÇA amb context REDUÏT per ahorrar RAM.
+        // per a models locals COMMENÇA amb el context COMPACTAT (alliberant RAM) per
+        // ahorrar memòria sense perdre l'esperit del programa.
         const bigCtx = sess.includeContext ?? false;
         return local && bigCtx ? 1 : 0;
       })();
@@ -3016,7 +3017,25 @@ export const useAgentStore = create<AgentState>((set, get) => {
         if (level === 0) return { m: msg, h: history, s: sys };
         const sysBase = platformPreamble ? platformPreamble + CONTEXT_SYSTEM : (sess.includeContext ? CONTEXT_SYSTEM : MEMORY_SYSTEM);
         if (level === 1) {
-          // Context REDUÏT: limitem a ≈ 1.500 caràcters.
+          // Context COMPACTAT (no reduït): el backend condensa el fil en un
+          // «fitxer de memòria» DENS que conserva l'objectiu, el pla,
+          // l'esquelet del codi, les rutes i les tasques — i mana la IA
+          // CONTINUAR la feina a trossos en lloc de començar de zero.
+          // Abans, si la RAM no donava, es retallava tot a ~1.500 caràcters i
+          // la IA perdia el fil del programa.
+          try {
+            // 1) Alliberem RAM: descarreguem els models que Ollama té carregats.
+            await invoke<number>("ollama_unload_models", { model: null }).catch(() => 0);
+          } catch {
+            /* sense permís/servei: es continua igual */
+          }
+          const memoria = await invoke<string>("agent_compact_context", {
+            input: { history, task: text },
+          }).catch(() => "");
+          if (memoria) {
+            return { m: memoria, h: [], s: withTasks(sysBase) };
+          }
+          // Si la compactació no és possible, es fa el que es podia: reduït.
           const small = sess.includeContext ? await get().buildContext(sid, 1500, text) : "";
           const m = small ? `${small}\n\n---\nPREGUNTA / TASCA:\n${text}` : text;
           return { m, h: history, s: withTasks(sysBase) };

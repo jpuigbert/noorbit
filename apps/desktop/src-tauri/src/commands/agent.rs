@@ -20,6 +20,25 @@ pub struct AgentRunInput {
     pub session: Option<String>,
 }
 
+/// Compacta el fil d'un xat + la tasca en un «fitxer de memòria» DENS: es
+/// conserva l'objectiu, el pla, l'esquelet del codi, les rutes i les tasques,
+/// de manera que la IA CONTINUI programant en lloc de perdre el fil quan la
+/// memòria no dona per tot el context.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactInput {
+    /// Fil del xat (rol + contingut).
+    #[serde(default)]
+    pub history: Vec<crate::ai::HistoryTurn>,
+    /// Tasca actual de l'usuari.
+    #[serde(default)]
+    pub task: String,
+}
+
+#[command]
+pub async fn agent_compact_context(input: CompactInput) -> Result<String, String> {
+    Ok(crate::ai::compact::dense_compact(&input.history, &input.task))
+}
+
 #[command]
 pub async fn agent_check_backends(
     state: State<'_, AgentState>,

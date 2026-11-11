@@ -3,6 +3,9 @@
 use crate::api::{self, ApiManager};
 use crate::config::AppConfig;
 use crate::external_orchestrator::OrchestratorAgent;
+
+/// Compactació Densa del context (resum que conserva l'esperit del programa).
+pub mod compact;
 use anyhow::{anyhow, Result};
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
@@ -2105,6 +2108,17 @@ impl AiManager {
         Ok(names.len())
     }
 
+    /// ALLIBERA RAM quan la memòria no dona: descarrega els models que Ollama
+    /// té a la RAM (i deixa el servei engegat, buit). Retorna quants n'ha
+    /// alliberat. La IA torna a carregar el que li cal quan fa la petició
+    /// següent: és més lent, però evita que l'agent es quedi aturat.
+    pub async fn free_ram(&self) -> usize {
+        match self.unload_models(None).await {
+            Ok(n) => n,
+            Err(_) => 0,
+        }
+    }
+
     /// Defineix quant de temps Ollama manté els models a la RAM.
     /// Buit = valor per defecte d'Ollama.
     pub async fn set_keep_alive(&self, value: Option<String>) {
@@ -2640,18 +2654,22 @@ impl AiManager {
         ctl.begin().await;
         let provider = self.effective_provider(&ctl).await;
         let mut result = self.chat_inner(prompt, system, &ctl, &provider, opts).await;
-        // Memòria exhaurida a mitja resposta: comprimim el context i tornem-hi
-        // UNA vegada, per a poder continuar treballant en lloc de fallar.
+        // Memòria exhaurida a mitja resposta: ATUREM, ALLIBEREM RAM i
+        // CONDENSEM el context (no el retallem: així es conserva l'esperit del
+        // programa); la IA CONTINUA la feina a trossos en lloc de començar de
+        // zero o de quedar-se penjada.
         if let Err(e) = &result {
             if e.to_string() != CANCELLED_MSG && is_body_cut(&e.to_string()) {
-                let compacted = compact_prompt(prompt);
-                if compacted != prompt {
-                    let light = ChatOpts {
-                        history: compact_history(&opts.history),
-                        ..opts.clone()
-                    };
-                    result = self.chat_inner(&compacted, system, &ctl, &provider, &light).await;
-                }
+                // RAM: alliberem els models que Ollama té carregats.
+                self.free_ram().await;
+                let task = compact::extract_task(prompt);
+                let memoria = compact::dense_compact(&opts.history, &task);
+                let light = ChatOpts {
+                    // El fil ja és DINS de la memòria: no l'enviem dues vegades.
+                    history: Vec::new(),
+                    ..opts.clone()
+                };
+                result = self.chat_inner(&memoria, system, &ctl, &provider, &light).await;
             }
         }
         match result {
@@ -2752,32 +2770,40 @@ impl AiManager {
         }
 
         // Ollama (local): intent normal amb el prompt sencer; si la connexió es
-        // talla per manca de memòria, segon intent amb el context COMPRIMIT,
-        // perquè l'agent puga seguir treballant en lloc de rendir-se.
+        // talla per manca de memòria, segon intent amb el context CONDENSAT,
+        // perquè l'agent pugui SEGUIR PROGRAMANT en lloc de rendir-se.
         let mut res = self.ollama_stream(app, prompt, system, &ctl, opts, &start).await;
         if let Err(e) = &res {
             if e.to_string() != CANCELLED_MSG && is_body_cut(&e.to_string()) {
-                let compacted = compact_prompt(prompt);
-                if compacted != prompt {
-                    // El visor ha de continuar mostrant el model REAL: posar-hi
-                    // «noorbit» com a etiqueta confonia l'usuari.
-                    let (_, m) = self.session_labels(&ctl.id).await;
-                    ctl.process(
-                        app,
-                        "ollama",
-                        &m,
-                        "thinking",
-                        "La memòria no abastava tot el context: el comprimeix i ho torna a provar.",
-                        start.elapsed().as_millis() as u64,
-                    );
-                    let light = ChatOpts {
-                        history: compact_history(&opts.history),
-                        ..opts.clone()
-                    };
-                    res = self
-                        .ollama_stream(app, &compacted, system, &ctl, &light, &start)
-                        .await;
-                }
+                // RAM: ATUREM, ALLIBEREM la memòria dels models d'Ollama i
+                // després CONTINUEM amb el context condensat.
+                let alliberats = self.free_ram().await;
+                let task = compact::extract_task(prompt);
+                let memoria = compact::dense_compact(&opts.history, &task);
+                // El visor ha de continuar mostrant el model REAL: posar-hi
+                // «noorbit» com a etiqueta confonia l'usuari.
+                let (_, m) = self.session_labels(&ctl.id).await;
+                ctl.process(
+                    app,
+                    "ollama",
+                    &m,
+                    "thinking",
+                    &format!(
+                        "La memòria no donava per tot el context: he ALLIBERAT RAM ({} \
+                         model(s) descarregats de la memòria) i CONDENSO el context \
+                         (conservo l'objectiu, el pla i l'esquelet del codi). La IA \
+                         CONTINUA la feina a trossos.",
+                        alliberats
+                    ),
+                    start.elapsed().as_millis() as u64,
+                );
+                let light = ChatOpts {
+                    history: Vec::new(),
+                    ..opts.clone()
+                };
+                res = self
+                    .ollama_stream(app, &memoria, system, &ctl, &light, &start)
+                    .await;
             }
         }
         match res {
