@@ -185,7 +185,7 @@ per copiar-la a la resposta final.";
 fn asks_for_code(prompt: &str) -> bool {
     use regex::Regex;
     let action = Regex::new(
-        r"(?i)\b(crea|crear|fes|fes-me|implementa|implementar|afegeix|afegir|modifica|modificar|corregeix|corregir|arregla|arreglar|refactoritza|refactoritzar|escriu|escriure|genera|generar|completa|completar|desenvolupa|desenvolupar|programa|programar|monta|muntar|migra|migrar)\b",
+        r"(?i)\b(crea|crear|fes|fes-me|implementa|implementar|afegeix|afegir|modifica|modificar|corregeix|corregir|arregla|arreglar|refactoritza|refactoritzar|escriu|escriure|genera|generar|completa|completar|desenvolupa|desenvolupar|programa|programar|monta|muntar|migra|migrar|necessito|necessitem|vull|volem|cal|calen)\b",
     )
     .map(|r| r.is_match(prompt))
     .unwrap_or(false);
@@ -304,10 +304,16 @@ async fn chat_with_tools(
     // qualsevol IA: la local, les remotes, els especialistes) entren al
     // system prompt: la IA sap el que l'usuari ja li ha ensenyat i no
     // torna a preguntar-ho. Tot local — cap servei al núvol hi participa.
+    //
+    // Les lliçons es trien segons la PREGUNTA real de l'usuari (no el prompt
+    // sencer, que pot durar milers de caràcters de codi i faria que tot
+    // coincidís amb alguna cosa).
+    let user_question = extract_question(prompt, question);
     let learn_cfg = { cfg.read().await.learning.clone() };
     let learning_on = learn_cfg.enabled;
     let lessons_block = if learning_on && learn_cfg.inject {
-        learning.context_for(prompt, 5)
+        let q = user_question.clone().unwrap_or_else(|| prompt.to_string());
+        learning.context_for(&q, 5)
     } else {
         String::new()
     };
@@ -371,6 +377,25 @@ async fn chat_with_tools(
                 current = EXEC_NUDGE.to_string();
                 continue;
             }
+            // I si l'usuari ha demanat PROVES i la resposta només les explica
+            // (cap «@file:»)? És el cas «fes els tests»: la prova ha d'existir
+            // com a fitxer real, no com a prosa. Va ABANS del recordatori de
+            // «projecte sencer» perquè «fes els tests del projecte» no acabe
+            // generant tot el projecte en lloc de les proves. UNA vegada.
+            if round < MAX_ROUNDS
+                && !tests_nudged
+                && asks_for_code(prompt)
+                && asks_for_tests(prompt)
+                && !has_file_blocks(&text)
+            {
+                tests_nudged = true;
+                opts.history.push(HistoryTurn {
+                    role: "assistant".into(),
+                    content: text.clone(),
+                });
+                current = TESTS_NUDGE.to_string();
+                continue;
+            }
             // I si ha annunciat fitxers amb «@file:» i els ha deixat BUITS
             // (el model menut crea l'arxiu i promet el codi «després»)? Un
             // recordatori, UNA vegada: que reemetja cada fitxer COMPLET.
@@ -398,23 +423,6 @@ async fn chat_with_tools(
                     current = PROJECT_NUDGE.to_string();
                     continue;
                 }
-            }
-            // I si l'usuari ha demanat PROVES i la resposta només les explica
-            // (cap «@file:»)? És el cas «fes els tests»: la prova ha d'existir
-            // com a fitxer real, no com a prosa. Un recordatori UNA vegada.
-            if round < MAX_ROUNDS
-                && !tests_nudged
-                && asks_for_code(prompt)
-                && asks_for_tests(prompt)
-                && !has_file_blocks(&text)
-            {
-                tests_nudged = true;
-                opts.history.push(HistoryTurn {
-                    role: "assistant".into(),
-                    content: text.clone(),
-                });
-                current = TESTS_NUDGE.to_string();
-                continue;
             }
             // I si l'usuari ha demanat FER codi (implementar, crear, modificar,
             // arreglar…) i la resposta no té ni fitxers ni cap bloc de codi?
@@ -490,7 +498,7 @@ async fn chat_with_tools(
     // local: serviran per destil·lar lliçons (en segon pla) i per exportar
     // un dataset per entrenar un model local (LoRA) més endavant.
     if learning_on {
-        if let Some(q) = extract_question(prompt, question) {
+        if let Some(q) = user_question {
             let (provider, model) = ai.session_labels(sid).await;
             learning.record(&q, &text, &provider, &model);
             // Destil·lació en segon pla: l'IA aprén sola, el xat NO espera.
@@ -508,7 +516,7 @@ async fn chat_with_tools(
 /// La pregunta «real» de l'usuari dins del prompt enviat. El frontend la
 /// passa explícitament; si no, es treu del final del prompt (on el frontend
 /// posa «PREGUNTA / TASCA:»).
-fn extract_question(prompt: &str, question: Option<&str>) -> Option<String> {
+pub fn extract_question(prompt: &str, question: Option<&str>) -> Option<String> {
     if let Some(q) = question {
         let t = q.trim();
         if !t.is_empty() {

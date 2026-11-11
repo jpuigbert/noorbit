@@ -3,6 +3,21 @@
 Totes les releases amb els seus binaris: <https://github.com/jpuigbert/noorbit/releases>.
 Les notes completes de cada release són a la pàgina del release corresponent.
 
+## 0.71.5-alpha (2026-11-11)
+
+**APRENENATGE LOCAL — la IA que aprèn de les altres IA (en segon pla)**
+
+- Pestanya nova a l'Agent: «Aprenentatge». Un interruptor engega l'observació de les converses i la injecció de les lliçons.
+- NoOrbit registra cada torn (pregunta + resposta + proveïdor/model) de TOTES les IAs: la local d'Ollama, les remotes amb token, els especialistes i les IAs web. El registre viu a la carpeta de dades (`learning.json`), mai al repositori.
+- Destil·lació en segon pla: el model LOCAL (Ollama) llegeix les converses pendents i en treu lliçons curtes (preferències, decisions, fets del projecte); si no hi ha cap model en marxa, una heurística detecta les preferències del text i l'aprenentatge funciona igual.
+- Les lliçons que apliquen a la teva pregunta s'injecten al system prompt: la IA local sap el que ja li has ensenyat. Les preferències apliquen sempre; la resta, per coincidència de paraules.
+- Destil·lació automàtica en segon pla (sessió «learning» aïllada: no barreja cancel·lació ni raonament amb el xat) i només quan l'usuari ja treballa amb el model local, per no carregar-lo a la RAM de cop. El xat NO espera.
+- «Exporta el dataset» genera un JSONL de totes les converses en format de xat: el material per entrenar un model local amb LoRA (LLaMA-Factory, Unsloth, Axolotl).
+- Tot local: cap dada surt de l'ordinador tret que l'usuari exporti el dataset. Desactivat per defecte (decisió de l'usuari) i esborrable sencer («Esborra tot»).
+- Altres 0.71.5: checklist de tasques amagable, `@doing:` (el que la IA té entre mans, en directe), `@edit:` (CERCA/NOU) aplicat també abans de `RUN|`, adjunt automàtic de fitxers al xat, errors d'escriptura explicats (permís / disc ple / només lectura), tancament net (`exit_app`), permisos `fs` per a fitxers binaris i recuperació del 404 amb model absent (descàrrega automàtica + reintent).
+
+---
+
 ## 0.71.4-alpha (2026-11-11)
 
 **Entorn auto-instal·lable + Unreal sempre connectat**

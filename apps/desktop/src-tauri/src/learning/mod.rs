@@ -28,10 +28,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 /// Intercanvis conservats al registre (els mésantics es descarten).
-pub const MAX_EXCHANGES: usize = 400;
+pub const MAX_EXCHANGES: usize = 250;
 /// Lliçons conservades (les més antigues es descarten).
 pub const MAX_LESSONS: usize = 200;
-/// Caràcters màxims d'una pregunta/ resposta desada al registre.
+/// Caràcters màxims d'una pregunta desada al registre.
+const MAX_QUESTION: usize = 1200;
+/// Caràcters màxims d'una resposta desada al registre (per entrenar, com més
+/// context millor, però el fitxer no ha de fer alguns megabytes).
 const MAX_TEXT: usize = 4000;
 /// Intercanvis pendents per destil·lar que fan disparar la destil·lació
 /// automàtica en segon pla.
@@ -122,7 +125,7 @@ impl LearningStore {
     pub fn record(&self, question: &str, answer: &str, provider: &str, model: &str) -> Exchange {
         let ex = Exchange {
             id: uuid::Uuid::new_v4().to_string(),
-            question: clip(question, MAX_TEXT),
+            question: clip(question, MAX_QUESTION),
             answer: clip(answer, MAX_TEXT),
             provider: provider.to_string(),
             model: model.to_string(),
@@ -291,7 +294,8 @@ impl LearningStore {
     /// preferències (que apliquen sempre).
     pub fn context_for(&self, query: &str, max: usize) -> String {
         let q: HashSet<String> = tokens(query).into_iter().collect();
-        let lessons = self.lessons();
+        let mut d = self.data.lock().unwrap();
+        let lessons = d.lessons.clone();
         if lessons.is_empty() {
             return String::new();
         }
@@ -327,12 +331,20 @@ impl LearningStore {
             return String::new();
         }
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        let escollides: Vec<&Lesson> = scored.iter().take(max.max(1)).map(|(_, l)| *l).collect();
+        // Marca les lliçons que han servit (es desen amb el proper registre:
+        // no fa falta escriure el fitxer aquí).
+        for l in &escollides {
+            if let Some(x) = d.lessons.iter_mut().find(|x| x.id == l.id) {
+                x.hits += 1;
+            }
+        }
         let mut out = String::from(
             "[APRENENATGE LOCAL] Lliçons que l'usuari ja t'ha ensenyat (o que has \
              après de les altres IAs). Tinge-les en compte: no tornis a preguntar \
              allò que ja saps, i aplica-les a la feina que toca.",
         );
-        for (_, l) in scored.iter().take(max.max(1)) {
+        for l in &escollides {
             let tags = if l.tags.is_empty() {
                 String::new()
             } else {
@@ -661,4 +673,133 @@ fn normalize_key(s: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ex(q: &str, a: &str) -> Exchange {
+        Exchange {
+            id: "x".into(),
+            question: q.into(),
+            answer: a.into(),
+            provider: "ollama".into(),
+            model: "qwen3:4b".into(),
+            at: 1,
+        }
+    }
+
+    #[test]
+    fn parses_the_lesson_format_of_the_distiller() {
+        let raw = "\
+LLIÇÓ | etiquetes: python, proves | L'usuari treballa amb pytest
+- LLIÇÓ | rust | El projecte està fet amb Rust i Tauri
+- El codi ha d'estar en català
+CAP
+";
+        let ls = parse_lessons(raw, "model local");
+        assert_eq!(ls.len(), 3);
+        assert_eq!(ls[0].text, "L'usuari treballa amb pytest");
+        assert_eq!(ls[0].tags, vec!["python", "proves"]);
+        assert_eq!(ls[1].text, "El projecte està fet amb Rust i Tauri");
+        assert_eq!(ls[1].tags, vec!["rust"]);
+        assert_eq!(ls[2].text, "El codi ha d'estar en català");
+    }
+
+    #[test]
+    fn heuristic_finds_preferences_without_any_model() {
+        let ls = heuristic_lessons(&[ex(
+            "Recorda que sempre treballo amb Rust i Tauri. Fes el login.",
+            "D'acord.",
+        )]);
+        assert!(!ls.is_empty());
+        assert!(ls[0].text.contains("sempre"));
+        assert!(ls[0].tags.contains(&"preferència".to_string()));
+    }
+
+    #[test]
+    fn context_only_injects_relevant_lessons() {
+        let dir = std::env::temp_dir().join(format!("noorbit-learning-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = LearningStore::new(dir.clone());
+        let mut a = Lesson {
+            id: "a".into(),
+            text: "El projecte està fet amb Rust i Tauri".into(),
+            tags: vec!["rust".into()],
+            source: "test".into(),
+            hits: 0,
+            at: 1,
+        };
+        let mut b = Lesson {
+            id: "b".into(),
+            text: "El postgresiu utilitza Postgres".into(),
+            tags: vec!["sql".into()],
+            source: "test".into(),
+            hits: 0,
+            at: 2,
+        };
+        a.at = 1;
+        b.at = 2;
+        store.add_lessons(vec![a, b], 10);
+        let ctx = store.context_for("fes el login amb Rust", 3);
+        assert!(ctx.contains("Rust i Tauri"));
+        assert!(!ctx.contains("Postgres"));
+        // Una consulta sense relació noinjecta soroll.
+        let ctx2 = store.context_for("quin temps fa a Oslo", 3);
+        assert!(ctx2.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn duplicate_lessons_are_not_stored_twice() {
+        let dir = std::env::temp_dir().join(format!("noorbit-learning-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = LearningStore::new(dir.clone());
+        let mk = |id: &str| Lesson {
+            id: id.into(),
+            text: "L'usuari treballa amb Rust".into(),
+            tags: vec![],
+            source: "test".into(),
+            hits: 0,
+            at: 1,
+        };
+        assert_eq!(store.add_lessons(vec![mk("a")], 10), 1);
+        assert_eq!(store.add_lessons(vec![mk("b")], 10), 0);
+        assert_eq!(store.lessons().len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// El cicle COMPLET sense cap IA: registre → lliçons (heurística) →
+    /// injecció al context. És el que fa que l'aprenentatge funcioni
+    /// encara que no tingui cap model instal·lat.
+    #[test]
+    fn full_cycle_without_any_model() {
+        let dir = std::env::temp_dir().join(format!("noorbit-learning-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = LearningStore::new(dir.clone());
+        store.record(
+            "Recorda que sempre treballo amb Rust i Tauri, no amb Python.",
+            "Entès, faré la feina amb Rust.",
+            "ollama",
+            "qwen3:4b",
+        );
+        assert_eq!(store.stats().exchanges, 1);
+        assert_eq!(store.pending().len(), 1);
+        // Destil·lació heurística (el que fa la reserva sense model).
+        let lessons = heuristic_lessons(&store.pending());
+        assert_eq!(store.add_lessons(lessons, 10), 1);
+        store.mark_distilled_upto(store.pending().last().unwrap().at);
+        assert!(store.pending().is_empty());
+        // La lliçó troba el seu lloc al context d'una pregunta relacionada.
+        let ctx = store.context_for("fes el projecte amb Rust", 3);
+        assert!(ctx.contains("APRENENATGE LOCAL"));
+        assert!(ctx.contains("Rust"));
+        // El registre es pot exportar per entrenar un model local.
+        let (path, n) = store.export_jsonl().unwrap();
+        assert_eq!(n, 1);
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("\"role\":\"user\"") && raw.contains("\"role\":\"assistant\""));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

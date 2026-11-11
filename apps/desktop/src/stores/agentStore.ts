@@ -975,6 +975,9 @@ async function applyDelegateDirectives(raw: string, sid: string): Promise<string
         system: CONSOLIDATION_SYSTEM,
         ...ia,
         history: hist,
+        // La pregunta REAL de l'usuari (per a l'aprenentatge local): el prompt
+        // aquí és una instrucció de consolidació, no el que ha demanat l'usuari.
+        question: originalUser,
       });
     } catch {
       consolidated = ""; // model incapaç de consolidar: ens quedem amb les solucions en brut
@@ -2141,6 +2144,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
             provider: s0.provider,
             model: s0.model,
             history: h,
+            // Pregunta real de l'usuari (aprenentatge local): «m» pot ser el
+            // context del projecte + la pregunta.
+            question: prompt,
           });
         }, quickStart);
         // Memòria: si s'ha hagut de RETALLAR el context, el resultat ho diu
@@ -2320,6 +2326,8 @@ export const useAgentStore = create<AgentState>((set, get) => {
             system: systemForPlatform,
             ...ia,
             session: sid,
+            // Pregunta real de l'usuari (aprenentatge local).
+            question: user,
           });
         });
         const raw = oomLevel.value;
@@ -2347,6 +2355,8 @@ export const useAgentStore = create<AgentState>((set, get) => {
             prompt: `${text}\n\nLlista NOMÉS les rutes relatives dels fitxers que cal crear, una per línia. Inclou sempre README.md.`,
             system: MANIFEST_SYSTEM,
             ...ia,
+            // Pregunta real de l'usuari (aprenentatge local).
+            question: text,
           });
           const paths = parseManifest(manifestRaw);
           if (paths.length > 0) {
@@ -2877,6 +2887,8 @@ export const useAgentStore = create<AgentState>((set, get) => {
                 session: `${sid}#webintegrate`,
                 provider: null,
                 model: sess.model,
+                // Pregunta real de l'usuari (aprenentatge local).
+                question: text,
               });
               if (adapted && parseFileBlocks(adapted).length > 0) {
                 integrated = adapted;
@@ -3106,6 +3118,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
               model: sess.model,
               history: built.h,
               images: imgs.length > 0 ? imgs : undefined,
+              // Pregunta real de l'usuari (aprenentatge local): «built.m» pot
+              // ser el context del projecte + la pregunta.
+              question: text,
             });
           }, sendStart);
           const out = oomLevelSend.value;

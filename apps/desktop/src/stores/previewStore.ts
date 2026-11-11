@@ -6,7 +6,14 @@ export type RightTab = "preview" | "agent" | "web" | "dev";
 /// Les "Integracions" viuen DINS de l'agent (decisió v0.71): l'usuari no ha
 /// de plegar pestanyes per veure l'equip treballant — són sub-pestanyes de
 /// la mateixa vista de l'Agent.
-export type AgentSub = "chat" | "experts" | "computer" | "unreal" | "blender" | "mobile";
+export type AgentSub =
+  | "chat"
+  | "experts"
+  | "learning"
+  | "computer"
+  | "unreal"
+  | "blender"
+  | "mobile";
 
 interface PreviewState {
   rightTab: RightTab;

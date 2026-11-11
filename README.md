@@ -13,6 +13,7 @@ Construïda amb [Tauri 2](https://tauri.app) + [React](https://react.dev) + [Typ
 ## Contents
 
 - [Què és NoOrbit](#què-és-noorbit)
+- [Novetats de la 0.71.5](#novetats-de-la-0715)
 - [Novetats de la 0.71.4](#novetats-de-la-0714)
 - [Novetats de la 0.71.3](#novetats-de-la-0713)
 - [Versions anteriors](#versions-anteriors)
@@ -39,11 +40,19 @@ Construïda amb [Tauri 2](https://tauri.app) + [React](https://react.dev) + [Typ
 | **Unreal** | Remote Control API + bootstrap Python (`unreal-scripts/bootstrap.py`). Build, launcher i execució de scripts. |
 | **Extensions** | Skills (carpetes amb `SKILL.md`), plugins natius i servidors **MCP**. |
 | **Especialistes** | Rols amb model, temperatura i prompt propis per tasques concretes. |
+| **Aprenentatge local** | La IA **aprèn de les altres IAs**: registra les teues converses (pregunta + resposta, amb l'origen), en destil·la **lliçons** amb el model local i les torna al context dels xats futures. Tot a la teva màquina; el dataset es pot exportar en JSONL per entrenar un model local (LoRA). |
 | **i18n** | **Català com a idioma base**. Extensible amb fitxers JSON a `apps/desktop/src/i18n/locales/`. |
 
 Tota la documentació ampliada és a la **wiki**: <https://github.com/jpuigbert/noorbit/wiki>
 
 ---
+
+## Novetats de la 0.71.5
+
+- **Aprenentatge local (en segon pla)**: una pestanya nova a l'Agent («Aprenentatge») on NoOrbit observa les converses amb **totes** les IAs — la local d'Ollama, les remotes amb token, els especialistes i les IAs web — i en treu **lliçons** (preferències, decisions, fets del projecte) que s'injecten al context dels xats futures: la IA local ja sap el que li has ensenyat i no torna a preguntar-ho. La destil·lació la fa **el model local** (Ollama) i, si no n'hi ha cap, una heurística que detecta les preferències del text. Tot és local: res surt de l'ordinador tret que ho exportis.
+- **Dataset per entrenar el teu model**: «Exporta el dataset» genera un **JSONL** amb totes les converses en format de xat (el material per a un LoRA amb LLaMA-Factory, Unsloth o Axolotl) — el pas següent perquè la IA local sigui «teva» de debò.
+- **En segon pla de veritat**: la IA aprén sola en una tasca de fons (sessió aïllada: ni la cancel·lació ni el raonament del xat es barrejen) i el xat **no espera**; si treballes amb un proveïdor en línia, la destil·lació automàtica espera (no carrega un model local a la RAM de cop).
+- **Checklist amagable**, `@doing:` (el que la IA té entre mans, en directe), adjunt automàtic de fitxers al xat, `@edit:` (CERCA/NOU) i errors d'escriptura explicats (permís, disc ple, volum de només lectura).
 
 ## Novetats de la 0.71.4
 

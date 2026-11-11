@@ -127,9 +127,10 @@ pub async fn expert_run(
     .map_err(|e| e.to_string())?;
     // Aprenentatge local: la resposta de l'especialista també s'aprèn (amb
     // l'origen ben marcat: un especialista no és la IA principal).
+    let q = crate::commands::ai::extract_question(&prompt, None).unwrap_or_else(|| prompt.clone());
     crate::commands::learning::record_turn(
         &state,
-        &prompt,
+        &q,
         &out,
         &format!("especialista:{}", expert.name),
         expert.model.as_deref().unwrap_or(""),

@@ -27,6 +27,8 @@ export async function aiReplaceSelection(
       prompt,
       system:
         "Ets un editor de codi precís. Responds només amb el fragment reescrit, en el mateix llenguatge, sense backticks ni explicacions.",
+      // La instrucció de l'usuari és el que s'APREN (aprenentatge local).
+      question: instruction,
     });
     let out = (raw ?? "").trim();
     const fence = /```[a-zA-Z]*\n?([\s\S]*?)```/.exec(out);

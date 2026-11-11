@@ -45,14 +45,20 @@ export default function LearningPanel() {
     watch,
   } = useLearningStore();
   const [showExchanges, setShowExchanges] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   useEffect(() => {
     void refresh();
+    let cancelled = false;
     let un: (() => void) | null = null;
     void watch().then((fn) => {
-      un = fn;
+      if (cancelled) fn();
+      else un = fn;
     });
-    return () => un?.();
+    return () => {
+      cancelled = true;
+      un?.();
+    };
   }, [refresh, watch]);
 
   const stats = status?.stats;
@@ -63,6 +69,11 @@ export default function LearningPanel() {
         <Brain size={14} />
         <span>{t("learning.title")}</span>
         {status?.enabled && <i className="learning-dot" title={t("learning.on")} />}
+        {status?.stats.distilling && (
+          <em className="learning-working">
+            <Sparkles size={11} /> {t("learning.working")}
+          </em>
+        )}
       </div>
 
       {/* ── Interruptor principal ─────────────────────────────────────── */}
@@ -131,7 +142,7 @@ export default function LearningPanel() {
             className="btn sm"
             title={t("learning.reveal")}
             onClick={() => {
-              const dir = status.datasetPath.replace(/\/[^/]+$/, "");
+              const dir = status.datasetPath.replace(/[\\/][^\\/]+$/, "");
               void invoke("reveal_in_finder", { path: dir }).catch(() => undefined);
             }}
           >
@@ -139,15 +150,21 @@ export default function LearningPanel() {
           </button>
         )}
         <button
-          className="btn sm"
+          className={"btn sm" + (confirmClear ? " danger" : "")}
           onClick={() => {
-            if (lessons.length || exchanges.length) {
-              if (confirm(t("learning.confirmClear"))) void clearAll();
+            // Dos passos: primer pregunta, segon esborra (cap diàleg del
+            // sistema: el confirm del navegador no sempre hi és).
+            if (!confirmClear) {
+              setConfirmClear(true);
+              return;
             }
+            setConfirmClear(false);
+            void clearAll();
           }}
+          onBlur={() => setConfirmClear(false)}
           disabled={busy}
         >
-          <Trash2 size={12} /> {t("learning.clear")}
+          <Trash2 size={12} /> {confirmClear ? t("learning.confirmClearBtn") : t("learning.clear")}
         </button>
       </div>
 

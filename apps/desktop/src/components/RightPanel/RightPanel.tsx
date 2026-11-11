@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Eye, Bot, Play, Square, Globe, Users, Monitor, Boxes, Clapperboard,
-  Smartphone, Wrench, Workflow,
+  Smartphone, Wrench, Workflow, Brain,
 } from "lucide-react";
 import { useT } from "../../i18n";
 import { usePreviewStore, type AgentSub, type RightTab } from "../../stores/previewStore";
@@ -11,6 +11,7 @@ import WebAiPanel from "../WebAi/WebAiPanel";
 import AIProcessViewer from "../AI/AIProcessViewer";
 import ComputerPanel from "../Computer/ComputerPanel";
 import ExpertsPanel from "../Experts/ExpertsPanel";
+import LearningPanel from "../Learning/LearningPanel";
 import UnrealPanel from "../Unreal/UnrealPanel";
 import BlenderPanel from "../Blender/BlenderPanel";
 import MobilePanel from "../Mobile/MobilePanel";
@@ -22,7 +23,15 @@ import DebugConsole from "../Console/DebugConsole";
 /// viuen DINS de la pestanya Agent com a sub-pestanyes (així veus sempre, al
 /// costat del xat, si l'equip d'especialistes està treballant i què fa).
 /// Exterior: «Agent» · «IA de web» · «Vista prèvia» · «Treball».
-const SUB_AGENT = ["chat", "experts", "computer", "unreal", "blender", "mobile"] as const;
+const SUB_AGENT = [
+  "chat",
+  "experts",
+  "learning",
+  "computer",
+  "unreal",
+  "blender",
+  "mobile",
+] as const;
 const SUB_DEV = ["process", "git", "problems", "console"] as const;
 type SubKeyAgent = (typeof SUB_AGENT)[number];
 type SubKeyDev = (typeof SUB_DEV)[number];
@@ -30,6 +39,7 @@ type SubKeyDev = (typeof SUB_DEV)[number];
 const SUB_ICONS: Record<SubKeyAgent, ReactNode> = {
   chat: <Bot size={12} />,
   experts: <Users size={12} />,
+  learning: <Brain size={12} />,
   computer: <Monitor size={12} />,
   unreal: <Boxes size={12} />,
   blender: <Clapperboard size={12} />,
@@ -65,6 +75,7 @@ export default function RightPanel() {
   const subAgentLabels: Record<SubKeyAgent, string> = {
     chat: t("agent.chat"),
     experts: t("rightPanel.experts"),
+    learning: t("rightPanel.learning"),
     computer: t("rightPanel.computer"),
     unreal: t("menu.unreal"),
     blender: t("menu.blender"),
@@ -119,6 +130,7 @@ export default function RightPanel() {
             <div className="rp-group-body">
               {agentSub === "chat" && <AgentPanel />}
               {agentSub === "experts" && <ExpertsPanel />}
+              {agentSub === "learning" && <LearningPanel />}
               {agentSub === "computer" && <ComputerPanel />}
               {agentSub === "unreal" && <UnrealPanel />}
               {agentSub === "blender" && <BlenderPanel />}

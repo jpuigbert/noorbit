@@ -12,12 +12,16 @@ use crate::learning::{
     LearningStore, AUTO_DISTILL_MIN, DISTILL_SYSTEM, DISTILL_TIMEOUT_S,
 };
 use crate::AppState;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{command, AppHandle, Emitter, State};
 use tokio::sync::RwLock;
+
+/// Xat intern de la destil·lació: aïllat del xat de l'usuari (ni la
+/// cancel·lació ni el raonament se'n barrejen).
+const DISTILL_SESSION: &str = "learning";
 
 /// Estat complet de l'aprenentatge (per a la interfície).
 #[derive(Debug, Clone, Serialize)]
@@ -40,6 +44,20 @@ pub struct LearningStatus {
 pub struct LearningSnapshot {
     pub lessons: Vec<Lesson>,
     pub exchanges: Vec<Exchange>,
+}
+
+/// Opcions que l'interfície pot canviar. Venen en camelCase (com la resta de
+/// les comandes) i es barregen amb la configuració persistent (que és
+/// snake_case, com la resta de `config.toml`): així un canvi parcial no
+/// perdre la resta d'opcions.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LearningOptions {
+    pub enabled: Option<bool>,
+    pub auto_distill: Option<bool>,
+    pub inject: Option<bool>,
+    pub model: Option<String>,
+    pub max_lessons: Option<usize>,
 }
 
 async fn status(state: &AppState) -> LearningStatus {
@@ -71,11 +89,28 @@ pub async fn learning_status(state: State<'_, AppState>) -> Result<LearningStatu
 #[command]
 pub async fn learning_set_config(
     state: State<'_, AppState>,
-    config: LearningConfig,
+    config: LearningOptions,
 ) -> Result<LearningStatus, String> {
     {
         let mut c = state.config.write().await;
-        c.learning = config.clone();
+        let l = &mut c.learning;
+        if let Some(v) = config.enabled {
+            l.enabled = v;
+        }
+        if let Some(v) = config.auto_distill {
+            l.auto_distill = v;
+        }
+        if let Some(v) = config.inject {
+            l.inject = v;
+        }
+        if let Some(v) = config.model {
+            l.model = v;
+        }
+        if let Some(v) = config.max_lessons {
+            if v > 0 {
+                l.max_lessons = v;
+            }
+        }
     }
     let snapshot = state.config.read().await.clone();
     snapshot.save().map_err(|e| e.to_string())?;
@@ -128,9 +163,12 @@ pub async fn learning_distill(
         // Ja n'hi ha una en marxa: no se'n encadena cap altra.
         return Ok(status(&state).await);
     }
+    // Avisa que la destil·lació ha començat: la interfície pot mostrar que
+    // la IA està aprenent (en segon pla).
+    notify(&app);
     let res = distill_now(&ai, &store, &cfg).await;
     store.distilling.store(false, Ordering::SeqCst);
-    res.map_err(|e| e)?;
+    res?;
     notify(&app);
     Ok(status(&state).await)
 }
@@ -223,7 +261,12 @@ async fn distill_now(
     };
     let raw = match tokio::time::timeout(
         Duration::from_secs(DISTILL_TIMEOUT_S),
-        ai.chat_local_only(&prompt, Some(DISTILL_SYSTEM), model),
+        // Sessió pròpia («learning»): la destil·lació en segon pla NO pot
+        // tocar el raonament ni la cancel·lació del xat de l'usuari.
+        crate::ai::in_session(
+            DISTILL_SESSION,
+            ai.chat_local_only(&prompt, Some(DISTILL_SYSTEM), model),
+        ),
     )
     .await
     {
@@ -267,10 +310,20 @@ pub fn maybe_auto_distill(
         if store.pending().len() < AUTO_DISTILL_MIN {
             return;
         }
+        // RAM: la destil·lació fa servir el model LOCAL. Si l'usuari treballa
+        // amb un proveïdor en línia, carregar un model local a la RAM «de
+        //Cop» seria una sorpresa: en aquest cas la destil·lació automàtica
+        // s'espera (l'usuari pot fer-la amb «Aprendre ara»).
+        let provider = ai.active_provider().await.to_lowercase();
+        if !provider.is_empty() && provider != "ollama" {
+            return;
+        }
         // Una destil·lació alhora: si ja n'hi ha una en marxa, aquesta espera.
         if store.distilling.swap(true, Ordering::SeqCst) {
             return;
         }
+        // La interfície ha de saber que la IA està aprenent (en segon pla).
+        let _ = app.emit("learning://changed", ());
         let res = distill_now(&ai, &store, &learning_cfg).await;
         store.distilling.store(false, Ordering::SeqCst);
         if let Ok(n) = res {
@@ -279,4 +332,35 @@ pub fn maybe_auto_distill(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// L'interfície envia les opcions en camelCase (com la resta de comandes)
+    /// i la configuració persistent és snake_case (com la resta de
+    /// `config.toml`). Aquest test ho fixa: si algú canvia una de les dues
+    /// convencions, l'opció es perdria en silenci.
+    #[test]
+    fn accepts_camel_case_options_from_the_ui() {
+        let opts: LearningOptions = serde_json::from_str(
+            r#"{"enabled":true,"autoDistill":false,"inject":true,"model":"qwen3:4b","maxLessons":50}"#,
+        )
+        .unwrap();
+        assert_eq!(opts.enabled, Some(true));
+        assert_eq!(opts.auto_distill, Some(false));
+        assert_eq!(opts.inject, Some(true));
+        assert_eq!(opts.model.as_deref(), Some("qwen3:4b"));
+        assert_eq!(opts.max_lessons, Some(50));
+    }
+
+    /// Un canvi parcial no pot esborrar la resta d'opcions.
+    #[test]
+    fn partial_options_leave_the_rest_untouched() {
+        let opts: LearningOptions = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
+        assert_eq!(opts.enabled, Some(true));
+        assert_eq!(opts.auto_distill, None);
+        assert_eq!(opts.inject, None);
+    }
 }

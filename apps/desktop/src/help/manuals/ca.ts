@@ -266,5 +266,23 @@ export const manual: Manual = {
         "«Creeu una landing page: un redactor fa els textos, un dissenyador els estils i un dev el formulari».",
       ],
     },
+    {
+      title: "17. Aprenentatge local (la IA que aprèn)",
+      intro:
+        "NoOrbit pot APRENDRE de les teves converses: observa què preguntes i què " +
+        "responen les IAs (la local, les del núvol, els especialistes i les IAs web) i " +
+        "en treu lliçons curtes que tornen al context dels xats futures. Tot és LOCAL: " +
+        "res surt de l'ordinador tret que exportis el dataset.",
+      items: [
+        "Obre la pestanya «Aprenentatge» al panell dret (dins de l'Agent) i activa l'interruptor.",
+        "A partir d'ara cada torn (pregunta + resposta) es desa al registre local de l'aplicació.",
+        "«Aprendre ara» destil·la les converses pendents amb el model local d'Ollama i en treu lliçons (preferències, decisions, fets del projecte). Si no hi ha cap model en marxa, es fa igual amb una heurística que detecta les preferències del text.",
+        "«Aprèn sol en segon pla» fa el mateix automàticament quan hi ha converses noves: el xat NO s'espera, la destil·lació va al fons.",
+        "«Injecta les lliçons al context» fa que les lliçons que apliquen a la teva pregunta s'afegeixin al prompt: la IA sap el que ja li has ensenyat i no torna a preguntar-ho.",
+        "Les lliçons es poden esborrar una a una (icona de paperera) i tot el registre amb «Esborra tot».",
+        "«Exporta el dataset» genera un JSONL amb totes les converses en format de xat: és el material per entrenar un model local (LoRA) amb LLaMA-Factory, Unsloth o Axolotl, quan vulguis que la IA local sigui «teva» de debò.",
+        "Privacitat: el registre i les lliçons viuen a la carpeta de dades de NoOrbit (a la mateixa carpeta que la configuració) i no s'envien enlloc. Per buidar-ho tot, «Esborra tot».",
+      ],
+    },
   ],
 };

@@ -49,6 +49,10 @@ export interface LearningConfig {
   maxLessons: number;
 }
 
+/// Els canvis viatjen com a objecte parcial (camelCase): el backend els barreja
+/// amb la configuració persistent, de manera que un canvi no perd la resta.
+export type LearningPatch = Partial<LearningConfig>;
+
 interface LearningSnapshot {
   lessons: Lesson[];
   exchanges: Exchange[];
@@ -64,7 +68,7 @@ interface LearningState {
   notice: string | null;
 
   refresh: () => Promise<void>;
-  setConfig: (patch: Partial<LearningConfig>) => Promise<void>;
+  setConfig: (patch: LearningPatch) => Promise<void>;
   distill: () => Promise<void>;
   removeLesson: (id: string) => Promise<void>;
   clearAll: () => Promise<void>;
@@ -92,18 +96,9 @@ export const useLearningStore = create<LearningState>((set, get) => ({
   },
 
   setConfig: async (patch) => {
-    const cur = get().status;
-    if (!cur) return;
-    const next: LearningConfig = {
-      enabled: patch.enabled ?? cur.enabled,
-      autoDistill: patch.autoDistill ?? cur.autoDistill,
-      inject: patch.inject ?? cur.inject,
-      model: patch.model ?? cur.model,
-      maxLessons: patch.maxLessons ?? cur.maxLessons,
-    };
     set({ busy: true, error: null });
     try {
-      const status = await invoke<LearningStatus>("learning_set_config", { config: next });
+      const status = await invoke<LearningStatus>("learning_set_config", { config: patch });
       set({ status, busy: false });
     } catch (e) {
       set({ busy: false, error: String(e) });

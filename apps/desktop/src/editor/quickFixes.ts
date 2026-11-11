@@ -58,6 +58,8 @@ async function aiRepair(fileName: string, lineText: string, message: string): Pr
     const raw = await invoke<string>("send_prompt", {
       prompt,
       system: "Ets un reparador de codi. Respon només amb la línia corregida, sense text addicional.",
+      // L'error que s'ha de corregir és el que s'APREN (aprenentatge local).
+      question: message,
     });
     let out = (raw ?? "").trim();
     const fence = /```[a-zA-Z]*\n?([\s\S]*?)```/.exec(out);

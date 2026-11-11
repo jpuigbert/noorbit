@@ -171,6 +171,7 @@
     "git": "Git",
     "problems": "Problemes",
     "console": "Consola",
+    "learning": "Aprenentatge",
     "startPreview": "Inicia la vista prèvia",
     "stopPreview": "Atura la vista prèvia",
     "previewNotRunning": "La vista prèvia no està en marxa",
@@ -976,5 +977,30 @@
   },
   "remoteServer": {
     "title": "Servidor d'IA remot"
+  },
+  "learning": {
+    "title": "Aprenentatge local",
+    "on": "Actiu",
+    "working": "aprenant…",
+    "enable": "Activa l'aprenentatge local",
+    "enableHint": "NoOrbit observa les teves converses amb TOTES les IAs (la local, les remotes, els especialistes i les IAs web) i en treu lliçons que tornen al context dels xats futures. Tot és local: res surt de l'ordinador tret que exportis el dataset.",
+    "statExchanges": "converses",
+    "statLessons": "lliçons",
+    "statPending": "per aprendre",
+    "inject": "Injecta les lliçons al context dels xats",
+    "autoDistill": "Aprèn sol en segon pla (no bloqueja el xat)",
+    "distill": "Aprendre ara",
+    "export": "Exporta el dataset",
+    "reveal": "Mostra la carpeta de dades al Finder / explorador",
+    "revealShort": "Mostra",
+    "clear": "Esborra tot",
+    "confirmClear": "Segur que vols esborrar el registre de converses i les lliçons apreses?",
+    "confirmClearBtn": "Segur? Prem-ho per esborrar",
+    "noModel": "No hi ha cap model local en marxa: les lliçons s'han d'extraure amb la heurística (preferències detectades al text). Engega Ollama per tenir una IA que destil·li de debò.",
+    "lessons": "Lliçons apreses",
+    "noLessons": "Encara no hi ha cap llicó. Activa l'aprenentatge, xateja una estona i prem «Aprendre ara» (o espera que la IA aprengui sola en segon pla).",
+    "deleteLesson": "Esborra aquesta llicó",
+    "exchanges": "Registre de converses",
+    "noExchanges": "Encara no s'ha registrat cap conversa."
   }
 }
