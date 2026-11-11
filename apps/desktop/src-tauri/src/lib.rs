@@ -142,22 +142,28 @@ pub fn run() {
             // (descàrrega oficial d'ollama.com) i després l'engega.
             let ollama_handle = handle.clone();
             std::thread::spawn(move || {
-                if crate::ai::ollama_running() {
-                    return;
-                }
-                if !crate::ai::ollama_installed() {
-                    match crate::ai::ensure_ollama_installed() {
-                        Ok(msg) => eprintln!("NoOrbit/Ollama: {}", msg),
-                        Err(e) => eprintln!("NoOrbit/Ollama: no s'ha pogut instal·lar: {e}"),
+                // NOMÉS si no escolta res encara: si Ollama ja corria no cal
+                // instal·lar ni arrencar res — però el model inicial es
+                // comprova SEMPRE (més avall), perquè un Ollama ja en marxa
+                // pot no tenir CAP model i tots els xats donarien 404.
+                if !crate::ai::ollama_running() {
+                    if !crate::ai::ollama_installed() {
+                        match crate::ai::ensure_ollama_installed() {
+                            Ok(msg) => eprintln!("NoOrbit/Ollama: {}", msg),
+                            Err(e) => eprintln!("NoOrbit/Ollama: no s'ha pogut instal·lar: {e}"),
+                        }
+                    }
+                    if let Err(e) = crate::ai::start_ollama_server() {
+                        eprintln!("NoOrbit/Ollama: no s'ha pogut arrencar el servei: {e}");
                     }
                 }
-                if let Err(e) = crate::ai::start_ollama_server() {
-                    eprintln!("NoOrbit/Ollama: no s'ha pogut arrencar el servei: {e}");
-                }
-                // USUARI NOU: un Ollama acabat d'instal·lar no té CAP model i
-                // TOTS els xats fallarien amb 404. Si no n'hi ha cap, baixa'n
-                // un d'inicial (mida segons la RAM) amb progrés — sense que
-                // l'usuari hagi de fer res ni entendre res d'Ollama.
+                // USUARI NOU: un Ollama acabat d'instal·lar (o JA en marxa però
+                // sense cap model baixat) fa que TOTS els xats fallin amb 404.
+                // Si no n'hi ha cap, baixa'n un d'inicial (mida segons la RAM)
+                // amb progrés — sense que l'usuari hagi de fer res ni entendre
+                // res d'Ollama. ABANS només es feia quan Nosaltres havíem
+                // arrencat el servei: qui ja tenia Ollama obert mai rebia cap
+                // model i veia «404 model not found» amb Ollama «disponible».
                 let ai = {
                     use tauri::Manager as _;
                     let state = ollama_handle.state::<AppState>();

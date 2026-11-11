@@ -2048,7 +2048,7 @@ impl AiManager {
     }
 
     /// descarrega un model amb streaming de progrés (event "ai://pull").
-    pub async fn pull_model(&self, app: &tauri::AppHandle, name: &str) -> Result<String> {
+    pub async fn pull_model(&self, app: Option<&tauri::AppHandle>, name: &str) -> Result<String> {
         use tauri::Emitter;
         let body = serde_json::json!({ "name": name, "stream": true });
         let resp = self
@@ -2085,9 +2085,13 @@ impl AiManager {
                     };
                     if msg != last {
                         last = msg.clone();
-                        let _ = app.emit("ai://pull", serde_json::json!({
-                            "model": name, "message": msg
-                        }));
+                        // Sense AppHandle (p. ex. recuperació 404 dins d'un xat)
+                        // el progrés no s'emet: la baixada continua igual.
+                        if let Some(app) = app {
+                            let _ = app.emit("ai://pull", serde_json::json!({
+                                "model": name, "message": msg
+                            }));
+                        }
                     }
                 }
             }
@@ -2133,7 +2137,7 @@ impl AiManager {
                 )
             }),
         );
-        match self.pull_model(app, &name).await {
+        match self.pull_model(Some(app), &name).await {
             Ok(_) => Some(name),
             Err(e) => {
                 let _ = app.emit(
@@ -3211,18 +3215,44 @@ impl AiManager {
         } else {
             None
         };
-        let req = ChatRequest {
-            model,
-            messages,
-            stream: false,
-            system: system.map(|s| s.to_string()),
-            think,
-            keep_alive: self.keep_alive.read().await.clone(),
-            options: Self::ctx_options(prompt_chars, system.map_or(0, |s| s.len())),
-        };
         let chat_url = self.url("/api/chat");
-        let parsed: ChatResponse = race_cancel(ctl, async {
-            let resp = Self::send_chat(&self.http, &chat_url, &req).await?;
+        let keep_alive = self.keep_alive.read().await.clone();
+        let system_owned = system.map(|s| s.to_string());
+        let options = Self::ctx_options(prompt_chars, system.map_or(0, |s| s.len()));
+        let parsed: ChatResponse = race_cancel(ctl, async move {
+            let mut req = ChatRequest {
+                model: model_label.clone(),
+                messages,
+                stream: false,
+                system: system_owned,
+                think,
+                keep_alive,
+                options,
+            };
+            let mut resp = Self::send_chat(&self.http, &chat_url, &req).await?;
+            // USUARI NOU SENSE CAP MODEL: el primer enviament a un Ollama
+            // acabat d'instal·lar (o JA en marxa però buit) retorna 404.
+            // Mateixa recuperació que el camí streaming: si Ollama no té cap
+            // model, baixem l'inicial i REINTENTEM una vegada — l'usuari no
+            // ha de fer res. Sense això, experts/equip/agent fallaven amb 404
+            // mentre el xat normal funcionava.
+            if resp.status().as_u16() == 404 {
+                let body = resp.text().await.unwrap_or_default();
+                let sense_models = self
+                    .list_models()
+                    .await
+                    .map(|m| m.is_empty())
+                    .unwrap_or(false);
+                if !sense_models {
+                    // El model demanat no existeix però sí que n'hi ha
+                    // d'altres instal·lats: error normal.
+                    return Err(anyhow!("Ollama error 404: {}", body));
+                }
+                let nom = Self::starter_model_name();
+                self.pull_model(None, &nom).await?;
+                req.model = nom;
+                resp = Self::send_chat(&self.http, &chat_url, &req).await?;
+            }
             if !resp.status().is_success() {
                 let status = resp.status();
                 let text = resp.text().await.unwrap_or_default();

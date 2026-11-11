@@ -457,7 +457,7 @@ pub async fn ollama_pull_model(
         );
     }
     let ai = state.ai_manager.clone();
-    ai.pull_model(&app, &name).await.map_err(|e| e.to_string())
+    ai.pull_model(Some(&app), &name).await.map_err(|e| e.to_string())
 }
 
 #[command]
