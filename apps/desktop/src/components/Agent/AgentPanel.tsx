@@ -15,6 +15,7 @@ import {
 import { usePreviewStore } from "../../stores/previewStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { useSystemStatsStore, memPercent, formatBytes } from "../../stores/systemStatsStore";
+import { useProcessStore } from "../../stores/processStore";
 import TaskChecklist from "./TaskChecklist";
 import { CopyButton, SaveButton } from "../CopyButton";
 import ChatMarkdown from "./ChatMarkdown";
@@ -186,6 +187,37 @@ export default function AgentPanel() {
     return () => clearInterval(id);
   }, [running]);
   const liveSeconds = startedAt ? Math.floor((Date.now() - startedAt) / 1000) : null;
+
+  // ── QUÈ ESTÀ FENT ARA MATEIX (en viu), per al xat ────────────────────────
+  // Tres fonts, de la més concreta a la més genèrica:
+  //  1. L'últim PAS del motor («Blender: Executant l'script…», «ia: La IA
+  //     està escrivint…», «Ordre d'ordinador: $ …»): el pas real, no una
+  //     estimació.
+  //  2. La fase del procés de la IA amb un fragment del RAONAMENT.
+  //  3. La fase del procés amb l'última línia del TEXT que ja està escrivint.
+  const procSnap = useProcessStore((s) => s.per[activeId]);
+  // Només ens serveix el pas si és del TORN ACTUAL (la llista de passos no es
+  // buida a cada torn: un pas vell no pot explicar què fa la IA ara mateix).
+  const rawStep = sess.timeline.length ? sess.timeline[sess.timeline.length - 1] : null;
+  const lastStep =
+    rawStep && (!startedAt || rawStep.at >= startedAt - 2000) ? rawStep : null;
+  const liveWhat = (() => {
+    if (lastStep && lastStep.detail) {
+      return lastStep.label ? `${lastStep.label}: ${lastStep.detail}` : lastStep.detail;
+    }
+    const fase = procSnap?.phase;
+    const text = (fase === "thinking" ? procSnap?.thinking : procSnap?.text) ?? "";
+    const línia = text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .pop();
+    if (fase === "thinking" && línia) return `Pensant… ${línia}`;
+    if (fase === "streaming" && línia) return `Generant… ${línia}`;
+    return "";
+  })();
+  const liveWhatShort =
+    liveWhat.length > 160 ? liveWhat.slice(0, 160) + "…" : liveWhat;
 
   // RAM en temps real per al cronòmetre: percentatge + detall «usada/total».
   const ramPct = memPercent(mem);
@@ -1130,12 +1162,24 @@ export default function AgentPanel() {
                     {liveSeconds !== null && ` · ${liveSeconds} s`}
                     {ramChip}
                   </div>
+                  {/* QUÈ ESTÀ FENT ARA MATEIX: el pas real del motor o la fase
+                      de la IA amb un fragment del que escriu. */}
+                  {liveWhatShort && (
+                    <div className="stream-what" title={liveWhat}>
+                      {liveWhatShort}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="chat-bubble assistant pending">
                   <RefreshCw size={12} className="spin" /> {t("agent.running")}
                   {liveSeconds !== null && ` · ${liveSeconds} s`}
                   {ramChip}
+                  {liveWhatShort && (
+                    <div className="stream-what" title={liveWhat}>
+                      {liveWhatShort}
+                    </div>
+                  )}
                 </div>
               )}
             {/* Imatges generades en este torn: les anunciades pel stream MÉS

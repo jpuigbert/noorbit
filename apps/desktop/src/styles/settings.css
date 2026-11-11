@@ -339,6 +339,22 @@
   align-items: center;
   gap: 4px;
 }
+/* QUÈ ESTÀ FENT LA IA ARA MATEIX: el pas real del motor o la fase amb un
+   fragment del que està escrivint. Línia discreta, tallada a una línia. */
+.stream-what {
+  margin-top: 4px;
+  padding: 3px 7px;
+  font-size: 11.5px;
+  color: var(--text-2, #999);
+  background: var(--bg-1, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border, #333);
+  border-radius: 5px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: stream-blink 2.4s ease-in-out infinite;
+}
 .chat-thought {
   width: 92%;
   margin-bottom: 4px;
