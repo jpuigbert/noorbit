@@ -13,7 +13,11 @@ Construïda amb [Tauri 2](https://tauri.app) + [React](https://react.dev) + [Typ
 ## Contents
 
 - [Què és NoOrbit](#què-és-noorbit)
-- [Novetats de la 0.6.0](#novetats-de-la-060)
+- [Novetats de la 0.71.4](#novetats-de-la-0714)
+- [Novetats de la 0.71.3](#novetats-de-la-0713)
+- [Versions anteriors](#versions-anteriors)
+- [Seguretat i claus API (important)](#seguretat-i-claus-api-important)
+- [Novetats de la 0.6.0 (historial)](#novetats-de-la-060-historial)
 - [Instal·lació (usuari final)](#instal·lació-usuari-final)
 - [Compilar des del codi font](#compilar-des-del-codi-font)
 - [On són els instal·ladors un cop compilats](#on-són-els-instal·ladors-un-cop-compilats)
@@ -41,46 +45,58 @@ Tota la documentació ampliada és a la **wiki**: <https://github.com/jpuigbert/
 
 ---
 
-## Novetats de la 0.71
+## Novetats de la 0.71.4
 
-- **Arrencada encara més lleugera**: els 9 diàlegs (Configuració, Proveïdors, Plugins, Ajuda, Compte, Catàleg IA, Gestor de models, Servidor remot, Onboarding) es carreguen **a demanda**, no a l'inici — el paquet principal ha baixat un 27% (357 → 260 KB).
-- **Remats de disseny**: el botó primari porta el degradat del TEMA (a «Verd i daurat» és jade→daurat), els inputs brillen amb anell d'accent al focus i el fitxer actiu de l'arbre té la veta de la casa.
+- **Entorn auto-instal·lable**: finestra de comprovació de l'entorn a l'obrir (Ollama/Blender/ComfyUI) que instal·la SOLA el que falta (zip oficial d'ollama.com a macOS, `install.sh` a Linux, `OllamaSetup.exe` silenciós a Windows) i després engega el servidor — i amb la ruta REAL del binari ollama (el CLI viu dins el bundle de la app).
+- **Unreal Engine sempre connectable**: el `.uproject` es parcheja sol amb els plugins `PythonScriptPlugin`+`RemoteControl` (còpia `.bak`), arrencada fiable del bootstrap (`-ExecutePythonScript`, admet rutes amb espais), watchdog de connexió cada 5 s que detecta l'editor sol, cerca automàtica del `.uproject` al projecte obert, captura del viewport robusta i bug de qualitat d'il·luminació corregit.
+- **Usuari nou sense 404**: si Ollama no té cap model baixat, NoOrbit baixa'n un d'inicial (mida segons la RAM) amb progrés al gestor de models — al camí amb streaming i al que no, i fins i tot si Ollama ja estava en marxa.
+- **Blender amb so**: música generada amb numpy a l'editor de seqüències, veu amb TTS del sistema (say/espeak-ng/SAPI), boca animada amb keyframes i àudio AAC al render MP4.
+- **Remats**: el `.uproject` mai no queda tocat sense còpia de seguretat; `cargo clippy` passa amb 0 errors.
 
-## Novetats de la 0.70
+## Novetats de la 0.71.3
 
-- **Menu «IA ▸ Servidor d'IA remot»**: el mateix assistent (SFTP → SSH → Connecta), ara amb una entrada pròpia a la paleta de comandes i **un tutorial pas a pas inclòs** (màquina amb GPU, SSH, Puja, Comprova, Connecta — amb errors típics com el port 8000 del tallafocs).
-- **Arrencada molt més ràpida i lleugera**: Monaco (4 MB + 8 MB de workers) ja NO es carrega a l'inici: s'importa ÀJUS quan obres el primer fitxer de codi o el primer diff. Sense cap fitxer obert, el seu pes no arriba a descarregar-se.
-- **Menys tokens a cada resposta** (−40% o més): el manual del terminal s'ha comprimit (859 → 514 tokens) i el del navegador NOMÉS entra quan la conversa en parla (URLs, «cerca», «pregunta a…»), no a cada torn.
-- **Tema «Verd i daurat»** a Configuració ▸ Aparença (i a l'onboarding): base mineral fosca, accent jade i daurat de remat — també a l'editor.
-- **Detalls de disseny moderns**: dreceres de teclat amb fitxa de tecles físicques, anell d'accent al focus, veta degradada a les files del menú, modals amb entrada animada — i **il·lustracions SVG pròpies** (que pinten amb el tema actiu) als buits de l'editor, de l'onboarding i del servidor remot.
+- **Especialistes en directe**: mentre l'equip treballa, cada expert té la seva mini-card amb el que escriu EN TEMPS REAL (mateix format del xat) i botó «Obre al xat» per continuar-hi.
+- **Execució per torns + estalvi de RAM**: amb model local, l'equip treballa d'un en un («Torn N/M») i allibera el model després de cada torn; amb proveïdor al núvol, fins a 3 en paral·lel.
+- **Rodet d'imatges en CPU** (stable-diffusion.cpp) per a Mac Intel, on ComfyUI no existeix: txt2img i img2img locals amb models `.gguf`/`.safetensors`.
+- **CivitAI** com a font de models (sense token) i IAs locals instal·lables amb un clic (LM Studio, Jan, GPT4All, llama.cpp); editors de vídeo (Kdenlive, OpenShot, DaVinci Resolve, Shotcut).
+- **Nudge d'imatges**: si demanes una imatge i el model respon prosa, NoOrbit li torna l'ordre una vegada amb la regla «IMG|» al manual.
+- Confirmació de tancament, botons **Desfés/Refés** a la barra, checklist de tasques fixat, **GLM-5.3-Flash i GLM-OCR** al catàleg.
 
-## Novetats recents (0.62 → 0.68)
+## Versions anteriors
 
-- **Servidor d'IA remot** (Proveïdors › «Servidor d'IA remot»): la GPU treballa fora del Mac. NoOrbit puja dos fitxers al teu servidor per **SFTP/FTPS/FTP** (amb `curl`, sense dependències noves): l'script d'instal·lació `noorbit-ai-server.sh` i una **API OpenAI-compatible en Python/FastAPI** que va davant del motor **DeepInfer** (DeepSeek, SM100/Ascend) o **vLLM**. Un cop executat l'script via SSH, el botó «Comprova» diagnostica la connexió des del Mac i sempre diu EL MOTIU exacte (servidor aturat, clau dolenta, URL 404, model encara carregant…), i «Connecta» afegeix el servidor com a proveïdor normal: les IAs descarregades al servidor treballen allà i **només les respostes i els canvis tornen al local per HTTP** (zero RAM d'inferència al Mac).
-- **DeepInfer com a opció preparada** (github.com/deepseek-ai/DeepInfer, Apache 2.0): proveïdor «DeepInfer (servidor GPU)» + «DeepSeek API (núvol)» creats per defecte, detecció automàtica del procés com a IA externa i skill builtin amb tota la guia (Linux + CUDA 13 o CANN 9.2, Python 3.12, `./build.sh`, sortides estructurades).
-- **Diagnòstic pas a pas de serveis d'IA** (`ai_endpoint_check`): cinc fases (connexió → autenticació → URL → models → llest) i els codis d'error traduits a accions concretes (accés denegat, temps esgotat, connexió refusada…). Al Mac/Windows avisa que la versió oficial de DeepInfer corre a Linux.
-- **Treball en equip més robust**: especialistes en **sèrie** amb models locals (fins a 3 en paral·lel amb remots), botó «Atura l'equip», cronòmetre en temps real i xat intern aïllat; els resultats fallits no es consoliden mai com a resposta final.
-- **Gestió de RAM dels models**: secció «Memòria RAM dels models» al gestor — allibera models carregats amb un clic, `keep_alive` configurable (5 min per defecte) i `num_ctx` limitat automàticament per la RAM disponible (p. ex. 8 GB → context 4096).
-- **Arrencada robusta**: la configuració corrupta (pendrive, apagada sobtada) **no atura l'app**: es renomena a `config.toml.trencat-<hora>` i es continua amb valors de fàbrica; tots els panics queden registrats al **`crash.log`** de la carpeta de dades (`~/Library/Application Support/no-orbit/…`).
+- **0.71.2 — Núvol d'equip**: projecte connectat a Git (connecta 1 clic, ↑↓ pendents, Sincronitza + Auto cada 90 s) per editar-lo des de diversos dispositius.
+- **0.71.0**: les integracions DINS de l'Agent (sub-pestanyes Xat/Equip/Ordinador/Unreal/Blender/Mòbil), franja viva «equip treballant», raonament de la IA en català automàtic.
+- **0.70.0**: Monaco a demanda (arrencada sense 4 MB+8 MB de workers), −40% tokens, tema «Verd i daurat», servidor d'IA remot amb tutorial pas a pas.
+- **0.62 → 0.68**: servidor d'IA remot (SFTP + API OpenAI-compatible), DeepInfer, diagnòstic pas a pas de serveis, gestió de RAM dels models, arrencada robusta amb `crash.log`.
+- **0.6.0**: navegador intern controlat per les IAs (`NB|…`), imatges al xat, catàleg d'IAs amb mides, orquestrador d'IA externes.
+- L'historial COMPLET, versió per versió, és a [`CHANGELOG.md`](CHANGELOG.md) — i cada release a GitHub porta les seves pròpies notes a <https://github.com/jpuigbert/noorbit/releases>.
 
 ---
 
 ## Seguretat i claus API (important)
 
-**Aquest repositori NO conté cap clau API, token ni credencial personal**, i així es manté:
+**Aquest repositori NO conté cap clau API, token ni credencial personal — i no n'hi ha hagut mai cap fuita**: la comanda d'auditoria de sota és una comprovació PREVENTIVA que qualsevol pot executar per verificar-ho, no un indicador d'accidents anteriors.
 
 - Els tokens dels proveïdors que enganxes a l'app es desen a la **carpeta de dades del sistema** (`~/Library/Application Support/no-orbit/…`, o `NoOrbitData/` en mode portàtil/USB) — **mai dins el codi del projecte**, i aquesta carpeta no forma part del repo mai.
 - No hi ha fitxers `.env` reals (gitignored) ni claus escrites al codi font. NoOrbit no apuja mai res del disc de l'usuari a cap servidor sense la teva acció explícita.
 - Si algú clona aquest repo en una altra màquina (o un altre Mac), l'app **funciona igual sense cap clau**: models locals amb Ollama i tota la resta. Les claus API es queden només a la màquina on es van guardar i no se sincronitzen mai amb el repo ni amb cap servei remot.
-- Auditoria pròpia ràpida:
+- Auditoria preventiva ràpida:
   ```bash
   git grep -lI -E "sk-[a-zA-Z0-9]{20,}|gho_[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{20,}|AKIA[A-Z0-9]{16}"
   ```
-  (hauria de no tornar res; si n'apareix, és un accident — obre un *issue*, si us plau).
+  (ha de no tornar RES; si en tornés, seria un accident — obre un *issue*, si us plau).
 
 ---
 
-## Novetats de la 0.6.0
+## Novetats de la 0.6.0 (historial)
+
+- **Navegador intern controlat per totes les IAs, sense botons**: qualsevol IA del xat (local, remota o experta) pot obrir pàgines, llegir-ne el contingut i consultar IAs web (DeepSeek, ChatGPT, Claude, Gemini, Perplexity, Grok…) escrivint directrius de text `NB|OBRIR|`, `NB|LLEGIR|`, `NB|PREGUNTA_IA|` que NoOrbit executa. Abans de preguntar a una IA web es demana **permís a l'usuari** i la finestra sempre és visible (el login el fa sempre la persona).
+- **El codi dels xats web s'aprofita**: quan una IA web o una pàgina retorna codi, NoOrbit l'extreu en blocs estructurats (amb el llenguatge) i la IA local l'adapta i l'escriu al projecte com a fitxers reals (format `@file:` + automaterialització).
+- **Imatges al xat**: es mostren en línia, es poden copiar al porta-retalls i adjuntar/enganxar (⌘V) com a entrada dels models amb visió.
+- **Catàleg d'IAs** (menú IA): abans de descarregar veus la mida aproximada de cada model, si és sense censura, si té visió i si pot generar imatges o vídeo.
+- **Generació i manipulació d'imatges**: amb ComfyUI local (si la RAM ho permet) o via API en línia amb la teua clau.
+- **Orquestrador d'IAs externes legit**: descobriment d'instal·lacions locals (Ollama, LM Studio, llama.cpp…) i fallback en línia **només** amb tokens propis de l'usuari, etiquetant sempre l'origen de cada resposta.
+- **Proveïdors d'API robustos**: claus normalitzades (espais, barras, URLs amb `/v1`…), Venice amb el model correcte (`venice-uncensored`) i migració automàtica de la configuració vella, errors 401/404/429 explicats en català.
 
 - **Navegador intern controlat per totes les IAs, sense botons**: qualsevol IA del xat (local, remota o experta) pot obrir pàgines, llegir-ne el contingut i consultar IAs web (DeepSeek, ChatGPT, Claude, Gemini, Perplexity, Grok…) escrivint directrius de text `NB|OBRIR|`, `NB|LLEGIR|`, `NB|PREGUNTA_IA|` que NoOrbit executa. Abans de preguntar a una IA web es demana **permís a l'usuari** i la finestra sempre és visible (el login el fa sempre la persona).
 - **El codi dels xats web s'aprofita**: quan una IA web o una pàgina retorna codi, NoOrbit l'extreu en blocs estructurats (amb el llenguatge) i la IA local l'adapta i l'escriu al projecte com a fitxers reals (format `@file:` + automaterialització).
@@ -100,17 +116,17 @@ Els instal·ladors publicats es troben a la secció **Releases** del repositori:
 
 **👉 <https://github.com/jpuigbert/noorbit/releases>**
 
-Cada release inclou, per a cada sistema, l'arxiu corresponent (substitueix la versió per l'última publicada):
+Cada release inclou, per a cada sistema, l'arxiu corresponent (substitueix la versió per l'última publicada; els noms d'exemple són els de la **0.71.4-alpha**):
 
 | Sistema | Fitxer que has de descarregar |
 |---|---|
-| **macOS** (universal, recomanat: Intel + Apple Silicon) | `NoOrbit_0.6.0_universal.dmg` |
-| **macOS** (Intel) | `NoOrbit_0.6.0_x64.dmg` |
-| **macOS** (Apple Silicon) | `NoOrbit_0.6.0_aarch64.dmg` |
-| **Windows** (10 / 11) | `NoOrbit_0.6.0_x64-setup.exe` |
-| **Linux** (Debian / Ubuntu) | `NoOrbit_0.6.0_amd64.deb` |
-| **Linux** (Fedora / RHEL) | `NoOrbit-0.6.0-1.x86_64.rpm` |
-| **Linux** (universal) | `NoOrbit_0.6.0_amd64.AppImage` |
+| **macOS** (universal, Intel + Apple Silicon) | `NoOrbit_0.71.4-alpha_universal.dmg` |
+| **Windows** (10 / 11) | `NoOrbit_0.71.4-alpha_x64-setup.exe` |
+| **Linux** (Debian / Ubuntu) | `NoOrbit_0.71.4-alpha_amd64.deb` |
+| **Linux** (Fedora / RHEL) | `NoOrbit-0.71.4-alpha-1.x86_64.rpm` |
+| **Linux** (universal) | `NoOrbit_0.71.4-alpha_amd64.AppImage` |
+
+L'índex automàtic de totes les versions i els seus enllaços de descàrrega directa és l'asset **`versions.json`** de l'últim release.
 
 > **Versions anteriors**: cada tag és un release independent a GitHub i **no esborra mai** els de versions velles (p. ex. la 0.5.0 completa és a <https://github.com/jpuigbert/noorbit/releases/tag/v0.5.0>). L'índex automàtic de totes les versions i els seus enllaços és l'asset `versions.json` de l'últim release.
 
@@ -149,27 +165,27 @@ xattr -dr com.apple.quarantine /Applications/NoOrbit.app
 **Per què no es firma?** La signatura i notarització exigeixen un compte de desenvolupador d'Apple de pagament. Si vols una versió signada (sense bloquejos ni passos manuals), col·labora amb el projecte o crea un issue per prioritzar-ho: el workflow de CI ja prepara els binaris i només caldria afegir-hi els secrets `APPLE_SIGNING_IDENTITY`, `APPLE_ID` i `APPLE_APP_SPECIFIC_PASSWORD`.
 
 **Windows**
-1. Doble clic a `NoOrbit_0.6.0_x64-setup.exe`.
+1. Doble clic a `NoOrbit_0.71.4-alpha_x64-setup.exe`.
 2. S'instal·la **per a l'usuari actual**, sense necessitat de drets d'administrador.
 3. L'executable apareix al menú Inici.
 
 **Linux (Debian/Ubuntu)**
 ```bash
-sudo apt install ./NoOrbit_0.6.0_amd64.deb
+sudo apt install ./NoOrbit_0.71.4-alpha_amd64.deb
 # si el paquet ja està descarregat i vols instal·lar-lo "a la vella":
-sudo dpkg -i NoOrbit_0.6.0_amd64.deb && sudo apt -f install
+sudo dpkg -i NoOrbit_0.71.4-alpha_amd64.deb && sudo apt -f install
 ```
 Executa'l amb `no-orbit` o des del menú d'aplicacions.
 
 **Linux (Fedora/RHEL)**
 ```bash
-sudo dnf install ./NoOrbit-0.6.0-1.x86_64.rpm
+sudo dnf install ./NoOrbit-0.71.4-alpha-1.x86_64.rpm
 ```
 
 **Linux (AppImage)**
 ```bash
-chmod +x NoOrbit_0.6.0_amd64.AppImage
-./NoOrbit_0.6.0_amd64.AppImage
+chmod +x NoOrbit_0.71.4-alpha_amd64.AppImage
+./NoOrbit_0.71.4-alpha_amd64.AppImage
 ```
 
 ---
@@ -233,7 +249,7 @@ Rutes completes segons sistema:
 
 ```
 apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/
-├── dmg/NoOrbit_0.6.0_universal.dmg      ← compartiu això
+├── dmg/NoOrbit_0.71.4-alpha_universal.dmg      ← compartiu això
 └── macos/NoOrbit.app                     ← app "nua" (provable directament)
 ```
 
@@ -243,17 +259,17 @@ Per a només Intel (`--target x86_64-apple-darwin`) o només Apple Silicon (`--t
 
 ```
 apps\desktop\src-tauri\target\release\bundle\
-├── nsis\NoOrbit_0.6.0_x64-setup.exe      ← instal·lador clàssic (recomanat)
-└── msi\NoOrbit_0.6.0_x64_en-US.msi        ← paquet per a desplegaments empresarials (GPO/SCCM)
+├── nsis\NoOrbit_0.71.4-alpha_x64-setup.exe      ← instal·lador clàssic (recomanat)
+└── msi\NoOrbit_0.71.4-alpha_x64_en-US.msi        ← paquet per a desplegaments empresarials (GPO/SCCM)
 ```
 
 ### Linux (des de Linux)
 
 ```
 apps/desktop/src-tauri/target/release/bundle/
-├── deb/NoOrbit_0.6.0_amd64.deb            ← Debian / Ubuntu
-├── rpm/NoOrbit-0.6.0-1.x86_64.rpm         ← Fedora / RHEL
-└── appimage/NoOrbit_0.6.0_amd64.AppImage  ← universal (tots els distros)
+├── deb/NoOrbit_0.71.4-alpha_amd64.deb            ← Debian / Ubuntu
+├── rpm/NoOrbit-0.71.4-alpha-1.x86_64.rpm         ← Fedora / RHEL
+└── appimage/NoOrbit_0.71.4-alpha_amd64.AppImage  ← universal (tots els distros)
 ```
 
 En una ARM Linux (p. ex. Raspberry Pi) afegeix `--target aarch64-unknown-linux-gnu` i ajusta el nom del paquet.
@@ -313,4 +329,4 @@ Part del disseny i alguns fragments deriven o estan inspirats en **Visual Studio
 
 ## Estat del projecte
 
-Versió actual: **0.6.0**. El projecte està en desenvolupament actiu. Si trobes un bug o vols una funcionalitat, obre un [issue](https://github.com/jpuigbert/noorbit/issues).
+Versió actual: **0.71.4-alpha** (vegeu [`CHANGELOG.md`](CHANGELOG.md)). El projecte està en desenvolupament actiu. Si trobes un bug o vols una funcionalitat, obre un [issue](https://github.com/jpuigbert/noorbit/issues).
