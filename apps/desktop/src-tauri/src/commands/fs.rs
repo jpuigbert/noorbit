@@ -42,46 +42,68 @@ pub async fn write_file(path: String, content: String) -> Result<(), String> {
             display
         ));
     }
-    tauri::async_runtime::spawn_blocking(move || {
+    tauri::async_runtime::spawn_blocking(move || -> std::result::Result<std::io::Result<()>, String> {
+        // La CARPETA de destinació ha d'existir: abans es descartava l'error de
+        // create_dir_all amb .ok() i si fallava (permisos, ruta il·legal…) el
+        // write de sota fallava amb un error menys clar. Ara es propaga explicat.
         if let Some(parent) = p.parent() {
-            std::fs::create_dir_all(parent).ok();
+            if !parent.as_os_str().is_empty() {
+                if !parent.is_dir() {
+                    std::fs::create_dir_all(parent).map_err(|e| {
+                        format!(
+                            "No s'ha pogut crear la carpeta de destinació {}: {}",
+                            parent.display(),
+                            explain_io(&e)
+                        )
+                    })?;
+                }
+                // Si ni amb crear-la hi ha una carpeta (un FITXER amb el mateix
+                // nom al mig, p. ex.), l'error ha de dir-ho: «src/app.py» on
+                // src és un fitxer no és una ruta vàlida de destinació.
+                if !parent.is_dir() {
+                    return Err(format!(
+                        "La ruta de destinació no és vàlida: {} existeix però NO \
+                         és una carpeta (hi ha un fitxer amb aquest nom al mig \
+                         del camí)",
+                        parent.display()
+                    ));
+                }
+            }
         }
-        std::fs::write(&p, content)
+        Ok(std::fs::write(&p, content))
     })
     .await
     .map_err(|e| e.to_string())?
-    .map_err(|e| {
-        // ERROR EXPLICAT (no un «Permission denied (os error 13)» sec): cada
-        // cas típic diu QUÈ fer. El darrer cas cobreix el resta (ruta
-        // inexistent, volum expulsat…).
-        let os = e.raw_os_error().unwrap_or(0);
-        match e.kind() {
-            std::io::ErrorKind::PermissionDenied => format!(
-                "El sistema no deixa escriure a {}: la carpeta és de NOMÉS LECTURA \
-                 o protegida (p. ex. «Program Files»/«/usr»/carpetes de sistema). \
-                 Desa-ho a la carpeta del projecte o tria una altra ruta \
-                 (codi {})",
-                display, os
-            ),
-            std::io::ErrorKind::NotFound => format!(
-                "La carpeta de destinació no existeix o el volum no és muntat: {}. \
-                 Comprova que el disc/pendrive estigui connectat (codi {})",
-                display, os
-            ),
-            std::io::ErrorKind::StorageFull => format!(
-                "El DISC és PLE: no hi ha espai per escriure {}. Allibera espai i \
-                 torna a desar (codi {})",
-                display, os
-            ),
-            _ if os == 30 => format!(
-                "El volum on vols escriure {} és de NOMÉS LECTURA \
-                 (p. ex. un DMG obert o un pendrive protegit). Tria una altra \
-                 carpeta (codi 30)",
-                display
-            ),
-            _ => format!("No s'ha pogut escriure {}: {}", display, e),
-        }
-    })
+    .map_err(|e| format!("No s'ha pogut escriure {}: {}", display, explain_io(&e)))
+}
+
+/// Explica un error del sistema de fitxers amb el motiu i què fer (català).
+/// Fins i tot un model local pot citar això al xat i l'usuari ho entén.
+fn explain_io(e: &std::io::Error) -> String {
+    let os = e.raw_os_error().unwrap_or(0);
+    match e.kind() {
+        std::io::ErrorKind::PermissionDenied => format!(
+            "la carpeta és de NOMÉS LECTURA o protegida \
+             (p. ex. «Program Files»/«/usr»/carpetes de sistema): desa-ho a la \
+             carpeta del projecte o tria una altra ruta (codi {})",
+            os
+        ),
+        std::io::ErrorKind::NotFound => format!(
+            "la carpeta de destinació no existeix o el volum no és muntat: \
+             comprova que el disc/pendrive estigui connectat (codi {})",
+            os
+        ),
+        std::io::ErrorKind::StorageFull => format!(
+            "el DISC és PLE: no hi ha espai per escriure. Allibera espai i \
+             torna a desar (codi {})",
+            os
+        ),
+        _ if os == 30 => format!(
+            "el volum és de NOMÉS LECTURA (p. ex. un DMG obert o un pendrive \
+             protegit): tria una altra carpeta (codi 30)"
+        ),
+        _ => e.to_string(),
+    }
 }
 
 #[tauri::command]
