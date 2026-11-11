@@ -42,7 +42,7 @@ pub async fn write_file(path: String, content: String) -> Result<(), String> {
             display
         ));
     }
-    tauri::async_runtime::spawn_blocking(move || -> std::result::Result<std::io::Result<()>, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         // La CARPETA de destinació ha d'existir: abans es descartava l'error de
         // create_dir_all amb .ok() i si fallava (permisos, ruta il·legal…) el
         // write de sota fallava amb un error menys clar. Ara es propaga explicat.
@@ -70,11 +70,11 @@ pub async fn write_file(path: String, content: String) -> Result<(), String> {
                 }
             }
         }
-        Ok(std::fs::write(&p, content))
+        std::fs::write(&p, content)
+            .map_err(|e| format!("No s'ha pogut escriure {}: {}", display, explain_io(&e)))
     })
     .await
     .map_err(|e| e.to_string())?
-    .map_err(|e| format!("No s'ha pogut escriure {}: {}", display, explain_io(&e)))
 }
 
 /// Explica un error del sistema de fitxers amb el motiu i què fer (català).

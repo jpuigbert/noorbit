@@ -43,6 +43,9 @@ interface UIState {
   showAccount: boolean;
   /** Assistent de primera arrencada (3 passos). */
   showOnboarding: boolean;
+  /** Assistent d'entorn («Posant NoOrbit en marxa»): s'obre sol si falta
+   *  alguna cosa i es pot obrir manualment des de la barra d'estat. */
+  showSetupCheck: boolean;
   terminalOpen: boolean;
 
   // Autodesat (com VS Code)
@@ -73,6 +76,7 @@ interface UIState {
   setShowStartup: (v: boolean) => void;
   setShowAccount: (v: boolean) => void;
   setShowOnboarding: (v: boolean) => void;
+  setShowSetupCheck: (v: boolean) => void;
   setTerminalOpen: (v: boolean) => void;
   toggleTerminal: () => void;
   setAutoSave: (v: boolean) => void;
@@ -120,6 +124,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   showAccount: false,
   /** Assistent de primera arrencada (3 passos): només si no s'ha completat. */
   showOnboarding: false,
+  showSetupCheck: false,
   terminalOpen: false,
 
   autoSave: loadBool(LS_AUTOSAVE, true),
@@ -145,6 +150,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setShowStartup: (v) => set({ showStartup: v }),
   setShowAccount: (v) => set({ showAccount: v }),
   setShowOnboarding: (v) => set({ showOnboarding: v }),
+  setShowSetupCheck: (v) => set({ showSetupCheck: v }),
   setTerminalOpen: (v) => set({ terminalOpen: v }),
   toggleTerminal: () => set({ terminalOpen: !get().terminalOpen }),
 

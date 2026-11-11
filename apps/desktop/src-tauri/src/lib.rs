@@ -223,6 +223,8 @@ pub fn run() {
             commands::ai::list_providers,
             commands::ai::set_active_provider,
             commands::ai::ollama_is_running,
+            commands::ai::ollama_starter_model,
+            commands::ai::ollama_pull_starter,
             commands::ai::ollama_list_models,
             commands::ai::ollama_pull_model,
             commands::ai::ollama_delete_model,

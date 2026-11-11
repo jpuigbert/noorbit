@@ -5,6 +5,7 @@ import { useWorkspaceStore } from "../stores/workspaceStore";
 import { useBlenderLiveStore } from "../stores/blenderLiveStore";
 import { useUnrealStore } from "../stores/unrealStore";
 import { useAIStore } from "../stores/aiStore";
+import { useUIStore } from "../stores/uiStore";
 import { useAIActivity } from "../stores/activityStore";
 import { useSystemStatsStore, memPercent, formatBytes } from "../stores/systemStatsStore";
 import BackgroundTaskBadge from "./BackgroundTaskBadge";
@@ -22,6 +23,7 @@ export default function StatusBar() {
   const blender = useBlenderLiveStore((s) => s.connected);
   const unreal = useUnrealStore((s) => s.connected);
   const ollama = useAIStore((s) => s.ollamaRunning);
+  const setShowSetupCheck = useUIStore((s) => s.setShowSetupCheck);
   const activity = useAIActivity();
 
   // RAM en temps real: arrenca el mostreig global (idempotent) i llig.
@@ -38,6 +40,22 @@ export default function StatusBar() {
   }, []);
 
   const folderName = root ? root.split(/[/\\]/).pop() : null;
+
+  // Salut de la IA local (3 estils): instal·lada i amb model = a punt;
+  // instal·lada però sense model = hi ha un pas pendent; no instal·lada.
+  const ollamaInstalled = useAIStore((s) => s.ollamaInstalled);
+  const models = useAIStore((s) => s.models);
+  const aiOk = ollama && ollamaInstalled && models.length > 0;
+  const aiLabel = !ollamaInstalled
+    ? "IA: no instal·lada"
+    : !ollama
+      ? "IA: aturada"
+      : models.length === 0
+        ? "IA: sense model"
+        : `IA: ${models.length} model${models.length === 1 ? "" : "s"}`;
+  const aiTitle = aiOk
+    ? "La IA local està instal·lada i en marxa."
+    : "Fes clic per posar la IA local en marxa (instal·lar, engegar o baixar model).";
 
   return (
     <div className="statusbar">
@@ -65,8 +83,8 @@ export default function StatusBar() {
           {t("status.ram")}: {ramPct}%
         </span>
       )}
-      <span className="status-item">
-        <Dot on={ollama} /> {t("status.ai")}
+      <span className="status-item status-ai" onClick={() => setShowSetupCheck(true)} title={aiTitle}>
+        <Dot on={aiOk} /> {aiLabel}
       </span>
       <span className="status-item">
         <Dot on={blender} /> {t("status.blender")}

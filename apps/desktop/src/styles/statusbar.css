@@ -67,3 +67,23 @@
   background: var(--text-3);
   opacity: 0.5;
 }
+
+/* ---- Barra d'estat: salut de la IA local (clicable) ----
+   El punt verd sol ja no basta: el text diu QUÈ falta (no instal·lada,
+   aturada, sense model) i un clic obre l'assistent «Posant NoOrbit en marxa». */
+.status-item.status-ai {
+  cursor: pointer;
+  padding: 0 4px;
+  margin: 0 -4px;
+  border-radius: 4px;
+  transition: background var(--speed-fast) var(--ease-out),
+    color var(--speed-fast) var(--ease-out);
+}
+.status-item.status-ai:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+.status-item.status-ai .status-dot.off {
+  background: var(--warning);
+  opacity: 0.9;
+}

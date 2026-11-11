@@ -20,6 +20,7 @@ import { CopyButton, SaveButton } from "../CopyButton";
 import ChatMarkdown from "./ChatMarkdown";
 import { useWebAiStore } from "../../stores/webAiStore";
 import ChatThought from "./ChatThought";
+import LocalAIStatus from "../AI/LocalAIStatus";
 
 export default function AgentPanel() {
   const { t } = useT();
@@ -618,6 +619,11 @@ export default function AgentPanel() {
         </button>
         )}
       </div>
+
+      {/* SALUT DE LA IA LOCAL: diu clarament per què el xat no respon i
+          ofereix la solució amb un clic (instal·lar / engegar / baixar model).
+          Només en xats locals: en els web/cloud no fa falta. */}
+      {isLocalChat && <LocalAIStatus />}
 
       {/* Selector de PLATAFORMA: condiciona el system prompt de la IA perquè
           escriga codi NATIU (Kotlin/Compose o Swift/SwiftUI) dins l'estructura

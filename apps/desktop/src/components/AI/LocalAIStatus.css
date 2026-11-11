@@ -1,0 +1,101 @@
+/* «Estat de la IA local» — barra de salut al panell del xat.
+   Consumix els tokens del tema (--bg-*, --text-*, --accent…) perquè
+   sembli del mateix disseny que la resta de l'aplicació. */
+
+.lps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin: 0 12px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+  font-size: 11.5px;
+  color: var(--text-1);
+  line-height: 1.4;
+}
+
+.lps-ready {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-3);
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.lps-ready svg {
+  color: var(--success);
+}
+
+.lps-cpu {
+  color: var(--text-3);
+  display: none;
+}
+
+.lps-missing,
+.lps-stopped {
+  border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
+  background: color-mix(in srgb, var(--warning) 8%, var(--bg-2));
+}
+
+.lps-missing > svg:first-child,
+.lps-stopped > svg:first-child {
+  color: var(--warning);
+}
+
+.lps-no-model {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-2));
+}
+
+.lps-no-model > svg:first-child {
+  color: var(--accent);
+}
+
+.lps-downloading {
+  border-color: color-mix(in srgb, var(--accent-2) 35%, var(--border));
+}
+
+.lps-downloading > svg:first-child {
+  color: var(--accent-2);
+}
+
+.lps-label {
+  font-weight: 600;
+  color: var(--text-0);
+  flex-shrink: 0;
+}
+
+.lps-detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+}
+
+.lps-ready .lps-label {
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.lps-ready .lps-detail {
+  color: var(--text-3);
+}
+
+.lps-action {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.lps-error {
+  flex-basis: 100%;
+  color: var(--error);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

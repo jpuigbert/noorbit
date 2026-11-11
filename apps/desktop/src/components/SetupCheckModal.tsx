@@ -7,35 +7,67 @@ import {
   Loader2,
   Play,
   RefreshCw,
+  Sparkles,
   X,
 } from "lucide-react";
+import { useAIStore } from "../stores/aiStore";
+import { useUIStore } from "../stores/uiStore";
 import "./SetupCheckModal.css";
 
 /**
- * Detecció de l'entorn A L'OBRIRE NoOrbit (primera vegada i totes les
- * demés): comprova si falten components (Ollama, Blender, ComfyUI) i, si
- * n'hi ha, pregunta a l'usuari si els vols instal·lar — amb botó que fa la
- * instal·lació AUTOMÀTICA nativa del sistema (Ollama: zip oficial / install.sh
- * / OllamaSetup.exe segons el SO). Si tot hi és, no molesta gens.
+ * DETECCIÓ DE L'ENTORN A L'OBRIR NoOrbit: quatre passos reals, un darrere
+ * l'altre, com un assistent d'instal·lació. En lloc de «falta X», mostra
+ * «pas 2 de 4» amb el progrés real de la baixada i un botó per continuar.
+ *
+ *  1. Ollama (motor de la IA local)  → instal·la (nadiu del SO)
+ *  2. Servei en marxa (port 11434)   → engega
+ *  3. Model inicial (mínim 1)        → baixa (segons la RAM de la màquina)
+ *  4. Eines 3D (Blender / ComfyUI)   → instal·lador oficial
+ *
+ * La finestra apareix SEMPRE que falti alguna cosa, tret que l'usuari premi
+ * «No tornar-la a mostrar» (persistit a localStorage).
  */
 
-type Item = {
-  id: "ollama" | "blender" | "comfyui";
+type StepState = "ok" | "todo" | "busy" | "warn" | "skip";
+
+interface Step {
+  id: string;
   name: string;
   desc: string;
-  installed: boolean;
-  running?: boolean;
-  optional?: boolean;
-};
+  state: StepState;
+  /// Botó d'acció (null = res a fer).
+  action?: { label: string; run: () => Promise<void> };
+  /// Nota en vermell (error de l'última acció).
+  error?: string | null;
+  /// Text de progrés (p. ex. «descarregant 42 %»).
+  progress?: string | null;
+}
 
 export default function SetupCheckModal() {
   const [visible, setVisible] = useState(false);
-  const [items, setItems] = useState<Item[] | null>(null);
+  const [steps, setSteps] = useState<Step[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  /// «No tornar-la a mostrar» de l'usuari (persistant): si és «1», aquesta
-  /// finestra no apareix mai més — ho pot tornar a activar des de Configuració.
+  const [starter, setStarter] = useState<string | null>(null);
+  /// «No tornar-la a mostrar» de l'usuari (persistant).
   const [muted, setMuted] = useState(false);
+
+  const pulling = useAIStore((s) => s.pulling);
+  const models = useAIStore((s) => s.models);
+  const loadModels = useAIStore((s) => s.loadModels);
+  /// Obertura manual (barra d'estat): l'usuari pot demanar l'assistent
+  /// quan vulgui, encara que l'hagi silenciat.
+  const showSetupCheck = useUIStore((s) => s.showSetupCheck);
+  const setShowSetupCheck = useUIStore((s) => s.setShowSetupCheck);
+
+  useEffect(() => {
+    if (showSetupCheck) {
+      setVisible(true);
+      void detect();
+      setShowSetupCheck(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSetupCheck]);
 
   const muteForever = () => {
     try {
@@ -54,32 +86,110 @@ export default function SetupCheckModal() {
       invoke<{ installed: boolean }>("blender_status").catch(() => ({ installed: false })),
       invoke<boolean>("comfyui_installed").catch(() => false),
     ]);
-    const list: Item[] = [
+    await loadModels().catch(() => undefined);
+    let starterName = starter;
+    if (!starterName) {
+      starterName = await invoke<string>("ollama_starter_model").catch(() => null);
+      setStarter(starterName);
+    }
+    const progress = Object.values(pulling)[0] ?? null;
+    const next: Step[] = [
       {
         id: "ollama",
-        name: "Ollama — IA local",
-        desc: "Sense això el xat no pot pensar en local (no respon al port 11434).",
-        installed: ollama,
-        running: ollamaUp,
+        name: "Ollama — motor de la IA local",
+        desc: "El motor que fa que el xat funcioni al teu ordinador, sense Internet.",
+        state: ollama ? "ok" : "todo",
+        action: ollama
+          ? undefined
+          : {
+              label: "Instal·la",
+              run: async () => {
+                setMsg(await invoke<string>("install_ollama"));
+              },
+            },
+      },
+      {
+        id: "serve",
+        name: "Servei de l'IA en marxa",
+        desc: "Ollama ha d'escoltar al port 11434 per poder respondre.",
+        state: ollamaUp ? "ok" : ollama ? "todo" : "skip",
+        action:
+          ollamaUp || !ollama
+            ? undefined
+            : {
+                label: "Engega",
+                run: async () => {
+                  setMsg(await invoke<string>("start_ollama"));
+                },
+              },
+      },
+      {
+        id: "model",
+        name: "Model de llenguatge",
+        desc: starterName
+          ? `Cap model no serveix de res: baixa «${starterName}» (l'adaptat a la memòria d'aquest equip).`
+          : "Cap model no serveix de res: baixa un model perquè la IA pugui pensar.",
+        state:
+          models.length > 0
+            ? "ok"
+            : !ollamaUp
+              ? "skip"
+              : pulling.length > 0
+                ? "busy"
+                : "todo",
+        progress,
+        action:
+          models.length > 0 || !ollamaUp
+            ? undefined
+            : {
+                label: starterName ? `Baixa ${starterName}` : "Baixa el model",
+                run: async () => {
+                  const name = await invoke<string>("ollama_pull_starter");
+                  setMsg(`Model «${name}» a punt.`);
+                },
+              },
       },
       {
         id: "blender",
         name: "Blender — 3D i vídeo",
-        desc: "Modelatge 3D i vídeos amb ordres de la IA.",
-        installed: blender.installed,
+        desc: "Per modelar en 3D i fer vídeos amb ordres de la IA.",
+        state: blender.installed ? "ok" : "todo",
+        action: blender.installed
+          ? undefined
+          : {
+              label: "Instal·la",
+              run: async () => {
+                await invoke("open_externally", {
+                  path: "https://www.blender.org/download/",
+                });
+                setMsg(
+                  "S'ha obert la pàgina oficial de Blender. Un cop instal·lat, prem «Revisa» i NoOrbit el detectarà sol."
+                );
+              },
+            },
       },
       {
         id: "comfyui",
         name: "ComfyUI — imatges (opcional)",
-        desc: "Generació d'imatges local en CPU. No és imprescindible.",
-        installed: comfy,
-        optional: true,
+        desc: "Generació d'imatges local en CPU. No és imprescindible: es pot endur endarrere.",
+        state: comfy ? "ok" : "warn",
+        action: comfy
+          ? undefined
+          : {
+              label: "Instal·la",
+              run: async () => {
+                setMsg(await invoke<string>("install_comfyui"));
+              },
+            },
       },
     ];
-    setItems(list);
-    // Només molesta si falta un component IMPRESCINDIBLE (Ollama o Blender);
-    // ComfyUI és opcional i no obri la finestra sol, es veu dins la llista.
-    if (!ollama || !blender.installed) setVisible(true);
+    setSteps(next);
+    // Obre la finestra si falta alguna cosa IMPORTANT (Ollama, servei, model
+    // o Blender). ComfyUI és opcional i no la fa obrir sol.
+    const faltaImportant = next.some(
+      (s) => (s.id === "ollama" || s.id === "serve" || s.id === "model" || s.id === "blender") && s.state !== "ok"
+    );
+    if (faltaImportant) setVisible(true);
   };
 
   useEffect(() => {
@@ -95,105 +205,103 @@ export default function SetupCheckModal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const act = async (item: Item) => {
-    setBusy(item.id);
+  // Si el backend baixa un model automàticament (l'IA engegada en segon pla),
+  // l'interface s'actualitza sola.
+  useEffect(() => {
+    if (!visible) return;
+    const id = setInterval(() => void detect(), 4000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, pulling]);
+
+  const act = async (step: Step) => {
+    if (!step.action) return;
+    setBusy(step.id);
     setMsg(null);
     try {
-      if (item.id === "ollama") {
-        // Auto-instal·lació nativa del SO (o engegada del servei si ja hi és).
-        setMsg(
-          item.installed && !item.running
-            ? await invoke<string>("start_ollama")
-            : await invoke<string>("install_ollama")
-        );
-      } else if (item.id === "blender") {
-        // Blender es baixa des de la pàgina oficial (instal·lador d'usuari).
-        await invoke("open_externally", { path: "https://www.blender.org/download/" });
-        setMsg(
-          "S'ha obert la pàgina de descàrrega de Blender. Un cop instal·lat, prem «Revisa» i NoOrbit el detectarà sol."
-        );
-      } else {
-        setMsg(await invoke<string>("install_comfyui"));
-      }
-      await detect();
+      await step.action.run();
     } catch (e) {
       setMsg(String(e));
     } finally {
       setBusy(null);
+      await detect();
     }
   };
 
   if (!visible) return null;
-  const missing = (items ?? []).filter((i) => !i.installed);
+  const list = steps ?? [];
+  const pendents = list.filter((s) => s.state === "todo" || s.state === "busy").length;
+  const nextStep = list.find((s) => s.action && s.state !== "ok");
+
   return (
     <div className="modal-overlay" onClick={() => setVisible(false)}>
       <div className="modal sc-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <span>Comprovació de l'entorn de NoOrbit</span>
+          <span>Posant NoOrbit en marxa</span>
           <button className="icon-btn" onClick={() => setVisible(false)}>
             <X size={14} />
           </button>
         </div>
         <div className="modal-body">
           <p className="sc-intro">
-            {items === null
-              ? "Detectant components…"
-              : missing.length === 0
-                ? "Tot a punt: no falta res."
-                : "Falten components perquè NoOrbit funcioni del tot. Es poden instal·lar automàticament:"}
+            {steps === null
+              ? "Comprovant l'entorn…"
+              : pendents === 0
+                ? "Tot a punt: NoOrbit ja pot treballar amb la IA local."
+                : `Falt ${pendents} pas${pendents === 1 ? "" : "s"} perquè tot funcioni. Tu pots continuar i nosaltres ho fem tot sol.`}
           </p>
+
           <div className="sc-list">
-            {items?.map((i) => (
-              <div className={"sc-item" + (i.installed ? " ok" : "")} key={i.id}>
-                {i.installed ? (
-                  <CheckCircle2 size={15} className="sc-ok" />
-                ) : (
-                  <AlertCircle size={15} className="sc-warn" />
-                )}
+            {list.map((s, i) => (
+              <div className={"sc-item" + (s.state === "ok" ? " ok" : "")} key={s.id}>
+                <span className="sc-step-no">
+                  {s.state === "ok" ? (
+                    <CheckCircle2 size={15} className="sc-ok" />
+                  ) : s.state === "busy" ? (
+                    <Loader2 size={15} className="sc-spin sc-accent" />
+                  ) : s.state === "skip" ? (
+                    <span className="sc-skip">—</span>
+                  ) : s.state === "warn" ? (
+                    <AlertCircle size={15} className="sc-warn" />
+                  ) : (
+                    <span className="sc-num">{i + 1}</span>
+                  )}
+                </span>
                 <div className="sc-info">
                   <div className="sc-name">
-                    {i.name}
-                    {i.installed && i.running === false ? (
-                      <span className="sc-off"> · aturat</span>
-                    ) : null}
+                    {s.name}
+                    {s.state === "skip" ? <span className="sc-off"> · pendent</span> : null}
+                    {s.state === "ok" ? <span className="sc-ok-tag"> · a punt</span> : null}
                   </div>
-                  <div className="sc-desc">{i.desc}</div>
+                  <div className="sc-desc">{s.desc}</div>
+                  {s.progress ? <div className="sc-progress">{s.progress}</div> : null}
                 </div>
-                {i.installed ? (
-                  i.running === false ? (
-                    <button
-                      className="btn sm"
-                      disabled={busy !== null}
-                      onClick={() => void act(i)}
-                    >
-                      {busy === i.id ? (
-                        <Loader2 size={12} className="sc-spin" />
-                      ) : (
-                        <Play size={12} />
-                      )}
-                      Engega
-                    </button>
-                  ) : (
-                    <span className="sc-state">Instal·lat</span>
-                  )
-                ) : (
+                {s.action ? (
                   <button
                     className="btn primary sm"
                     disabled={busy !== null}
-                    onClick={() => void act(i)}
+                    onClick={() => void act(s)}
                   >
-                    {busy === i.id ? (
+                    {busy === s.id ? (
                       <Loader2 size={12} className="sc-spin" />
+                    ) : s.id === "model" ? (
+                      <Sparkles size={12} />
+                    ) : s.id === "serve" ? (
+                      <Play size={12} />
                     ) : (
                       <Download size={12} />
                     )}
-                    {busy === i.id ? "Instal·lant…" : "Instal·la"}
+                    {busy === s.id ? "En curs…" : s.action.label}
                   </button>
-                )}
+                ) : s.state === "ok" ? (
+                  <span className="sc-state">Fet</span>
+                ) : null}
               </div>
             ))}
           </div>
+
           {msg && <div className="sc-msg">{msg}</div>}
+
           <div className="mm-ollama-actions" style={{ justifyContent: "space-between" }}>
             <div className="sc-left-actions">
               <button className="btn sm ghost" disabled={busy !== null} onClick={() => void detect()}>
@@ -206,7 +314,7 @@ export default function SetupCheckModal() {
               )}
             </div>
             <button className="btn primary sm" onClick={() => setVisible(false)}>
-              Continua
+              {nextStep ? "Continua igual" : "Comença"}
             </button>
           </div>
         </div>

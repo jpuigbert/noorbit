@@ -2103,13 +2103,29 @@ impl AiManager {
     /// (quantització Q4 d'ollama.com): prou per seguir instruccions i escriure
     /// codi sense quedar-se sense memòria. Un Mac Intel de 8 GB amb qwen3:4b
     /// va bé; màquines modestes reben el 1.7b o el 0.6b.
-    fn starter_model_name() -> String {
+    pub fn starter_model_name() -> String {
         const GB: u64 = 1024 * 1024 * 1024;
         match Self::total_memory_bytes() {
             Some(ram) if ram >= 8 * GB => "qwen3:4b".to_string(),
             Some(ram) if ram >= 4 * GB => "qwen3:1.7b".to_string(),
             _ => "qwen3:0.6b".to_string(),
         }
+    }
+
+    /// El model demanat no està instal·lat (404) però Ollama TÉ d'altres:
+    /// en tria un de JA INSTAL·LAT per continuar (preferint el model inicial)
+    /// — el xat funciona DE SEGUIT sense baixar res i l'usuari veu l'avís.
+    /// None si realment no hi ha cap model instal·lat (llavors toca l'inicial).
+    fn pick_fallback_model(installed: &[OllamaModel]) -> Option<String> {
+        if installed.is_empty() {
+            return None;
+        }
+        let starter = Self::starter_model_name();
+        installed
+            .iter()
+            .find(|m| m.name == starter)
+            .or_else(|| installed.first())
+            .map(|m| m.name.clone())
     }
 
     /// Baixa el MODEL INICIAL si Ollama no té CAP model instal·lat (estat
@@ -2876,6 +2892,9 @@ impl AiManager {
         // error tècnic, baixem el model inicial (progrés a «ai://pull») i
         // REINTENTEM el mateix xat una vegada: l'usuari no ha de fer res.
         let mut starter_tried = false;
+        // Model de RESERVA ja instal·lat si el triat no hi és (404): una sola
+        // vegada — si el de reserva tampoc va (impossible en teoria), error.
+        let mut fallback_used: Option<String> = None;
         let resp = loop {
             // El futur «send» reté el préstec de «req»: el contenim en un
             // bloc propi perquè mori ABANS de poder substituir el model.
@@ -2918,30 +2937,65 @@ impl AiManager {
             };
             resp // el futur «send» i el seu préstec de «req» moren aquí
             };
-            if resp.status().as_u16() != 404 || starter_tried {
+            if resp.status().as_u16() != 404 || starter_tried || fallback_used.is_some() {
                 break resp;
             }
             starter_tried = true;
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            let sense_models = self
-                .list_models()
-                .await
-                .map(|m| m.is_empty())
-                .unwrap_or(false);
-            if !sense_models {
-                // El model demanat no existeix però sí que n'hi ha d'altres
-                // instal·lats: error normal (el model triat no és al sistema).
+            let instalats = self.list_models().await.unwrap_or_default();
+            let ja_hi_es = instalats.iter().any(|m| m.name == model_label);
+            if ja_hi_es {
+                // 404 amb un model que SÍ és a la llista (volum expulsat,
+                // model esborrat mentre volava…): error normal explicat.
                 let note = ollama_error_note(&model_label, status, &body);
+                ctl.process(app, "ollama", &model_label, "error", &note, start.elapsed().as_millis() as u64);
+                return Err(anyhow!("Ollama error {}: {}", status, body));
+            }
+            if !instalats.is_empty() {
+                // EL MODEL DEMANAT NO ÉS però es pot BAIXAR: descarrega'l
+                // («descarregant model» amb progrés en viu, un sol cop) i
+                // torna a provar el MATEIX xat amb ell — l'usuari no fa res.
                 ctl.process(
                     app,
                     "ollama",
                     &model_label,
-                    "error",
-                    &note,
+                    "thinking",
+                    &format!(
+                        "El model «{}» no està instal·lat a Ollama: DESCARREGANT MODEL \
+                         (progrés al gestor de models; pot trigar uns minuts)…",
+                        model_label
+                    ),
                     start.elapsed().as_millis() as u64,
                 );
-                return Err(anyhow!("Ollama error {}: {}", status, body));
+                match self.pull_model(Some(app), &model_label).await {
+                    Ok(_) => continue, // ja baixat: reintent amb el mateix model
+                    Err(e) => {
+                        // No s'ha pogut baixar (nom inventat, xarxa, disc ple):
+                        // RESERVA amb un model JA instal·lat per no tallar el xat.
+                        let Some(fb) = Self::pick_fallback_model(&instalats) else {
+                            let note = ollama_error_note(&model_label, status, &body);
+                            ctl.process(app, "ollama", &model_label, "error", &note, start.elapsed().as_millis() as u64);
+                            return Err(anyhow!("Ollama error {}: {} (i la descàrrega ha fallat: {})", status, body, e));
+                        };
+                        ctl.process(
+                            app,
+                            "ollama",
+                            &model_label,
+                            "thinking",
+                            &format!(
+                                "No he pogut descarregar «{}» ({}). Faig servir «{}», \
+                                 que ja tens baixat — si vols el de primer, baixa'l \
+                                 des del gestor de models (menú IA).",
+                                model_label, e, fb
+                            ),
+                            start.elapsed().as_millis() as u64,
+                        );
+                        fallback_used = Some(fb.clone());
+                        req.model = fb;
+                        continue;
+                    }
+                }
             }
             ctl.process(
                 app,
@@ -3238,20 +3292,36 @@ impl AiManager {
             // mentre el xat normal funcionava.
             if resp.status().as_u16() == 404 {
                 let body = resp.text().await.unwrap_or_default();
-                let sense_models = self
-                    .list_models()
-                    .await
-                    .map(|m| m.is_empty())
-                    .unwrap_or(false);
-                if !sense_models {
-                    // El model demanat no existeix però sí que n'hi ha
-                    // d'altres instal·lats: error normal.
+                let instalats = self.list_models().await.unwrap_or_default();
+                let ja_hi_es = instalats.iter().any(|m| m.name == model_label);
+                if ja_hi_es {
+                    // El model hi és però 404 igualment (esborrat mentre
+                    // volava…): error normal.
                     return Err(anyhow!("Ollama error 404: {}", body));
                 }
-                let nom = Self::starter_model_name();
-                self.pull_model(None, &nom).await?;
-                req.model = nom;
-                resp = Self::send_chat(&self.http, &chat_url, &req).await?;
+                if !instalats.is_empty() {
+                    // El model DEMANAT no és: DESCARREGA'L (silenciós, sense
+                    // AppHandle) i reintent una vegada amb ell.
+                    if self.pull_model(None, &model_label).await.is_ok() {
+                        resp = Self::send_chat(&self.http, &chat_url, &req).await?;
+                    } else if let Some(fb) = Self::pick_fallback_model(&instalats) {
+                        // La descàrrega ha fallat: reserva amb un JA instal·lat.
+                        req.model = fb;
+                        resp = Self::send_chat(&self.http, &chat_url, &req).await?;
+                    } else {
+                        // Res instal·lat útil: baixa l'inicial i reintent.
+                        let nom = Self::starter_model_name();
+                        self.pull_model(None, &nom).await?;
+                        req.model = nom;
+                        resp = Self::send_chat(&self.http, &chat_url, &req).await?;
+                    }
+                } else {
+                    // Ollama SENSE CAP model: baixem l'inicial i reintentem.
+                    let nom = Self::starter_model_name();
+                    self.pull_model(None, &nom).await?;
+                    req.model = nom;
+                    resp = Self::send_chat(&self.http, &chat_url, &req).await?;
+                }
             }
             if !resp.status().is_success() {
                 let status = resp.status();

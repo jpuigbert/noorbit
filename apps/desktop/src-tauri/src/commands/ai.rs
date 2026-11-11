@@ -440,6 +440,35 @@ pub async fn ollama_is_running(state: State<'_, AppState>) -> Result<bool, Strin
     Ok(ai.is_running().await)
 }
 
+/// Model INICIAL recomanat per a aquesta màquina (segons la RAM): el que
+/// NoOrbit baixa automàticament quan Ollama no té cap model. La interfície
+/// l'ofereix com a «Baixa el model inicial» amb un clic.
+#[command]
+pub async fn ollama_starter_model() -> Result<String, String> {
+    Ok(AiManager::starter_model_name())
+}
+
+/// Baixa el model inicial d'Ollama (el primer cop només). Retorna el nom
+/// baixat; si ja n'hi havia un, retorna el que hi ha.
+#[command]
+pub async fn ollama_pull_starter(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let ai = state.ai_manager.clone();
+    match ai.pull_starter_model(&app).await {
+        Some(name) => Ok(name),
+        None => {
+            // Pot ser que ja tingui models (res a fer) o que la baixada falli.
+            let models = ai.list_models().await.unwrap_or_default();
+            match models.first() {
+                Some(m) => Ok(m.name.clone()),
+                None => Err("No s'ha pogut baixar el model inicial (xarxa o espai al disc).".into()),
+            }
+        }
+    }
+}
+
 #[command]
 pub async fn ollama_list_models(state: State<'_, AppState>) -> Result<Vec<OllamaModel>, String> {
     let ai = state.ai_manager.clone();
