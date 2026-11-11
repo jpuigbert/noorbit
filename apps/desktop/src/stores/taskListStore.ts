@@ -16,12 +16,19 @@ export interface TaskItem {
   /// Qui la va afegir: «ia» (directriu) o «usuari» (a mà). Només informatiu.
   by: "ia" | "usuari";
   at: number;
+  /// La IA ha dit «@doing:» sobre aquesta tasca: és la que té ENTRE MANS ara
+  /// mateix. Una sola a la vegada (la darrera directriu guanya); s'aixeca al
+  /// marcar-la feta o quan una altra passa a en curs.
+  doing?: boolean;
 }
 
 interface TaskListState {
   items: TaskItem[];
   add: (text: string, by?: "ia" | "usuari") => void;
   complete: (match: string) => void;
+  /// Marca la tasca que la IA té ENTRE MANS («@doing: text»): n'aixeca qualsevol
+  /// altra de «en curs» i posa-ho a la coincident (exacta o per contenció).
+  markDoing: (match: string) => void;
   toggle: (id: string) => void;
   remove: (id: string) => void;
   clear: () => void;
@@ -86,7 +93,9 @@ export const useTaskListStore = create<TaskListState>((set, get) => ({
     if (!norm) return;
     const hit = get().items.find((t) => !t.done && t.text.trim().toLowerCase() === norm);
     if (hit) {
-      set((s) => ({ items: s.items.map((t) => (t.id === hit.id ? { ...t, done: true } : t)) }));
+      set((s) => ({
+        items: s.items.map((t) => (t.id === hit.id ? { ...t, done: true, doing: false } : t)),
+      }));
       persist(get().items);
       return;
     }
@@ -96,9 +105,31 @@ export const useTaskListStore = create<TaskListState>((set, get) => ({
       (t) => !t.done && (t.text.toLowerCase().includes(norm) || norm.includes(t.text.toLowerCase()))
     );
     if (partial) {
-      set((s) => ({ items: s.items.map((t) => (t.id === partial.id ? { ...t, done: true } : t)) }));
+      set((s) => ({
+        items: s.items.map((t) => (t.id === partial.id ? { ...t, done: true, doing: false } : t)),
+      }));
       persist(get().items);
     }
+  },
+
+  /// «@doing: text» de la IA: la tasca que té ENTRE MANS ARA (es veu en viu a
+  /// la llista fixada del xat). Coincidència exacta o per contenció, com
+  /// «complete». Sense coincidència amb cap tasca, no fa res (no inventa línies).
+  markDoing: (match) => {
+    const norm = match.trim().toLowerCase();
+    if (!norm) return;
+    const items = get().items;
+    const hit =
+      items.find((t) => !t.done && t.text.trim().toLowerCase() === norm) ??
+      items.find(
+        (t) => !t.done && (t.text.toLowerCase().includes(norm) || norm.includes(t.text.toLowerCase()))
+      );
+    if (!hit) return;
+    if (items.every((t) => (t.doing ? t.id === hit.id : !t.doing))) return; // ja ho estava
+    set((s) => ({
+      items: s.items.map((t) => ({ ...t, doing: t.id === hit.id })),
+    }));
+    persist(get().items);
   },
 
   toggle: (id) => {
@@ -124,8 +155,9 @@ export const useTaskListStore = create<TaskListState>((set, get) => ({
     const lines = [
       "LLISTA DE TASQUES DEL PROJECTE (no et perdes res: completa-les i no en " +
         "deixes cap sense resoldre):",
-      ...pendents.map((i) => `[ ] ${i.text}`),
+      ...pendents.map((i) => `${i.doing ? "[~ EN CURS]" : "[ ]"} ${i.text}`),
       ...fetes.map((i) => `[x] ${i.text}`),
+      "Quan comences a treballar-ne una, emet una línia «@doing: <text de la tasca>» (marca-la EN CURS: l'usuari veurà el progrés en viu).",
       "Quan resolguis una tasca, emet una línia «@done: <text exacte de la tasca>».",
       "Si detectes una tasca nova, afegeix-la amb «@todo: <descripció>».",
     ];

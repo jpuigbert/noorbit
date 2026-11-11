@@ -360,7 +360,11 @@
     "reopen": "Tornar a pendient",
     "remove": "Treure de la llista",
     "clear": "Buida la llista",
-    "byIa": "IA"
+    "byIa": "IA",
+    "hide": "Amaga la llista (el comptador queda a la franja)",
+    "show": "Mostra la llista de tasques",
+    "doing": "En curs",
+    "doingLive": "Treballant en"
   },
   "account": {
     "title": "Compte de NoOrbit",

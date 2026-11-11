@@ -357,6 +357,8 @@ const AGENT_CREATION_SYSTEM =
   "LLISTA DE TASQUES (per no perdre't ni tu ni els agents): manté un checklist. " +
   "Quan identifiques una tasca pendient, afegeix-la amb una línia:\n" +
   "@todo: descripció curta de la tasca\n" +
+  "Quan COMENCES a treballar-ne una, marca-la EN CURS amb una línia:\n" +
+  "@doing: text de la tasca que fas ara (l'usuari veurà el progrés en viu a la llista)\n" +
   "Quan en completes una, marca-la amb:\n" +
   "@done: text exacte de la tasca completada\n" +
   "NoOrbit mostra eixa llista a tot el xat i la manté visible per a tots els " +
@@ -959,9 +961,10 @@ async function applyDelegateDirectives(raw: string, sid: string): Promise<string
 }
 
 // ── LLISTA DE TASQUES («@todo:» / «@done:») ──────────────────────────────────
-function parseTodoDirectives(raw: string): { add: string[]; done: string[] } {
+function parseTodoDirectives(raw: string): { add: string[]; done: string[]; doing: string[] } {
   const add: string[] = [];
   const done: string[] = [];
+  const doing: string[] = [];
   for (const line of raw.split(/\r?\n/)) {
     const a = line.match(/^\s*@\s*(?:todo|pendent|pendient|task)\s*:\s*(.+?)\s*$/i);
     if (a) {
@@ -973,15 +976,23 @@ function parseTodoDirectives(raw: string): { add: string[]; done: string[] } {
     if (d) {
       const t = d[1].replace(/^[`'"]+|[`'"]+$/g, "").trim();
       if (t) done.push(t);
+      continue;
+    }
+    // «@doing:» (o «@fent:»/«@en curs:»): la tasca que la IA té ENTRE MANS
+    // ara mateix — es veu EN VIU a la llista fixada («~ En curs»).
+    const w = line.match(/^\s*@\s*(?:doing|fent|en\s+curs|in\s+progress)\s*:\s*(.+?)\s*$/i);
+    if (w) {
+      const t = w[1].replace(/^[`'"]+|[`'"]+$/g, "").trim();
+      if (t) doing.push(t);
     }
   }
-  return { add, done };
+  return { add, done, doing };
 }
 
 /// Aplica les directrius de checklist als «taskListStore». Retorna un resum o null.
 function applyTodoDirectives(raw: string): string | null {
-  const { add, done } = parseTodoDirectives(raw);
-  if (add.length === 0 && done.length === 0) return null;
+  const { add, done, doing } = parseTodoDirectives(raw);
+  if (add.length === 0 && done.length === 0 && doing.length === 0) return null;
   const store = useTaskListStore.getState();
   const added: string[] = [];
   for (const t of add) {
@@ -995,8 +1006,18 @@ function applyTodoDirectives(raw: string): string | null {
     store.complete(t);
     if (useTaskListStore.getState().items.filter((i) => !i.done).length < pendBefore) completed.push(t);
   }
+  // EN CURS: la darrera directriu «@doing:» guanya (només n'hi ha una a la vegada).
+  const doingNow: string[] = [];
+  for (const t of doing) {
+    const before = useTaskListStore.getState().items.find((i) => i.doing);
+    store.markDoing(t);
+    const after = useTaskListStore.getState().items.find((i) => i.doing);
+    if (after && after.id !== before?.id) doingNow.push(after.text);
+  }
   const lines: string[] = [];
   if (added.length > 0) lines.push("📌 Tasques afegides a la llista:\n" + added.map((x) => `• ${x}`).join("\n"));
+  if (doingNow.length > 0)
+    lines.push("⏳ La IA està treballant ara mateix en:\n" + doingNow.map((x) => `• ${x}`).join("\n"));
   if (completed.length > 0)
     lines.push("✔️ Tasques marcades com a fetes:\n" + completed.map((x) => `• ${x}`).join("\n"));
   return lines.length > 0 ? lines.join("\n\n") : null;

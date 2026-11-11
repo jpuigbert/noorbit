@@ -904,8 +904,17 @@ export default function AgentPanel() {
 
       {/* Checklist compartida FIXADA A DAMUNT DEL XAT: tasques de la IA i de
           l'usuari que no s'han de perdre amb l'scroll. S'injecta al context de
-          la principal i dels agents perquè ningú es perda cap punt del treball. */}
-      <TaskChecklist />
+          la principal i dels agents perquè ningú es perda cap punt del treball.
+          Quan la IA treballa, mostra EN VIU la tasca «@doing:» i l'últim pas.
+          L'usuari la pot amagar amb el botó ▲ (es recorda entre sessions). */}
+      <TaskChecklist
+        running={running}
+        liveStep={
+          sess.timeline.length > 0
+            ? sess.timeline[sess.timeline.length - 1]
+            : null
+        }
+      />
 
       <div
         className="agent-body"
