@@ -168,6 +168,57 @@ fn image_requested(prompt: &str, text: &str) -> bool {
     !text.contains("IMG|")
 }
 
+/// Detecta quan l'usuari demana CODI (projecte, botiga, script…) i la IA
+/// respon amb NOMÉS DOCUMENTACIÓ (README o blocs .md). Els models locals
+/// dèbils ho fan molt sovint: es fan el savis i escriuen un README en lloc
+/// de codi, i el projecte queda buit de codi.
+fn nomes_documentacio(prompt: &str, text: &str) -> bool {
+    use regex::Regex;
+    let demana_codi = Regex::new(
+        r"(?i)\b(fes|fer|crea|crear|genera|generar|escriu|escriure|implementa|implementar|munta|montar|constru[ïi]r|programa|programar|code|codea|build)\b[^.!?\n]{0,70}\b(codi|code|projecte|botiga|store|web|app|aplicaci[oó]|plugin|pl[oó]gin|theme|tema|script|component|servei|api|backend|frontend|dashboard|funcionalitat)\b",
+    )
+    .map(|r| r.is_match(prompt))
+    .unwrap_or(false);
+    if !demana_codi {
+        return false;
+    }
+    // Hi ha algun fitxer de CODI (no .md) a la resposta?
+    let té_codi = Regex::new(r"(?i)@file:\s*\S+\.(php|py|js|jsx|ts|tsx|rs|java|kt|kts|swift|css|scss|html|vue|svelte|go|rb|c|cpp|h|json|yml|yaml|toml|sql|sh)")
+        .map(|r| r.is_match(text))
+        .unwrap_or(false);
+    if té_codi {
+        return false;
+    }
+    // Hi ha «@file:»? llavors TOTS són .md → només documentació.
+    let Ok(re_file) = Regex::new(r"(?i)@file:\s*([^\s]+)") else {
+        return false;
+    };
+    let fitxers: Vec<String> = re_file
+        .captures_iter(text)
+        .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
+        .collect();
+    if !fitxers.is_empty() {
+        return fitxers
+            .iter()
+            .all(|f| f.to_lowercase().ends_with(".md") || f.to_lowercase().ends_with(".markdown"));
+    }
+    // Sense «@file:»: només compta si la resposta parla de documentació.
+    Regex::new(r"(?i)(README|documenta|millora|estructura del|caracter[íi]stiques|instal·lació|descripci[oó])")
+        .map(|r| r.is_match(text))
+        .unwrap_or(false)
+}
+
+/// Recordatori per quan l'usuari demanava CODI i la IA ha respost amb
+/// DOCUMENTACIÓ (README/blocs .md): el CODE_NUDGE normal no s'activaria perquè
+/// sí que hi ha «@file:» — però són tots .md, i un projecte de documentació no
+/// és un projecte. Aquí li diem que escrigui el codi real.
+const DOCS_ONLY_NUDGE: &str = "NoOrbit: l'usuari demanava CÓDI i tu has respost amb \
+DOCUMENTACIÓ (README/blocs .md): això NO crea el projecte, només en descriu les \
+pestanyes. Ara escriu el CÓDI REAL: un bloc «@file: ruta.ext» per cada fitxer del \
+projecte (amb el codi COMPLET dins, sense «...» ni placeholders), començant pel \
+més important (si el projecte és gran, fes-ho a trossos: primer els fitxers \
+essencials i després la resta). ATURA el torn després d'emetre els fitxers.";
+
 /// Recordatori per quan ha parlat de la imatge sense fer-la: que emet CLIC
 /// la directriu «IMG|» i ature el torn — la generació la fa el sistema.
 const IMG_NUDGE: &str = "NoOrbit: l'usuari ha demanat CREAR una IMATGE i no has \
@@ -330,6 +381,9 @@ async fn chat_with_tools(
     let mut img_nudged = false;
     // «Emet tot el projecte» (README + pla sense codi): un sol recordatori.
     let mut project_nudged = false;
+    // Ha demanat CODI i ha respost amb només .md (documentació): un sol
+    // recordatori perquè escrigui el codi de veritat.
+    let mut docs_nudged = false;
     // Tasca de codi/proves respost amb prosa i cap fitxer: un sol recordatori.
     let mut code_nudged = false;
     let mut tests_nudged = false;
@@ -423,6 +477,20 @@ async fn chat_with_tools(
                     current = PROJECT_NUDGE.to_string();
                     continue;
                 }
+            }
+            // I si l'usuari demanava CODI i la resposta només conté
+            // DOCUMENTACIÓ (tots els «@file:» són .md)? Aquest cas NO el
+            // captura el CODE_NUDGE normal (hi ha fitxers, però no són codi):
+            // sense aquest recordatori el model es queda fent README i
+            // «bloc_2.md» fins que s'esgota.
+            if round < MAX_ROUNDS && !docs_nudged && nomes_documentacio(prompt, &text) {
+                docs_nudged = true;
+                opts.history.push(HistoryTurn {
+                    role: "assistant".into(),
+                    content: text.clone(),
+                });
+                current = DOCS_ONLY_NUDGE.to_string();
+                continue;
             }
             // I si l'usuari ha demanat FER codi (implementar, crear, modificar,
             // arreglar…) i la resposta no té ni fitxers ni cap bloc de codi?
@@ -574,6 +642,30 @@ pub async fn send_prompt(
         question.as_deref(),
     )
     .await
+}
+
+/// Xat CRU: cap eina, cap directriu, cap execució — només el text. Es fa
+/// servir per generar el contingut d'UN fitxer (a trossos): com que no hi ha
+/// eines connectades, el model no pot llançar cap ordre «RUN|» per accident
+/// ni escriure res al projecte pel camí.
+#[command]
+pub async fn ai_chat_plain(
+    state: State<'_, AppState>,
+    prompt: String,
+    system: Option<String>,
+    provider: Option<String>,
+    model: Option<String>,
+) -> Result<String, String> {
+    let ai: Arc<AiManager> = state.ai_manager.clone();
+    let opts = ChatOpts {
+        provider,
+        model,
+        history: Vec::new(),
+        images: Vec::new(),
+    };
+    ai.chat_opts(&prompt, system.as_deref(), &opts)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Envia un prompt i va emetent fragments amb l'event «ai://chunk» mentre el
@@ -1565,5 +1657,31 @@ mod nudge_tests {
         assert!(!has_file_blocks("He creat el fitxer src/app.py"));
         assert!(has_code_fence("prova:\n```python\nx = 1\n```"));
         assert!(!has_code_fence("només prosa"));
+    }
+
+    /// El cas que es repetia: l'usuari demana el codi del projecte i la IA
+    /// respon amb README + blocs .md (documentació) en lloc de codi.
+    #[test]
+    fn detecta_nomes_documentacio() {
+        // Només .md → és documentació (cal el recordatori «escriu el codi»).
+        assert!(nomes_documentacio(
+            "FES TOT EL CODI DE EL PROGECTE!",
+            "@file: README.md\n# Store wp one\n\n## Característiques\n- Responsive\n"
+        ));
+        // Tot .md però sense demanar codi → no es toca.
+        assert!(!nomes_documentacio(
+            "explica'm el README",
+            "@file: README.md\n# Store\n"
+        ));
+        // Hi ha codi de veritat (.php) → no és «només documentació».
+        assert!(!nomes_documentacio(
+            "fes el codi de la botiga en WordPress",
+            "@file: functions.php\n<?php\necho 'hola';\n"
+        ));
+        // Sense «@file:» però parlant de millores/documentació.
+        assert!(nomes_documentacio(
+            "fes el codi del projecte",
+            "Millora de l'estructura del README.md: això seria el document."
+        ));
     }
 }

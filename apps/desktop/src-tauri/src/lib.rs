@@ -226,6 +226,7 @@ pub fn run() {
             commands::update::check_update,
             // IA
             commands::ai::send_prompt,
+            commands::ai::ai_chat_plain,
             commands::ai::send_prompt_stream,
             commands::ai::list_providers,
             commands::ai::set_active_provider,

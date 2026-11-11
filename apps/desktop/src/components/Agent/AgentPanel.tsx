@@ -83,6 +83,8 @@ export default function AgentPanel() {
   // la seva generació en curs. Tots els botons d'aquest panell actuen SOBRE
   // AQUEST XAT; un altre xat pot estar treballant alhora sense molestar-lo.
   const sess = useActiveChat();
+  const showThinking = useAgentStore((s) => s.showThinking);
+  const setShowThinking = useAgentStore((s) => s.setShowThinking);
   const {
     messages,
     lastResult,
@@ -972,6 +974,16 @@ export default function AgentPanel() {
                 <span className="chat-fork-origin"> ⑂ {t("agent.forkedFrom")}</span>
               )}
             </span>
+            {/* Amagar el text del raonament: per a qui el vol llegir i per a
+                qui l'estorba. Es recorda entre sessions. */}
+            <button
+              className="icon-btn"
+              onClick={() => setShowThinking(!showThinking)}
+              title={showThinking ? t("agent.hideThinking") : t("agent.showThinking")}
+              style={{ opacity: showThinking ? 0.85 : 0.45 }}
+            >
+              <Brain size={12} />
+            </button>
             <button className="icon-btn" onClick={() => clearChat(activeId)} title={t("agent.chatClear")}>
               <Trash2 size={12} />
             </button>
@@ -1039,10 +1051,11 @@ export default function AgentPanel() {
             </div>
           ) : (
             <div key={i} className="chat-row assistant">
-              {m.thinking && (
+              {m.thinking && showThinking && (
                 /* Sempre OBERT i en CATALÀ (ChatThought): el raonament és
                    la part que més es vol seguir — amb traducció automàtica
-                   si el model pensa en anglès, i «Original» a un clic. */
+                   si el model pensa en anglès, i «Original» a un clic.
+                   Si l'usuari l'ha amagat (botó 🧠 del capçal), no es mostra. */
                 <ChatThought thinking={m.thinking} elapsedMs={m.elapsedMs} />
               )}
               <div className={"chat-bubble assistant" + (m.error ? " err" : "")}>
@@ -1104,7 +1117,9 @@ export default function AgentPanel() {
               {!m.error && m.text && (
                 <div className="chat-copy-row">
                   <CopyButton text={m.text} label="Resposta" />
-                  {m.thinking && <CopyButton text={m.thinking} label="Raonament" />}
+                  {m.thinking && showThinking && (
+                    <CopyButton text={m.thinking} label="Raonament" />
+                  )}
                   <SaveButton text={m.text} suggestedName="resposta-ia.md" />
                   {/* Fork des de la resposta: continua a partir d'aquí amb una
                       altra IA en un xat nou. */}
@@ -1161,6 +1176,9 @@ export default function AgentPanel() {
                     <RefreshCw size={11} className="spin" /> {t("agent.running")}
                     {liveSeconds !== null && ` · ${liveSeconds} s`}
                     {ramChip}
+                    {/* El text ja generat es pot copiar AL MOMENT (no cal
+                        esperar que acabi la resposta). */}
+                    {stream && <CopyButton text={stream} label={t("agent.copyNow")} />}
                   </div>
                   {/* QUÈ ESTÀ FENT ARA MATEIX: el pas real del motor o la fase
                       de la IA amb un fragment del que escriu. */}

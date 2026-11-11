@@ -137,6 +137,16 @@ function newId(): string {
   return "x" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
+/// El raonament es mostra per defecte; l'usuari el pot amagar (preferència
+/// global, es recorda entre sessions).
+function defaultShowThinking(): boolean {
+  try {
+    return localStorage.getItem("noorbit.showThinking") !== "0";
+  } catch {
+    return true;
+  }
+}
+
 function defaultCtx(): boolean {
   try {
     // Per DEFECTE sempre actiu: la IA ha de veure el codi del projecte.
@@ -302,6 +312,48 @@ const SCAFFOLD_SYSTEM =
 const MANIFEST_SYSTEM =
   "Respon NOMÉS amb una llista de rutes de fitxers, una per línia, sense " +
   "números, guions ni explicacions.\nExemple:\napp.py\ndb.py\nmodels/order.py\nREADME.md";
+
+/// Sistema per generar el contingut d'UN SOL fitxer: un model dèbil (1.5b)
+/// no pot escriure 20 fitxers d'un cop (s'atura, s'omple de prosa i crea
+/// blocs «bloc_2.md»), però sí que pot fer-ne un de cada vegada. A trossos,
+/// com la feina real.
+const FILE_SYSTEM =
+  "ETS UN PROGRAMADOR. Escriu el fitxer demanat COMPLET, dins un sol bloc de " +
+  "codi, i NO escriguis cap text al voltant (ni «Aquí tens», ni «Millora:», ni " +
+  "cap explicació): només el codi. El contingut ha de ser CÓDI REAL que es " +
+  "pugui executar: sense «...», sense «(implementa aquí)», sense talls i sense " +
+  "placeholders. Si el fitxer és de documentació, escriu-lo igual, curt i útil.";
+
+/// Extreu el contingut d'UN fitxer de la resposta del model: si ve en
+/// «@file: ruta» agafem el bloc; si ve en codi «```» agafem el codi; si no,
+/// el text net (un model pot escriure un .php sencer sense tanques).
+function extractSingleFileContent(raw: string): string {
+  const r = (raw || "").trim();
+  if (!r) return "";
+  const blocs = parseFileBlocks(r);
+  if (blocs.length > 0) {
+    const b = blocs.reduce((a, c) => (c.content.length > a.content.length ? c : a));
+    return b.content.trim();
+  }
+  const fence = r.match(/```[\w+#.-]*\n([\s\S]*?)```/);
+  if (fence) return fence[1].trim();
+  // Sense codi identificable: què queda és el text sencer (p. ex. un fitxer
+  // .php sense codi fences).
+  return r;
+}
+
+/// Els fitxers «bloc_N.md» són fragments de documentació que els models locals
+/// inventen en lloc de codi: NO són codi del projecte i no s'han de crear.
+function esBlocDeDocumentacio(path: string): boolean {
+  return /^bloc[_-]?\d+\.(md|txt|markdown)$/i.test((path.split("/").pop() || "").trim());
+}
+
+/// Una resposta que només és documentació (.md) quan l'usuari demana CODI.
+function nomesDocumentacio(text: string): boolean {
+  const blocs = parseFileBlocks(text);
+  if (blocs.length === 0) return false;
+  return blocs.every((b) => /\.(md|markdown|txt|rst)$/i.test(b.path));
+}
 
 /// ── Platform hints: s'ANTOPOSEN al SCAFFOLD_SYSTEM quan el xat té una
 /// plataforma mòbil seleccionada. Així la IA escriu codi NATIU (Kotlin/Compose
@@ -1575,6 +1627,10 @@ interface AgentState {
   setChatExpert: (id: string, expertId: string) => void;
   setChatPlatform: (id: string, platform: "desktop" | "android" | "ios") => void;
   setIncludeContext: (id: string, v: boolean) => void;
+  /// Mostrar (per defecte) o AMAGAR el text del raonament de la IA. Per a
+  /// qui el vol llegir i per a qui l'estorba: es recorda entre sessions.
+  showThinking: boolean;
+  setShowThinking: (v: boolean) => void;
   persistChats: () => void;
 
   // ── Accions de treball (id = xat actiu si s'omet) ──────────────────────
@@ -1810,6 +1866,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
   return {
     backends: [],
     checking: false,
+    showThinking: defaultShowThinking(),
     sessions: initialChats.sessions,
     activeId: initialChats.activeId,
     bucket: currentBucket,
@@ -1916,6 +1973,15 @@ export const useAgentStore = create<AgentState>((set, get) => {
     setChatPlatform: (id, platform) => {
       patch(id, { platform });
       get().persistChats();
+    },
+
+    setShowThinking: (v) => {
+      set({ showThinking: v });
+      try {
+        localStorage.setItem("noorbit.showThinking", v ? "1" : "0");
+      } catch {
+        /* sense persistència */
+      }
     },
 
     setIncludeContext: (id, v) => {
@@ -2334,6 +2400,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
         get().pushStep(sid, { label: "ia", detail: "Resposta rebuda; n'extrec els fitxers…", ok: true });
         let files = parseFileBlocks(raw);
         let skeleton = false;
+        // Fitxers que encara no s'han generat (per torn) — l'usuari pot
+        // demanar «continua» per fer la resta.
+        let pendentsLlista: string[] = [];
 
         // Capa 2: si el model no usa @file: però SÍ escriu codi en blocs ```
         // (tutorials en prosa), resquem els blocs i en fem fitxers reals.
@@ -2351,8 +2420,19 @@ export const useAgentStore = create<AgentState>((set, get) => {
             detail: "El model no usa el format @file:; li demano només la llista de rutes…",
             ok: true,
           });
+          // Si és WordPress, se li dona la llista CANÒNICA de fitxers: un
+          // model dèbil no la inventa sola i el projecte quedava sense
+          // admin.php, functions.php, style.css…
+          const ésWordPress = /\b(wordpress|unt[eé]na|gosets|wordpress|plugin|tema|theme)\b/i.test(text);
+          const wpHint = ésWordPress
+            ? "\n\nÉS UN PROJECTE WORDPRESS: usa les rutes canòniques d'un tema " +
+              "o plugin: style.css, functions.php, index.php, header.php, footer.php, " +
+              "single.php, page.php, archive.php, searchform.php, 404.php, " +
+              "comments.php, sidebar.php, admin.php, inc/camps.php, " +
+              "inc/carrito.php, README.md. El codi va en .php (i .css a style.css)."
+            : "";
           const manifestRaw = await invoke<string>("send_prompt", {
-            prompt: `${text}\n\nLlista NOMÉS les rutes relatives dels fitxers que cal crear, una per línia. Inclou sempre README.md.`,
+            prompt: `${text}${wpHint}\n\nLlista NOMÉS les rutes relatives dels fitxers que cal crear, una per línia. Inclou sempre README.md.`,
             system: MANIFEST_SYSTEM,
             ...ia,
             // Pregunta real de l'usuari (aprenentatge local).
@@ -2362,12 +2442,51 @@ export const useAgentStore = create<AgentState>((set, get) => {
           if (paths.length > 0) {
             skeleton = true;
             if (!paths.some((p) => /README\.md$/i.test(p))) paths.push("README.md");
-            files = paths.map((p) => ({
-              path: p,
-              content: /README\.md$/i.test(p)
-                ? `# ${folder}\n\n${text}\n\n> Esquelet generat per NoOrbit. Omple el contingut de cada fitxer.\n`
-                : `${p}\n\n(Generat per NoOrbit — pendent d'implementar)\n`,
-            }));
+            // EL PUNT CLAU: en lloc de deixar l'esquelet BUIT, es genera el
+            // CODI fitxer a fitxer (a trossos). Un model dèbil (1.5b) no pot
+            // escriure 20 fitxers d'un cop: s'atura, s'omple de prosa i
+            // inventa blocs «bloc_2.md». Fitxer a fitxer, en canvi, sí que
+            // funciona: el context és petit i la resposta és codi real.
+            const MAX_PER_TORN = 8;
+            const generats: { path: string; content: string }[] = [];
+            const pendents: string[] = [];
+            // «Quins fitxers he de crear?»: la llista es queda a la LLISTA DE
+            // TASQUES del xat (la de dalt, sempre visible) i NoOrbit va
+            // marcant cada fitxer com a fet a mesura que el genera.
+            const tasques = useTaskListStore.getState();
+            for (const rel of paths) tasques.add(`Crear ${rel}`, "ia");
+            for (const rel of paths) {
+              if (generats.length >= MAX_PER_TORN) {
+                pendents.push(rel);
+                continue;
+              }
+              get().pushStep(sid, {
+                label: "projecte",
+                detail: `Generant el codi de «${rel}»…`,
+                ok: true,
+              });
+              const raw = await invoke<string>("ai_chat_plain", {
+                prompt:
+                  `Projecte: ${text}\n\nEscriu NOMÉS el fitxer «${rel}» amb el seu ` +
+                  `contingut COMPLET i executable. Cap text fora del codi.`,
+                system: FILE_SYSTEM,
+                provider: ia.provider ?? undefined,
+                model: ia.model ?? undefined,
+              }).catch(() => "");
+              const content = extractSingleFileContent(raw);
+              generats.push({
+                path: rel,
+                content:
+                  content ||
+                  `${rel}\n\n(Pendent: el model no ha retornat contingut per a aquest fitxer)\n`,
+              });
+              // Fitxer generat: es marca com a fet a la llista de tasques.
+              useTaskListStore.getState().complete(`Crear ${rel}`);
+            }
+            files = generats;
+            if (pendents.length > 0) {
+              pendentsLlista = pendents;
+            }
           }
         }
 
@@ -2403,6 +2522,10 @@ export const useAgentStore = create<AgentState>((set, get) => {
         const summary =
           head +
           created.map((c) => `• ${c}`).join("\n") +
+          (pendentsLlista.length > 0
+            ? `\n\n📌 Queden ${pendentsLlista.length} fitxer(s) per generar en un torn nou (digues «continua el projecte»):\n` +
+              pendentsLlista.map((c) => `• ${c}`).join("\n")
+            : "") +
           (lintErrors > 0
             ? `\n\n⚠️ ${lintErrors} error${
                 lintErrors === 1 ? "" : "s"
@@ -2450,9 +2573,26 @@ export const useAgentStore = create<AgentState>((set, get) => {
         // Primer intentem el format estricte @file:; si no, rescatem blocs de codi.
         let files = parseFileBlocks(raw);
         if (files.length === 0) files = extractFromProse(raw);
+        // Els «bloc_N.md» són fragments de documentació que els models locals
+        // inventen quan no saben escriure codi: NO són fitxers del projecte i
+        // no es materialitzen (es reporten a l'usuari).
+        const blocsDoc = files.filter((f) => esBlocDeDocumentacio(f.path));
+        if (blocsDoc.length > 0) {
+          files = files.filter((f) => !esBlocDeDocumentacio(f.path));
+        }
         // El missatge també pot portar peticions d'esborrat («@delete: …»).
         const dels = parseDeleteDirectives(raw);
         if (files.length === 0 && dels.length === 0) {
+          if (blocsDoc.length > 0) {
+            throw new Error(
+              `Aquest missatge només conté DOCUMENTACIÓ (${blocsDoc
+                .map((b) => b.path)
+                .join(", ")}), no codi de projecte. Els «bloc_N.md» són fragments ` +
+                `de text que els models locals inventen quan no saben escriure codi: ` +
+                `no els creem. Demana a la IA el CODI de cada fitxer «@file: ruta.ext» ` +
+                `o prem «Crear el projecte» perquè NoOrbit generi el codi fitxer a fitxer.`,
+            );
+          }
           throw new Error(
             "Aquest missatge no té cap bloc de codi que es pugui crear. Prova una d'aquestes:\n" +
               "• Demana a la IA «reemete els fitxers amb @file:» i torna-ho a prémer.\n" +
