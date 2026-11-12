@@ -6,6 +6,9 @@ use crate::external_orchestrator::OrchestratorAgent;
 
 /// Compactació Densa del context (resum que conserva l'esperit del programa).
 pub mod compact;
+
+/// Hugging Bay (huggingbay.xyz): cerca i descàrrega de models GGUF.
+pub mod hf_bay;
 use anyhow::{anyhow, Result};
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
@@ -1943,6 +1946,16 @@ impl AiManager {
 
     fn url(&self, path: &str) -> String {
         format!("{}{}", self.ollama_url.trim_end_matches('/'), path)
+    }
+
+    /// Client HTTP (per a les ordres que parlen amb Hugging Bay, CivitAI…).
+    pub fn http_client(&self) -> reqwest::Client {
+        self.http.clone()
+    }
+
+    /// Adreça base del servei d'Ollama (per registrar models hi).
+    pub fn base_url(&self) -> String {
+        self.ollama_url.clone()
     }
 
     pub async fn is_running(&self) -> bool {

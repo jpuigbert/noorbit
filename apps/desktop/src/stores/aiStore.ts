@@ -12,6 +12,9 @@ export interface SuggestedModel {
   description: string;
   /// Mida de la descàrrega en bytes (aproximada al catàleg).
   size?: number | null;
+  /// Enllaç a la fitxa del model (Hugging Bay: ruta de l'artifacte, d'on
+  /// s'extreu l'id per baixar-lo).
+  url?: string | null;
 }
 
 /// Model disponible al núvol d'Ollama (ollama.com).
@@ -121,8 +124,8 @@ interface AIState {
   searchInternet: (query: string) => Promise<void>;
   /// Origen de la cerca «a internet»: Hugging Face (LLM GGUF) o CivitAI
   /// (models d'imatge per al rodet de CPU).
-  internetSource: "hf" | "civitai";
-  setInternetSource: (s: "hf" | "civitai") => void;
+  internetSource: "hf" | "hf-bay" | "civitai";
+  setInternetSource: (s: "hf" | "hf-bay" | "civitai") => void;
   /// Instal·la una ALTRA IA local apart d'Ollama (LM Studio, GPT4All, Jan,
   /// llama.cpp); NoOrbit la detecta sols un cop instal·lada.
   installLocalAi: (which: string) => Promise<void>;
@@ -140,6 +143,8 @@ interface AIState {
   migrateModels: () => Promise<void>;
   selectModel: (name: string | null) => Promise<void>;
   pullModel: (name: string) => Promise<void>;
+  /// Descarrega un model de Hugging Bay (mirror verificat) i el registra a Ollama.
+  pullBayModel: (id: string) => Promise<string | null>;
   deleteModel: (name: string) => Promise<void>;
 }
 
@@ -367,10 +372,13 @@ export const useAIStore = create<AIState>((set, get) => ({
     try {
       // Hugging Face: GGUF que Ollama baixa natiu («hf.co/…»). CivitAI:
       // models d'imatge amb URL directa cap al rodet de CPU.
-      const internet = await invoke<CloudModel[]>(
-        source === "hf" ? "ollama_search_huggingface" : "civitai_search",
-        { query: query ?? "" }
-      );
+      const internet =
+        source === "hf-bay"
+          ? await invoke<CloudModel[]>("hf_bay_search", { query: query ?? "", limit: 24 })
+          : await invoke<CloudModel[]>(
+              source === "hf" ? "ollama_search_huggingface" : "civitai_search",
+              { query: query ?? "" }
+            );
       set({ internet, internetLoading: false });
     } catch (e) {
       set({ internet: [], internetLoading: false, internetError: String(e) });
@@ -530,6 +538,37 @@ export const useAIStore = create<AIState>((set, get) => ({
       /* sense persistència */
     }
     await invoke("ollama_set_model", { name }).catch(() => undefined);
+  },
+
+  /// Descarrega un model de HUGGING BAY: el mirror dóna el fitxer GGUF amb un
+  /// enllaç signat, el baixem amb progrés i el registrem a Ollama (Modelfile
+  /// «FROM»), de manera que apareix al gestor com qualsevol altre model.
+  pullBayModel: async (id: string) => {
+    const key = `huggingbay:${id}`;
+    set((s) => ({ pulling: { ...s.pulling, [key]: "Iniciant descàrrega…" } }));
+    const { listen } = await import("@tauri-apps/api/event");
+    const unlisten = listen<{ model: string; message: string }>(
+      "ai://pull",
+      (evt) => {
+        set((s) => ({ pulling: { ...s.pulling, [key]: evt.payload.message } }));
+      }
+    );
+    try {
+      const nom = await invoke<string>("hf_bay_download", { id });
+      await get().loadModels();
+      await get().selectModel(nom);
+      return nom;
+    } catch (e) {
+      set({ lastMessage: String(e) });
+      return null;
+    } finally {
+      (await unlisten)();
+      set((s) => {
+        const next = { ...s.pulling };
+        delete next[key];
+        return { pulling: next };
+      });
+    }
   },
 
   pullModel: async (name) => {

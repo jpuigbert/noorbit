@@ -883,6 +883,103 @@ pub async fn civitai_search(
     ai.search_civitai(&query).await.map_err(|e| e.to_string())
 }
 
+/// Cerca models GGUF a HUGGING BAY (huggingbay.xyz), el mirror verificat de
+/// Hugging Face. Els resultats es poden baixar i queden registrats a Ollama.
+#[command]
+pub async fn hf_bay_search(
+    state: State<'_, AppState>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<crate::ai::CloudModel>, String> {
+    let http = state.ai_manager.http_client();
+    let models = crate::ai::hf_bay::search(&http, &query, limit.unwrap_or(20))
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(models
+        .iter()
+        .map(crate::ai::hf_bay::a_cloud_model)
+        .collect())
+}
+
+/// Detalls d'un model de Hugging Bay: fitxer recomanat, mida, SHA-256 i
+/// l'enllaç de descàrrega signat.
+#[command]
+pub async fn hf_bay_details(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<crate::ai::hf_bay::BayDetails, String> {
+    let http = state.ai_manager.http_client();
+    crate::ai::hf_bay::details(&http, &id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// DESCARREGA un model de Hugging Bay (amb progrés) i el registra a Ollama
+/// perquè aparegui al gestor de models i es pugui usar al xat. Retorna el nom
+/// del model ja instal·lat.
+#[command]
+pub async fn hf_bay_download(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    id: String,
+) -> Result<String, String> {
+    use tauri::Emitter;
+    let http = state.ai_manager.http_client();
+    let det = crate::ai::hf_bay::details(&http, &id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let file = det
+        .recommended
+        .clone()
+        .ok_or_else(|| "Aquest model no té cap fitxer descargable.".to_string())?;
+    let url = file
+        .download_url
+        .clone()
+        .ok_or_else(|| "El mirror no dona enllaç de descàrrega per a aquest model.".to_string())?;
+
+    let _ = app.emit(
+        "ai://pull",
+        serde_json::json!({
+            "model": det.model.name.clone(),
+            "message": format!("descarregant {} des de Hugging Bay…", det.model.name)
+        }),
+    );
+
+    let dest_name = format!(
+        "{}-{}",
+        crate::ai::hf_bay::ollama_name(&det.model.repo),
+        file.path.rsplit('/').next().unwrap_or("model.gguf")
+    );
+    let path = crate::ai::hf_bay::download_file(&http, Some(&app), &id, &url, &dest_name)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let nom = crate::ai::hf_bay::ollama_name(&det.model.repo);
+    let _ = app.emit(
+        "ai://pull",
+        serde_json::json!({
+            "model": nom.clone(),
+            "message": format!("registrant «{}» a Ollama…", nom)
+        }),
+    );
+    crate::ai::hf_bay::register_in_ollama(&nom, &path)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // El GGUF ja és dins d'Ollama: es pot esborrar la còpia per no tarar el
+    // disc (Ollama en crea la seva pròpia).
+    let _ = std::fs::remove_file(&path);
+
+    let _ = app.emit(
+        "ai://pull",
+        serde_json::json!({
+            "model": nom.clone(),
+            "message": format!("«{}» a punt!", nom)
+        }),
+    );
+    Ok(nom)
+}
+
 /// Instal·la una ALTRA IA LOCAL apart d'Ollama: LM Studio, GPT4All, Jan
 /// (cask de Homebrew en macOS; pàgina de descàrrega a Linux/Windows) o
 /// llama.cpp (formula). NoOrbit les DETECTA sols un cop instal·lades

@@ -51,6 +51,7 @@ export default function ModelManagerModal() {
     installComfy,
     startComfy,
     pullModel,
+    pullBayModel,
     deleteModel,
     selectModel,
     modelsDir,
@@ -657,7 +658,12 @@ export default function ModelManagerModal() {
                   const installed = models.some(
                     (m) => m.name === s.name || m.name.startsWith(s.name + ":")
                   );
-                  const prog = pulling[s.name];
+                  // Hugging Bay: la clau de progrés és «huggingbay:<id>» i el
+                  // model NO es baixa amb Ollama (el mirror dóna el GGUF i
+                  // NoOrbit el registra). La resta de fonts: com abans.
+                  const bayId =
+                    internetSource === "hf-bay" ? (s.url ?? "").split("/").pop() ?? "" : "";
+                  const prog = pulling[bayId ? `huggingbay:${bayId}` : s.name];
                   return (
                     <div key={s.name} className="mm-row">
                       <div className="mm-cloud-info">
@@ -680,7 +686,9 @@ export default function ModelManagerModal() {
                       ) : (
                         <button
                           className="btn sm"
-                          onClick={() => void pullCloud(s.name, s.size)}
+                          onClick={() =>
+                            bayId ? void pullBayModel(bayId) : void pullCloud(s.name, s.size)
+                          }
                         >
                           <Download size={12} /> {t("ai.pull")}
                         </button>
@@ -781,10 +789,11 @@ export default function ModelManagerModal() {
             <select
               className="ex-input"
               value={internetSource}
-              onChange={(e) => void setInternetSource(e.target.value as "hf" | "civitai")}
+              onChange={(e) => void setInternetSource(e.target.value as "hf" | "hf-bay" | "civitai")}
               style={{ marginBottom: 6 }}
             >
               <option value="hf">{t("ai.sourceHf")}</option>
+              <option value="hf-bay">{t("ai.sourceHfBay")}</option>
               <option value="civitai">{t("ai.sourceCivitai")}</option>
             </select>
             <div className="mm-custom">
