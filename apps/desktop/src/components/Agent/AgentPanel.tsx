@@ -68,6 +68,7 @@ export default function AgentPanel() {
     createStructure,
     pushStep,
     appendStream,
+    importWebCode,
     clearChat,
     stop,
   } = useAgentStore();
@@ -653,6 +654,20 @@ export default function AgentPanel() {
               </button>
             </>
           )}
+          {/* IMPORTACIÓ MANUAL DEL CODI DE LA IA WEB: l'usuari parla al
+              xat del navegador (ChatGPT, Gemini…) i, si la importació
+              automàtica no ha capturat el codi, aquest botó l'agafa de la
+              pàgina i el porta al projecte (amb les carpetes que hi ha creat). */}
+          {isWebChat && (
+            <button
+              className="btn sm ap-web-import"
+              disabled={running}
+              title="Ara el codi que ha generat la IA del navegador i descàrrega'l al projecte (també crea les carpetes que ha dit)."
+              onClick={() => void importWebCode(activeId)}
+            >
+              <Download size={12} /> Importa el codi
+            </button>
+          )}
         </div>
 
         {/* Fila 2: ROL (especialista) i PLATAFORMA objectiu del codi. */}
@@ -673,15 +688,6 @@ export default function AgentPanel() {
               ))}
             </select>
             <span className="ap-expert-count">({experts.length})</span>
-            {experts.length === 0 && (
-              <button
-                className="icon-btn"
-                onClick={goCreateExpert}
-                title={t("agent.expertNone")}
-              >
-                <Plus size={12} />
-              </button>
-            )}
           </div>
 
           <div
@@ -715,6 +721,11 @@ export default function AgentPanel() {
           </div>
         </div>
       </div>
+
+      {/* SALUT DE LA IA LOCAL: diu clarament per què el xat no respon i
+          ofereix la solució amb un clic (instal·lar / engegar / baixar model).
+          Només en xats locals: en els web/cloud no fa falta. */}
+      {isLocalChat && <LocalAIStatus />}
 
       {showDownload && (
         <div className="ap-download">
@@ -912,7 +923,6 @@ export default function AgentPanel() {
           </button>
         </div>
       )}
-      </div>
 
       {/* Cua de missatges afegits mentre LA IA d'aquest xat treballa. */}
       {queue.length > 0 && (
@@ -1160,9 +1170,22 @@ export default function AgentPanel() {
                   <FileDown size={12} /> {t("agent.materialize")}
                 </button>
               )}
+              {/* XATS WEB: pla B de la importació automàtica. Si la IA web
+                  ha generat codi a la pàgina del navegador i NoOrbit no l'ha
+                  capturat automàticament, aquest botó l'agafa de la pantalla
+                  i el porta al projecte (creant també les carpetes). */}
+              {isWebChat && !m.error && (
+                <button
+                  className="btn sm chat-materialize"
+                  disabled={running}
+                  onClick={() => void importWebCode(activeId)}
+                  title="Ara el codi que ha generat la IA del navegador i descàrrega'l al projecte (amb les carpetes que ha dit)."
+                >
+                  <Download size={12} /> Importa el codi del navegador
+                </button>
+              )}
               {/* Creació a mà: parteix de les rutes que la IA recomana (també
-                  en prosa) i l'usuari decideix quines es creen de veritat. */}
-              {!m.error && (
+                  en prosa) i l'usuari decideix quines es creen de veritat. */}              {!m.error && (
                 <button
                   className="btn sm chat-materialize"
                   disabled={running}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ListChecks,
   Plus,
@@ -36,13 +36,27 @@ export default function TaskChecklist({
   const [draft, setDraft] = useState("");
   // Amagat/mostrat: recordat a localStorage («noorbit.tasks.hidden») —
   // preferència de la UI, no una dada del projecte (igual per a tots els calaixos).
+  // Si encara no hi ha cap preferència i la llista és buida, es mostra només
+  // la franja prima: així el xat no perd 90 px en una llista que no diu res.
   const [hidden, setHidden] = useState(() => {
     try {
-      return localStorage.getItem("noorbit.tasks.hidden") === "1";
+      const pref = localStorage.getItem("noorbit.tasks.hidden");
+      if (pref !== null) return pref === "1";
     } catch {
-      return false;
+      /* sense persistència */
     }
+    return items.length === 0;
   });
+  // Quan la IA afig la primera tasca, la llista s'obri sola (si l'usuari no
+  // ha triat explícitament amagar-la).
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("noorbit.tasks.hidden") !== null) return;
+    } catch {
+      return;
+    }
+    if (items.length > 0) setHidden(false);
+  }, [items.length]);
 
   const pendents = items.filter((i) => !i.done).length;
   const doingItem = items.find((i) => i.doing && !i.done);

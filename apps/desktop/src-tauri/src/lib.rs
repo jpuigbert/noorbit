@@ -244,6 +244,9 @@ pub fn run() {
             commands::ai::ollama_search_cloud,
             commands::ai::ollama_search_huggingface,
             commands::ai::hf_bay_search,
+            commands::ai::llamacpp_status,
+            commands::ai::llamacpp_start,
+            commands::ai::llamacpp_stop,
             commands::ai::hf_bay_details,
             commands::ai::hf_bay_download,
             commands::ai::ollama_installed,
@@ -300,6 +303,7 @@ pub fn run() {
             commands::browser::web_ia_open,
             commands::browser::web_ia_status,
             commands::browser::web_ia_ask,
+            commands::browser::web_ia_grab_code,
             // Proveïdors d'IA en línia (tokens)
             commands::api::ai_provider_list,
             commands::api::ai_provider_add,

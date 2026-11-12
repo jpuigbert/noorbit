@@ -77,6 +77,34 @@ pub async fn web_ia_list() -> Result<Vec<WebIa>, String> {
     Ok(browser::WEB_IAS.to_vec())
 }
 
+/// Arreplega el CÓDI que la IA web ha generat a la pàgina oberta (blocs
+/// ```` ``` ```` visibles) i les RUTES/CARPETES que hi ha esmentat. És el
+/// botó d'importació MANUAL: quan l'importació automàtica falla (la IA web
+/// no conté «@file:» ni la pàgina no es deixa llegir), l'usuari prem un botó
+/// i NoOrbit agafa el codi de la pantalla i el porta al projecte.
+#[command]
+pub async fn web_ia_grab_code(app: AppHandle) -> Result<WebCodeGrab, String> {
+    let blocks = crate::browser::grab_code_blocks(&app)
+        .await
+        .map_err(|e| e.to_string())?;
+    // Text visible de la pàgina: serveix per esbrinar les carpetes i les
+    // rutes que la IA ha dit («crea la carpeta src/components…»).
+    let page_text = crate::browser::extract_text(&app, std::time::Duration::from_secs(6))
+        .await
+        .map(|e| e.text)
+        .unwrap_or_default();
+    Ok(WebCodeGrab { blocks, page_text })
+}
+
+/// Codi i text recollits de la pàgina de la IA web.
+#[derive(serde::Serialize)]
+pub struct WebCodeGrab {
+    /// Blocs de codi visibles (amb el seu llenguatge).
+    pub blocks: Vec<crate::browser::CodeBlock>,
+    /// Text visible de la pàgina (per deduir carpetes i rutes).
+    pub page_text: String,
+}
+
 /// Obre el navegador intern (VISIBLE) al xat web de la IA indicada perquè
 /// l'usuari hi iniciï sessió amb el seu compte.
 #[command]

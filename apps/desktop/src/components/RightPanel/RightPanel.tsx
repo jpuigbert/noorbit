@@ -14,6 +14,7 @@ import ExpertsPanel from "../Experts/ExpertsPanel";
 import LearningPanel from "../Learning/LearningPanel";
 import UnrealPanel from "../Unreal/UnrealPanel";
 import BlenderPanel from "../Blender/BlenderPanel";
+import PanelErrorBoundary from "../PanelErrorBoundary";
 import MobilePanel from "../Mobile/MobilePanel";
 import GitPanel from "../Git/GitPanel";
 import ProblemsPanel from "../Problems/ProblemsPanel";
@@ -128,13 +129,44 @@ export default function RightPanel() {
               ))}
             </div>
             <div className="rp-group-body">
-              {agentSub === "chat" && <AgentPanel />}
-              {agentSub === "experts" && <ExpertsPanel />}
-              {agentSub === "learning" && <LearningPanel />}
-              {agentSub === "computer" && <ComputerPanel />}
-              {agentSub === "unreal" && <UnrealPanel />}
-              {agentSub === "blender" && <BlenderPanel />}
-              {agentSub === "mobile" && <MobilePanel />}
+              {/* Cada panell va amb la seva pròpia xarxa de seguretat: si un
+                  peta (un null d'una dada), només mor AQUELL panell — la resta
+                  de NoOrbit (xat, editor, terminal) continua funcionant. */}
+              {agentSub === "chat" && (
+                <PanelErrorBoundary label="Error al xat">
+                  <AgentPanel />
+                </PanelErrorBoundary>
+              )}
+              {agentSub === "experts" && (
+                <PanelErrorBoundary label="Error als especialistes">
+                  <ExpertsPanel />
+                </PanelErrorBoundary>
+              )}
+              {agentSub === "learning" && (
+                <PanelErrorBoundary label="Error a l'aprenentatge">
+                  <LearningPanel />
+                </PanelErrorBoundary>
+              )}
+              {agentSub === "computer" && (
+                <PanelErrorBoundary label="Error al panell d'ordinador">
+                  <ComputerPanel />
+                </PanelErrorBoundary>
+              )}
+              {agentSub === "unreal" && (
+                <PanelErrorBoundary label="Error al panell d'Unreal">
+                  <UnrealPanel />
+                </PanelErrorBoundary>
+              )}
+              {agentSub === "blender" && (
+                <PanelErrorBoundary label="Error al panell de Blender">
+                  <BlenderPanel />
+                </PanelErrorBoundary>
+              )}
+              {agentSub === "mobile" && (
+                <PanelErrorBoundary label="Error al panell mòbil">
+                  <MobilePanel />
+                </PanelErrorBoundary>
+              )}
             </div>
           </div>
         )}

@@ -883,6 +883,89 @@ pub async fn civitai_search(
     ai.search_civitai(&query).await.map_err(|e| e.to_string())
 }
 
+/// Estat del motor local sense Ollama (llama.cpp) i els models GGUF ja
+/// baixats al disc per poder-los engegar.
+#[derive(Debug, Clone, Serialize)]
+pub struct LlamaCppStatus {
+    /// La llama.cpp està instal·lada (hi ha «llama-server»).
+    pub installed: bool,
+    /// On és el binari.
+    pub binary: Option<String>,
+    /// Models GGUF baixats (ruta + mida).
+    pub models: Vec<(String, u64)>,
+    /// Servidors locals en marxa.
+    pub running: Vec<crate::ai::llamacpp::LocalServer>,
+}
+
+#[command]
+pub async fn llamacpp_status() -> Result<LlamaCppStatus, String> {
+    let bin = crate::ai::llamacpp::binary();
+    Ok(LlamaCppStatus {
+        installed: bin.is_some(),
+        binary: bin.map(|p| p.to_string_lossy().to_string()),
+        models: crate::ai::llamacpp::downloaded_models(),
+        running: crate::ai::llamacpp::servers(),
+    })
+}
+
+/// Engega un model GGUF amb llama.cpp (sense Ollama) i registra el servei
+/// local com a proveïdor, perquè el xat el pugui fer servir.
+#[command]
+pub async fn llamacpp_start(
+    state: State<'_, AppState>,
+    model_path: String,
+    port: Option<u16>,
+    ctx: Option<u32>,
+) -> Result<String, String> {
+    let http = state.ai_manager.http_client();
+    let port = port.unwrap_or(crate::ai::llamacpp::DEFAULT_PORT);
+    let ctx = ctx.unwrap_or(4096);
+    let (id, name, base) = crate::ai::llamacpp::start(&http, &model_path, port, ctx)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Registrem el servei local com a proveïdor (sense clau: és local).
+    let mut api = state.api_manager.lock().map_err(|e| e.to_string())?;
+    let item = crate::api::AiProvider {
+        id: id.clone(),
+        name: name.clone(),
+        base_url: base.clone(),
+        model: name.rsplit("· ").next().unwrap_or("").trim().to_string(),
+        kind: "openai".to_string(),
+        auth: crate::api::AuthScheme::None,
+        header_name: String::new(),
+        token: String::new(),
+        enabled: true,
+    };
+    // Si ja existia (servidor reiniciat), l'actualitzem; si no, l'afegim.
+    if api.list().iter().any(|p| p.id == id) {
+        let _ = api.update(
+            &id,
+            Some(item.name.clone()),
+            Some(item.base_url.clone()),
+            Some(item.model.clone()),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+    } else {
+        let _ = api.add(item);
+    }
+    Ok(format!("{} · {}", name, base))
+}
+
+/// Atura un servidor local de llama.cpp i en treu el proveïdor.
+#[command]
+pub async fn llamacpp_stop(state: State<'_, AppState>, port: u16) -> Result<bool, String> {
+    let aturat = crate::ai::llamacpp::stop(port);
+    let mut api = state.api_manager.lock().map_err(|e| e.to_string())?;
+    let id = format!("llamacpp_{}", port);
+    let _ = api.remove(&id);
+    Ok(aturat)
+}
+
 /// Cerca models GGUF a HUGGING BAY (huggingbay.xyz), el mirror verificat de
 /// Hugging Face. Els resultats es poden baixar i queden registrats a Ollama.
 #[command]
@@ -1062,6 +1145,22 @@ pub async fn install_local_ai(app: AppHandle, which: String) -> Result<String, S
     #[cfg(target_os = "linux")]
     {
         let _ = &app;
+        // llama.cpp a Linux: es compila al moment (no hi ha paquet fàcil a
+        // tothom). Obrem una terminal amb les comandes exactes.
+        if which == "llamacpp" {
+            let script = "git clone https://github.com/ggml-org/llama.cpp && cd llama.cpp && \
+                         cmake -B build && cmake --build build --config Release -j && \
+                         sudo cp build/bin/llama-server /usr/local/bin/";
+            if let Ok(term) = which::which("gnome-terminal") {
+                let _ = std::process::Command::new(term)
+                    .arg("--")
+                    .arg("bash")
+                    .arg("-c")
+                    .arg(script)
+                    .spawn();
+                return Ok("S'ha obert una terminal per compilar la llama.cpp (uns minuts). Quan acabi, NoOrbit la detectarà.".into());
+            }
+        }
         std::process::Command::new("xdg-open")
             .arg(url)
             .spawn()

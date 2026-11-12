@@ -158,8 +158,11 @@ export const useUnrealStore = create<UnrealState>((set, get) => ({
 
   detectInstallations: async () => {
     try {
-      const installations = await unrealDetectInstallations();
-      set({ installations });
+      // El backend pot tornar null (versió antiga o error): la interfície
+      // ha de poder dibuixar-se igual — mai un null aquí, que tombava tota
+      // la finestra del panell d'Unreal.
+      const installations = (await unrealDetectInstallations()) ?? [];
+      set({ installations: Array.isArray(installations) ? installations : [] });
     } catch {
       set({ installations: [] });
     }

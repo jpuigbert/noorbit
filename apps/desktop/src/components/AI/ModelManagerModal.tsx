@@ -82,6 +82,24 @@ export default function ModelManagerModal() {
   const [askDisk, setAskDisk] = useState<{ name: string; size: number | null } | null>(null);
   // Avís de la instala·lació d'editors de vídeo (per si el Terminal falla).
   const [videoMsg, setVideoMsg] = useState("");
+  // Motor local SENSE Ollama (llama.cpp): estat i models GGUF ja baixats.
+  const [llama, setLlama] = useState<{
+    installed: boolean;
+    binary: string | null;
+    models: [string, number][];
+    running: { port: number; model: string; path: string; pid: number }[];
+  } | null>(null);
+  const [llamaMsg, setLlamaMsg] = useState("");
+
+  const loadLlama = async () => {
+    const st = await invoke<{
+      installed: boolean;
+      binary: string | null;
+      models: [string, number][];
+      running: { port: number; model: string; path: string; pid: number }[];
+    }>("llamacpp_status").catch(() => null);
+    if (st) setLlama(st);
+  };
   // El catàleg del núvol és molt més llarg que la llista base: qualsevol nom
   // allotjat a ollama.com es pot usar sense baixar-lo res al disc.
   const [cloudCustom, setCloudCustom] = useState("");
@@ -110,6 +128,7 @@ export default function ModelManagerModal() {
       loadModelsDir();
       loadLoaded();
       loadProviders();
+      void loadLlama();
       // Carrega el catàleg de models recomanats (opcions instal·lables).
       refreshProviders();
       // El navegador del núvol funciona sempre, tingues o no Ollama.
@@ -697,6 +716,100 @@ export default function ModelManagerModal() {
                   );
                 })}
               </div>
+            )}
+          </div>
+
+          {/* MOTOR LOCAL SENSE OLLAMA (llama.cpp): aquí es poden fer córrer
+              els models GGUF baixats (Hugging Bay / Hugging Face) sense Ollama:
+              s'engega «llama-server» i el servei es registra com a proveïdor
+              local, per xatejar-hi com si fos una IA qualsevol. */}
+          <div className="field">
+            <label>
+              <Cpu size={13} style={{ verticalAlign: -2, marginRight: 5 }} />
+              {t("ai.llamacppTitle")}
+            </label>
+            <p className="lp-hint">{t("ai.llamacppHint")}</p>
+
+            {!llama?.installed ? (
+              <div className="mm-custom" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button
+                  className="btn sm primary"
+                  onClick={async () => {
+                    setLlamaMsg(t("ai.llamacppInstalling"));
+                    const r = await invoke<string>("install_local_ai", { which: "llamacpp" }).catch(
+                      (e) => String(e),
+                    );
+                    setLlamaMsg(r);
+                    void loadLlama();
+                  }}
+                >
+                  <Download size={12} /> {t("ai.llamacppInstall")}
+                </button>
+                {llamaMsg && <span className="mm-desc">{llamaMsg}</span>}
+              </div>
+            ) : (
+              <>
+                {llama.running.length > 0 && (
+                  <div className="mm-custom" style={{ marginBottom: 6 }}>
+                    {llama.running.map((r) => (
+                      <div key={r.port} className="mm-row">
+                        <div className="mm-cloud-info">
+                          <div className="mm-name-static">
+                            <span className="mm-installed">{t("ai.llamacppRunning")}</span> {r.model}
+                          </div>
+                          <div className="mm-desc">
+                            127.0.0.1:{r.port} · {t("ai.llamacppProvider")}
+                          </div>
+                        </div>
+                        <button
+                          className="btn sm"
+                          onClick={async () => {
+                            await invoke("llamacpp_stop", { port: r.port }).catch(() => undefined);
+                            void loadLlama();
+                            void loadProviders();
+                          }}
+                        >
+                          {t("ai.llamacppStop")}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {llama.models.length === 0 ? (
+                  <p className="lp-hint">{t("ai.llamacppNoModels")}</p>
+                ) : (
+                  <div className="mm-custom">
+                    {llama.models.map(([path, size]) => (
+                      <div key={path} className="mm-row">
+                        <div className="mm-cloud-info">
+                          <div className="mm-name-static">
+                            {path.split("/").pop()}
+                            <span className="mm-size" style={{ marginLeft: 8 }}>
+                              {fmtSize(size)}
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          className="btn sm"
+                          onClick={async () => {
+                            setLlamaMsg(t("ai.llamacppStarting"));
+                            const r = await invoke<string>("llamacpp_start", { modelPath: path }).catch(
+                              (e) => String(e),
+                            );
+                            setLlamaMsg(r);
+                            void loadLlama();
+                            void loadProviders();
+                          }}
+                        >
+                          <Play size={12} /> {t("ai.llamacppRun")}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {llamaMsg && <p className="lp-hint">{llamaMsg}</p>}
+              </>
             )}
           </div>
 

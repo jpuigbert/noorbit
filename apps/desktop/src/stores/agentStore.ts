@@ -1702,6 +1702,9 @@ interface AgentState {
   apply: (target: ApplyTarget, prompt: string, id?: string) => Promise<string | null>;
   scaffold: (prompt: string, id?: string) => Promise<string | null>;
   materialize: (text: string, id?: string) => Promise<string | null>;
+  /// Importa el codi que la IA WEB ha generat a la pàgina del navegador
+  /// (botó d'importació manual, pla B de l'automàtica).
+  importWebCode: (id?: string) => Promise<string | null>;
   createStructure: (lines: string[], id?: string) => Promise<string | null>;
   /// Pas de progrés rebut en temps real (event «agent://progress» d'un xat).
   pushStep: (sessionId: string, step: { label: string; detail: string; ok: boolean }) => void;
@@ -2611,6 +2614,121 @@ export const useAgentStore = create<AgentState>((set, get) => {
 
     /// Agafa un text JA present al xat (amb codi en blocs ``` o @file:) i en
     /// crea fitxers reals al workspace, sense tornar a consultar la IA.
+    /// IMPORTACIÓ MANUAL DEL CODI D'UNA IA WEB (botó «Importa el codi»):
+    /// agafa els blocs de codi que la IA web ha generat a la PÀGINA del
+    /// navegador, hi posa nom i ruta (amb la IA local, que coneix el projecte;
+    /// si no hi ha model local, amb heurístiques), i crea també les CARPETES
+    /// que la IA web ha dit. És el pla B quan l'importació automàtica falla
+    /// (moltes IAs web no escriuen «@file:»).
+    importWebCode: async (id) => {
+      const sid = target(id);
+      const ws = useWorkspaceStore.getState();
+      const root = ws.root;
+      get().beginTurn(sid, "⬇ Important el codi del navegador");
+      if (!root) {
+        patch(sid, {
+          error:
+            "Obre primer una carpeta de projecte (barra lateral ▸ «Obre carpeta») perquè el codi del navegador es pugui desar.",
+        });
+        get().finalizeTurn(sid);
+        return null;
+      }
+      try {
+        const grab = await invoke<{ blocks: { lang: string; code: string }[]; pageText: string }>(
+          "web_ia_grab_code"
+        );
+        const blocks = grab?.blocks ?? [];
+        if (blocks.length === 0) {
+          patch(sid, {
+            error:
+              "No he trobat cap bloc de codi a la pàgina del navegador. És possible que " +
+              "la IA web encara estigui escrivint, que el codi estigui dins d'un requadre " +
+              "(«Veure codi») o que el navegador no estigui obert.",
+          });
+          get().finalizeTurn(sid);
+          return null;
+        }
+        // Carpetes que la IA web ha esmentat a la pàgina (per crear-les).
+        const dirs = Array.from(
+          new Set(
+            extractRecommendedPaths(grab.pageText ?? "")
+              .map((p) => p.replace(/\/+$/, ""))
+              .filter((p) => p && !/\.[A-Za-z0-9]{1,6}$/.test(p.split("/").pop() ?? ""))
+          )
+        ).slice(0, 12);
+        const codi = blocks
+          .map((b) => `\`\`\`${b.lang || ""}\n${b.code}\n\`\`\``)
+          .join("\n\n");
+        // 1) Integra amb la IA LOCAL (coneix l'estructura del projecte i hi
+        //    posa els noms de fitxer correctes).
+        let text = "";
+        try {
+          get().pushStep(sid, {
+            label: "Integració · codi web",
+            detail: "Adaptant el codi del navegador a l'estructura del projecte…",
+            ok: true,
+          });
+          const adapted = await invoke<string>("send_prompt", {
+            prompt:
+              "AQUEST ÉS EL CODI GENERAT PER UNA IA WEB (ChatGPT, Gemini, Claude…) " +
+              "en una tasca de programació. INTEGRA-LA AL PROJECTE OBERT.\n\n" +
+              `BLOCS DE CODI REBUTS (${blocks.length}):\n${codi.slice(0, 24000)}\n\n` +
+              "Fes dues coses i prou:\n" +
+              "1) Decideix el nom i la ruta EXACTA de cada fitxer dins del projecte " +
+              "(usa la mateixa estructura i convencions que el projecte).\n" +
+              "2) Emet CADA fitxer com una línia «@file: ruta/relativa» seguida del " +
+              "seu contingut COMPLET (el codi que has rebut, revisat).\n" +
+              "Si la IA web ha creat carpetes, afegeix una línia «@dir: ruta» per cadascuna.\n" +
+              "No expliquis res més que una frase de resum per fitxer.",
+            system:
+              "Ets l'instrument d'integració de NoOrbit: contingut de fitxers com a " +
+              "línies «@file: ruta» completes + «@dir:» per a les carpetes. Sense més prosa.",
+            session: `${sid}#webimport`,
+            provider: null,
+            model: null,
+          });
+          if (adapted) text = adapted;
+        } catch {
+          /* sense model local: es fa amb heurístiques (pas 2) */
+        }
+        // 2) PLA B: si la IA local no ha servit (no hi ha model, o no ha
+        //    retornat cap «@file:»), es crea igualment amb noms automàtics
+        //    i les carpetes detectades: millor un fitxer mal nombrat que res.
+        if (parseFileBlocks(text).length === 0) {
+          const ext = (l: string) =>
+            ({
+              python: "py", py: "py", javascript: "js", js: "js",
+              typescript: "ts", ts: "ts", json: "json", html: "html", css: "css",
+              bash: "sh", shell: "sh", sql: "sql", yaml: "yml", yml: "yml",
+              php: "php", ruby: "rb", go: "go", rust: "rs", java: "java",
+              c: "c", cpp: "cpp", markdown: "md", md: "md", xml: "xml",
+            })[l.toLowerCase()] ?? "txt";
+          text = [
+            ...dirs.map((d) => `@dir: ${d}`),
+            ...blocks.map(
+              (b, i) =>
+                `@file: codi_ia/web_${i + 1}.${ext(b.lang)}\n\`\`\`${b.lang || ""}\n${b.code}\n\`\`\``
+            ),
+          ].join("\n\n");
+        } else if (dirs.length > 0) {
+          text = `${text}\n\n${dirs.map((d) => `@dir: ${d}`).join("\n")}`;
+        }
+        const extra = await autoMaterialize(text);
+        const n = parseFileBlocks(text).length;
+        const summary =
+          (extra ? `${extra}\n\n` : "") +
+          `⬇ Importats ${n} fitxer${n === 1 ? "" : "s"} des de la IA del navegador` +
+          (dirs.length > 0 ? ` i ${dirs.length} carpeta${dirs.length === 1 ? "" : "s"}.` : ".");
+        patch(sid, { error: null, lastResult: summary });
+        get().finalizeTurn(sid);
+        return summary;
+      } catch (e) {
+        patch(sid, { error: toErrorText(e) });
+        get().finalizeTurn(sid);
+        return null;
+      }
+    },
+
     materialize: async (text, id) => {
       const sid = target(id);
       const raw = (text || "").trim();
@@ -3082,12 +3200,29 @@ export const useAgentStore = create<AgentState>((set, get) => {
               ok: true,
             });
             try {
+              // Codi NET de la pàgina: els blocs de codi que la IA web ha
+              // generat de debò (la resposta en pantalla va barrejada amb
+              // menús i suggeriments, i el model local no la digeria).
+              let codiWeb = out.slice(0, 24000);
+              try {
+                const grab = await invoke<{
+                  blocks: { lang: string; code: string }[];
+                }>("web_ia_grab_code");
+                if (grab?.blocks?.length) {
+                  codiWeb = grab.blocks
+                    .map((b) => `\`\`\`${b.lang || ""}\n${b.code}\n\`\`\``)
+                    .join("\n\n")
+                    .slice(0, 24000);
+                }
+              } catch {
+                /* si no es pot llegir la pàgina, es fa amb el text que tenim */
+              }
               const adapted = await invoke<string>("send_prompt", {
                 prompt:
                   "AQUESTA ÉS LA RESPOSTA D'UNA IA WEB (ChatGPT, Gemini, DeepSeek…) sobre " +
                   "una tasca de programació. INTEGRA-LA AL PROJECTE OBERT.\n\n" +
                   `TASCA ORIGINAL DE L'USUARI:\n${text}\n\n` +
-                  `RESPUESTA AMB CODI DE LA IA WEB:\n${out.slice(0, 24000)}\n\n` +
+                  `RESPUESTA AMB CODI DE LA IA WEB:\n${codiWeb}\n\n` +
                   "Revisa el codi rebut (no el creguis cec): adapta-lo (imports, noms, " +
                   "estructura i llenguatge del workspace) i després emet CADA fitxer com una " +
                   "línia «@file: ruta/relativa» seguida del seu contingut COMPLET — igual que " +

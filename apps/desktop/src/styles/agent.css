@@ -962,6 +962,8 @@
 }
 .ap-toolbar .ap-model-role {
   max-width: 190px;
+  flex: 1 1 120px;
+  min-width: 0;
 }
 .ap-tool-note {
   font-size: 11px;
@@ -982,16 +984,20 @@
 .ap-plat {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   border: none;
   background: transparent;
   color: var(--text-2);
-  font-size: 11px;
-  padding: 3px 8px;
+  font-size: 10.5px;
+  padding: 2px 6px;
   border-radius: 999px;
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.15s ease, color 0.15s ease;
+}
+.ap-plat svg {
+  width: 11px;
+  height: 11px;
 }
 .ap-plat:hover {
   color: var(--text-0);
@@ -1046,13 +1052,18 @@
 }
 
 /* Fila d'accions secundàries: planificar, ràpida, equip i crear projecte.
-   Viu per damunt del composer perquè no competisca amb «Envia». */
+   Viu per damunt del composer perquè no competisca amb «Envia». És una
+   graella adaptable: 2 columnes en panells estrets, 4 en panells amples; així
+   mai no queda una fila coixa amb un sol botó penjat. */
 .ap-secondary-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   align-items: center;
   gap: 6px;
-  padding: 0 10px 6px;
-  flex-wrap: wrap;
+  padding: 2px 10px 6px;
+}
+.ap-secondary-actions > .btn {
+  justify-content: center;
 }
 
 /* Ordre coherent de la part baixa del panell: eines secundàries → «Aplica a»

@@ -19,6 +19,9 @@ export default function UnrealConnectButton() {
   } = useUnrealStore();
 
   const busy = status === "detecting" || status === "launching" || status === "waiting" || status === "connecting";
+  // Llista d'instal·lacions: sempre un array (mai null) — un null aquí
+  // feia caure el component i, amb ell, TOTA la interfície.
+  const inst = Array.isArray(installations) ? installations : [];
 
   const pickProject = async () => {
     const sel = await open({
@@ -58,12 +61,12 @@ export default function UnrealConnectButton() {
             <FolderSearch size={13} /> {t("common.select")}
           </button>
         </div>
-        {installations.length > 0 && (
+        {inst.length > 0 && (
           <p className="lp-hint">
-            {t("unreal.installations")}: {installations.length}
+            {t("unreal.installations")}: {inst.length}
           </p>
         )}
-        {installations.length === 0 && (
+        {inst.length === 0 && (
           <p className="lp-hint">{t("unreal.noInstallations")}</p>
         )}
       </div>

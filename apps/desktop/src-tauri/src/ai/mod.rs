@@ -9,6 +9,9 @@ pub mod compact;
 
 /// Hugging Bay (huggingbay.xyz): cerca i descàrrega de models GGUF.
 pub mod hf_bay;
+
+/// Motor local sense Ollama: llama.cpp («llama-server»).
+pub mod llamacpp;
 use anyhow::{anyhow, Result};
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
@@ -2608,7 +2611,7 @@ impl AiManager {
         guard
             .providers
             .iter()
-            .find(|p| p.enabled && !p.token.trim().is_empty())
+            .find(|p| p.enabled && p.has_token())
             .map(|p| p.id.clone())
     }
 
@@ -3806,7 +3809,9 @@ impl AiManager {
                     name: format!("{} · {}", p.name, p.model),
                     kind: "text".into(),
                     active: active == p.id,
-                    available: p.enabled && !p.token.trim().is_empty(),
+                    // Els serveis LOCALS (llama.cpp, LM Studio…) no demanen
+                    // clau: «has_token» ho sap (auth = None).
+                    available: p.enabled && p.has_token(),
                 })
                 .collect();
             out.extend(infos);
