@@ -554,10 +554,21 @@ export const useAIStore = create<AIState>((set, get) => ({
       }
     );
     try {
-      const nom = await invoke<string>("hf_bay_download", { id });
+      const res = await invoke<{
+        ok: boolean;
+        model: string | null;
+        message: string;
+      }>("hf_bay_download", { id });
+      if (!res.ok) {
+        // Sense Ollama (o sense permís): el fitxer és baixat, però cal el
+        // motor per usar-lo. S'ho expliquem a l'usuari.
+        set({ lastMessage: res.message });
+        return null;
+      }
       await get().loadModels();
-      await get().selectModel(nom);
-      return nom;
+      if (res.model) await get().selectModel(res.model);
+      set({ lastMessage: res.message });
+      return res.model;
     } catch (e) {
       set({ lastMessage: String(e) });
       return null;

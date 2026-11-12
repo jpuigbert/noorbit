@@ -146,6 +146,41 @@ fn clean_file_path(p: &str) -> String {
         .to_string()
 }
 
+/// Neteja els ARTEFACTES DE LA INTERFÍCIE que el model pot copiar del xat:
+/// l'etiqueta del llenguatge («PHP», «Python»…) i el botó «Copia» que hi ha
+/// just damunt del codi. No són codi i feien que cap edició coincidís.
+pub fn strip_ui_artifacts(content: &str) -> String {
+    let langs = [
+        "php", "python", "javascript", "typescript", "css", "scss", "html", "json",
+        "bash", "shell", "sql", "yaml", "yml", "toml", "rust", "go", "java", "c",
+        "cpp", "csharp", "cs", "diff", "markdown", "text", "plaintext", "xml", "ini",
+        "swift", "kt", "kotlin", "ruby", "rb", "vue", "svelte", "astro", "graphql",
+        "dockerfile", "makefile", "code",
+    ];
+    let mut lines = content.lines();
+    let mut out: Vec<&str> = Vec::new();
+    let mut started = false;
+    for line in lines.by_ref() {
+        let t = line.trim();
+        if !started {
+            if t.is_empty() {
+                continue;
+            }
+            let low = t.to_lowercase();
+            if low == "copia" || low == "còpia" || low == "copy" || langs.contains(&low.as_str()) {
+                continue;
+            }
+            started = true;
+        }
+        out.push(line);
+    }
+    let mut s = out.join("\n");
+    if !s.is_empty() {
+        s.push('\n');
+    }
+    s
+}
+
 /// Extreu els blocs «@file: ruta» de la resposta del model com a
 /// (ruta relativa, contingut). HEURÍSTICA: si el model embolica el codi en
 /// tanques ``` , el contingut és NOMÉS el de DINS de les tanques; si no en
@@ -216,7 +251,7 @@ pub fn extract_file_blocks(text: &str) -> Vec<(String, String)> {
             } else {
                 &b.bare
             };
-            let content = src.join("\n").trim_matches('\n').to_string() + "\n";
+            let content = strip_ui_artifacts(&src.join("\n").trim_matches('\n').to_string());
             (b.path, content)
         })
         .filter(|(_, c)| !c.trim().is_empty())
@@ -259,7 +294,9 @@ pub fn extract_edit_blocks(text: &str) -> Vec<EditBlock> {
     let flush_section = |cur: &mut Option<EditBlock>, s: &mut Option<(Vec<String>, Vec<String>, u8)>| {
         if let (Some(b), Some((find, rep, _))) = (cur.as_mut(), s.take()) {
             let f = find.join("\n").trim_matches('\n').to_string();
-            let r = rep.join("\n").trim_matches('\n').to_string();
+            let r = strip_ui_artifacts(&rep.join("\n").trim_matches('\n').to_string())
+                .trim_end_matches('\n')
+                .to_string();
             if !f.trim().is_empty() {
                 b.edits.push((f, r));
             }

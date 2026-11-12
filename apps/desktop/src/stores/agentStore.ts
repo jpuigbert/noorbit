@@ -148,13 +148,12 @@ function defaultShowThinking(): boolean {
 }
 
 function defaultCtx(): boolean {
-  try {
-    // Per DEFECTE sempre actiu: la IA ha de veure el codi del projecte.
-    // Només es desactiva si l'usuari ho demana explícit («0»).
-    return localStorage.getItem("noorbit.ctx") !== "0";
-  } catch {
-    return true;
-  }
+  // PER NORMA: la IA de l'Agent treballa SEMPRE amb el codi real del projecte
+  // obert. Abans es podia desactivar i es recordava entre sessions; això feia
+  // que la IA responguera «a cegues» i no creara els fitxers correctes.
+  // Si un projecte és enorme, el context es retalla sol (buildContext) i els
+  // reintents per falta de memòria el redueixen encara més.
+  return true;
 }
 
 function blankSession(id: string, over: Partial<ChatSession> = {}): ChatSession {
@@ -456,6 +455,9 @@ const MEMORY_SYSTEM =
   "PER EDITAR només un tros d'un fitxer (millor que reemetre'l sencer): " +
   "«@edit: ruta» + marcador «<<<<<<< CERCA» + el text EXACTE que vols canviar " +
   "+ «=======» + el text NOU (buit = ESBORRAR-lo) + «>>>>>>>».\n" +
+  "IMPORTANT: emet cada fitxer UNA SOLA VEGADA (no repeteixis el mateix " +
+  "@file: ni el mateix bloc de codi). Si un fitxer ja existeix, reemet-lo " +
+  "amb «@edit:» o «@file:» una sola vegada i prou.\n" +
   "PER ESBORRAR un fitxer sencer: una línia «@delete: ruta». " +
   "Si la petició és FER codi («fes…», «implementa…», «crea…», «afegeix…», " +
   "«arregla…») o PROVES («tests», «proves»), la resposta HA de portar els " +
@@ -485,6 +487,8 @@ const CONTEXT_SYSTEM =
   "MÉS FÀCIL I MILLOR per a canvis PETITS: «@edit: ruta» + «<<<<<<< CERCA» " +
   "+ el text EXACTE del fitxer a canviar + «=======» + el text NOU (buit = " +
   "esborrar-lo) + «>>>>>>>». NoOrbit aplica el canvi al fitxer real.\n" +
+  "EMET CADA FITXER UNA SOLA VEGADA: no repeteixis el mateix «@file:» ni el " +
+  "mateix bloc de codi (són inútils i cremaven el context).\n" +
   "PER ESBORRAR UN FITXER SENCER (o codi que falla): una línia «@delete: " +
   "ruta». Ho esborra de veritat al projecte.\n\n" +
   "SI ET DEMANEN FER CODI o PROVES (tests): no ho expliquis en prosa — emet " +
@@ -523,6 +527,29 @@ function parseManifest(raw: string): string[] {
 /// NOMÉS el que hi ha DINS DE LES TANQUES. Així la prosa posterior, les
 /// directrius «RUN|» i els altres anuncis NO s'arreneguen dins del fitxer
 /// (abans «python3 x.py» fallava amb SyntaxError per culpa d'eixa brossa).
+/// Neteja els ARTEFACTES DE LA INTERFÍCIE que el model pot copiar del xat:
+/// l'etiqueta del llenguatge («PHP», «Python»…) i el botó «Copia» que hi ha
+/// just damunt del codi. No són codi: al projecte hi quedaven al davant del
+/// fitxer i, sobretot, feien que cap «@edit:» coincidís mai amb el text real.
+function stripUiArtifacts(content: string): string {
+  const lines = content.split("\n");
+  const lang = /^(php|python|javascript|typescript|css|scss|html|json|bash|shell|sql|yaml|yml|toml|rust|go|java|c|cpp|csharp|cs|diff|markdown|text|plaintext|xml|ini|swift|kt|kotlin|ruby|rb|dart|lua|vue|svelte|astro|graphql|dockerfile|makefile|code)$/i;
+  let i = 0;
+  while (i < lines.length) {
+    const t = lines[i].trim();
+    if (!t) {
+      i++;
+      continue;
+    }
+    if (/^(copia|còpia|copy)$/i.test(t) || lang.test(t)) {
+      i++;
+      continue;
+    }
+    break;
+  }
+  return lines.slice(i).join("\n");
+}
+
 function parseFileBlocks(raw: string): { path: string; content: string }[] {
   const lines = raw.split(/\r?\n/);
   type Cur = { path: string; fenced: string[]; bare: string[]; inFence: boolean; hadFence: boolean };
@@ -576,7 +603,8 @@ function parseFileBlocks(raw: string): { path: string; content: string }[] {
       const body = f.hadFence && f.fenced.length > 0 ? f.fenced : f.bare;
       return {
         path: f.path,
-        content: body.join("\n").replace(/^\s*\n+/, "").replace(/\s+$/, "") + "\n",
+        content:
+          stripUiArtifacts(body.join("\n").replace(/^\s*\n+/, "").replace(/\s+$/, "")) + "\n",
       };
     })
     // Un bloc sense contingut útil s'ignora: FILE_NUDGE ja encarrega de
@@ -599,8 +627,11 @@ function parseDirDirectives(raw: string): string[] {
       .replace(/^\/+/, "")
       .replace(/\\/g, "/");
     if (!d) continue;
-    // Si per error posa un fitxer (sense «/») amb extensió, no és una carpeta.
-    if (/\.[A-Za-z0-9]{1,6}$/.test(d) && !d.includes("/")) continue;
+    // Si té extensió de fitxer coneguda NO pot ser una carpeta (ni tan sols
+    // amb «/» al mig: «admin/index.php» és un FITXER, no un directori).
+    // Abans es creava com a carpeta i fallava («admin/» no existia).
+    const ext = (d.split("/").pop() ?? "").split(".").pop()?.toLowerCase() ?? "";
+    if (d.includes(".") && REC_EXT.has(ext)) continue;
     if (!d.split("/").includes("..")) out.push(d);
   }
   return Array.from(new Set(out));
@@ -679,7 +710,7 @@ function extractFromProse(raw: string): { path: string; content: string }[] {
   while ((m = fenceRe.exec(norm)) !== null) {
     i++;
     const lang = (m[1] || "").toLowerCase();
-    const content = m[2].replace(/\s+$/, "") + "\n";
+    const content = stripUiArtifacts(m[2].replace(/\s+$/, "")) + "\n";
     if (!content.trim()) continue;
     const before = norm.slice(Math.max(0, m.index - 320), m.index);
     const after = norm.slice(m.index + m[0].length, m.index + m[0].length + 320);
@@ -697,7 +728,7 @@ function extractFromProse(raw: string): { path: string; content: string }[] {
     const after = norm.slice((lastOp.index ?? 0) + lastOp[0].length).replace(/^\n/, "");
     if (after.trim()) {
       const lang = (lastOp[0].match(/```([A-Za-z0-9_-]*)/)?.[1] ?? "").toLowerCase();
-      const content = after.replace(/\s+$/, "") + "\n";
+      const content = stripUiArtifacts(after.replace(/\s+$/, "")) + "\n";
       const before = norm.slice(0, lastOp.index ?? 0).slice(-320);
       dedupe(inferPath(lang, content, before, "", fences.length + 1), content);
     }
@@ -706,10 +737,20 @@ function extractFromProse(raw: string): { path: string; content: string }[] {
 }
 
 /// Extensions considerades «de fitxer» a l'hora de reconèixer rutes en prosa.
+/// IMPORTANT: si una extensió NO hi és, la ruta es classifica com a CARPETA i
+/// es crea com a carpeta (i falla). Per això hi ha totes les habituals:
+/// WordPress/PHP, Twig/Blade, Laravel, Django, Rails, Go, Kotlin, Swift…
 const REC_EXT = new Set([
   "py", "js", "jsx", "ts", "tsx", "json", "md", "txt", "css", "scss", "html",
   "toml", "yaml", "yml", "ini", "cfg", "env", "lock", "rs", "go", "java",
   "c", "h", "cpp", "hpp", "sh", "sql", "csv", "xml", "svg", "glb", "fbx",
+  // WordPress / PHP i el seu ecosistema
+  "php", "php3", "php4", "php5", "phtml", "twig", "blade", "po", "pot", "mo",
+  // Altres llenguatges i formats habituals
+  "kt", "kts", "swift", "m", "mm", "cs", "rb", "phpunit", "vue", "svelte",
+  "astro", "graphql", "gql", "proto", "dockerfile", "makefile", "conf",
+  "htaccess", "htpasswd", "webp", "jpg", "jpeg", "png", "gif", "ico", "pdf",
+  "woff", "woff2", "ttf", "eot", "mp4", "webm", "zip", "tar", "gz",
 ]);
 
 /// Reconeix rutes que la IA RECOMANA en prosa (fora dels blocs de codi):
@@ -1197,8 +1238,8 @@ function parseEditBlocks(raw: string): EditBlock[] {
   let sec: { find: string[]; rep: string[]; phase: 0 | 1 } | null = null;
   const flushSec = () => {
     if (cur && sec) {
-      const find = sec.find.join("\n").replace(/^\n+|\s+$/g, "");
-      const replace = sec.rep.join("\n").replace(/^\n+|\s+$/g, "");
+      const find = stripUiArtifacts(sec.find.join("\n").replace(/^\n+|\s+$/g, ""));
+      const replace = stripUiArtifacts(sec.rep.join("\n").replace(/^\n+|\s+$/g, ""));
       if (find.trim()) cur.edits.push({ find, replace });
     }
     sec = null;
@@ -1326,6 +1367,16 @@ async function autoMaterialize(raw: string): Promise<string | null> {
   let files = parseFileBlocks(raw);
   if (files.length === 0) {
     files = extractFromProse(raw);
+  }
+  // El model pot REPETIR el mateix fitxer moltes vegades (bucle genseratiu:
+  // 20 cops el mateix @file:). Es queda només l'última versió (que és la
+  // més completa) i la resta es compten com a duplicats: així no es cremen
+  // els recursos ni s'escriu el mateix fitxer desenes de vegades.
+  let dupes = files.length - new Set(files.map((f) => f.path)).size;
+  if (dupes > 0) {
+    const ultimes = new Map<string, { path: string; content: string }>();
+    for (const f of files) ultimes.set(f.path, f);
+    files = [...ultimes.values()];
   }
   // Blocs de codi SENSE nom de fitxer (els models locals sovint no anomenen
   // res): abans es descartaven i NOMÉS sobrevivien els .md, així que «no crea
@@ -1465,6 +1516,12 @@ async function autoMaterialize(raw: string): Promise<string | null> {
     parts.push(
       `📁 Aplicats automàticament al projecte (${written.length} fitxers):\n` +
         written.map((p) => `• ${p}`).join("\n")
+    );
+  }
+  if (dupes > 0) {
+    parts.push(
+      `♻️ La IA ha repetit ${dupes} bloc${dupes === 1 ? "" : "s"} de codi idèntics: ` +
+        `només s'ha aplicat l'última versió de cada fitxer.`
     );
   }
   // Si el motor lleuger ha detectat errors (claus sense tancar, JSON invàlid…),
@@ -1681,7 +1738,7 @@ function loadChats(key: string): { sessions: ChatSession[]; activeId: string } {
             ...s,
             title: s.title ?? "",
             createdAt: s.createdAt ?? Date.now(),
-            includeContext: s.includeContext ?? defaultCtx(),
+            includeContext: true,
             messages: (s.messages ?? []).map((m) => ({ ...m })),
             // L'estat transitori no es restaura: en reobrir l'app res no genera.
             running: false,
@@ -1984,10 +2041,12 @@ export const useAgentStore = create<AgentState>((set, get) => {
       }
     },
 
-    setIncludeContext: (id, v) => {
-      patch(id, { includeContext: v });
+    setIncludeContext: (id, _v) => {
+      // PER NORMA: sempre inclòs. Aquest mètode es conserva per compatibilitat
+      // (altres vistes podrien cridar-lo), però no pot desactivar el codi.
+      patch(id, { includeContext: true });
       try {
-        localStorage.setItem("noorbit.ctx", v ? "1" : "0");
+        localStorage.removeItem("noorbit.ctx");
       } catch {
         /* sense persistència */
       }
@@ -2681,6 +2740,19 @@ export const useAgentStore = create<AgentState>((set, get) => {
         const abs = `${base}/${p}`;
         try {
           if (p.endsWith("/")) {
+            // La IA pot classificar mal un fitxer com a carpeta (p. ex. si
+            // l'extensió no és coneguda): si ja hi ha un FITXER amb aquest
+            // nom, no es pot crear la carpeta — i no és un error, és el fitxer
+            // que ja hi és.
+            const senseSlash = p.replace(/\/+$/, "");
+            const absSense = `${base}/${senseSlash}`;
+            try {
+              await invoke<string>("read_file", { path: absSense });
+              existed.push(senseSlash);
+              continue;
+            } catch {
+              /* no hi ha cap fitxer: és una carpeta de veritat */
+            }
             await invoke("create_dir", { path: abs });
             newDirs.push(p);
           } else {

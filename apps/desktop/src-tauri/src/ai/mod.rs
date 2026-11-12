@@ -945,7 +945,7 @@ fn url_host_port(url: &str) -> (String, u16) {
 /// 3. Connexió refusada/tallada amb el port viu: Ollama saturat.
 /// S'emprà des de `send_chat`; el text tècnic original s'adjunta al final per
 /// no perdre informació (i perquè `is_body_cut` segueixis reconeixent-lo).
-fn explain_send_failure(e: &reqwest::Error, url: &str) -> String {
+fn explain_send_failure(e: &reqwest::Error, url: &str, auto_install: bool) -> String {
     use std::error::Error as _;
     use std::net::ToSocketAddrs;
     let (host, port) = url_host_port(url);
@@ -975,15 +975,21 @@ fn explain_send_failure(e: &reqwest::Error, url: &str) -> String {
     } else if !listening {
         // El servei no hi és: intentem arrencar-lo nosaltres (si està instal·lat);
         // si NO ho està, l'hem de BAIXAR i INSTAL·LAR: ho llenç en un fil de fons
-        // (la descàrrega triga uns minuts i així no congelo el xat) i aviso
-        // l'usuari que ho repeteixi quan acabi.
+        // Ollama NO instal·lat: NoOrbit ha de poder funcionar igual. Ara:
+        //  - Si l'usuari ja té un proveïdor EN LÍNIA (amb token), el xat ja ha
+        //   uria d'haver caigut a ell; aquí l'error és del remot.
+        //  - Si no en té cap, l'instal·lació d'Ollama en segon pla és la via
+        //    per tenir IA local (gratis, sense comptes).
         let tried = if ollama_installed() {
             start_ollama_server().is_ok()
-        } else {
+        } else if auto_install {
             std::thread::spawn(|| {
                 let _ = ensure_ollama_installed();
                 let _ = start_ollama_server();
             });
+            false
+        } else {
+            // L'usuari ja té una IA EN LÍNIA: no li baixem Ollama a la força.
             false
         };
         format!(
@@ -992,12 +998,22 @@ fn explain_send_failure(e: &reqwest::Error, url: &str) -> String {
             port,
             if tried {
                 "Ho he intentat arrencar jo: espera uns segons i repeteix el missatge."
+            } else if !auto_install {
+                "El motor local (Ollama) no està instal·lat, però tu ja tens una IA \
+                 en línia configurada: el problema és el proveïdor remot (token, \
+                 quota o connexió). Revisa'l a «Proveïdors». NoOrbit funciona igual \
+                 sense Ollama: editor, terminal, fitxers, Blender, Unreal i \
+                 imatges són iguals."
             } else {
                 "No el tens instal·lat: estic BAIXANT i INSTAL·LANT Ollama \
                  automàticament en segon pla (triga uns minuts la descàrrega). \
                  Quan acabi torna a enviar el missatge — o prem «Inicia Ollama» \
-                 al panell IA. També pots connectar un proveïdor remot amb token \
-                 (p. ex. Venice AI) mentre s'instal·la."
+                 al panell IA. \
+                 \
+                 MENTRE TANT: NoOrbit funciona igual (editor, terminal, fitxers, \
+                 Blender, Unreal, imatges, extensions i skills). Per tenir IA al \
+                 xat ara mateix, connecta un proveïdor amb token a «Proveïdors» \
+                 (p. ex. Venice AI o OpenAI) i el xat hi caurà automàticament."
             }
         )
     } else if e.is_connect() {
@@ -2583,6 +2599,27 @@ impl AiManager {
         }
     }
 
+    /// Primer proveïdor EN LÍNIA utilitzable (activat i amb token). Serveix
+    /// perquè NoOrbit funcioni SENSE OLLAMA: si el motor local no hi és (o no
+    /// està instal·lat), el xat continua amb la IA del núvol de l'usuari.
+    pub fn first_working_remote(&self) -> Option<String> {
+        let remote = self.remote.as_ref()?;
+        let guard = remote.lock().unwrap();
+        guard
+            .providers
+            .iter()
+            .find(|p| p.enabled && !p.token.trim().is_empty())
+            .map(|p| p.id.clone())
+    }
+
+    /// Hi ha ALGUNA IA disponible (local en marxa o remota amb token)?
+    pub async fn has_any_provider(&self) -> bool {
+        if self.is_running().await {
+            return true;
+        }
+        self.first_working_remote().is_some()
+    }
+
     /// Model d'un xat: el seu propi o, si no, el triat globalment.
     async fn model_for(&self, ctl: &Arc<SessionCtl>) -> String {
         match ctl.model().await {
@@ -2595,7 +2632,13 @@ impl AiManager {
     /// visor del procés la fa servir per a etiquetar també els errors.
     pub async fn session_labels(&self, session: &str) -> (String, String) {
         let ctl = self.ctl(session);
-        let provider = self.effective_provider(&ctl).await;
+        let mut provider = self.effective_provider(&ctl).await;
+        // SENSE OLLAMA: caiguda a la IA en línia de l'usuari (si n'hi ha).
+        if provider == "ollama" && !self.is_running().await {
+            if let Some(remot) = self.first_working_remote() {
+                provider = remot;
+            }
+        }
         let model = self.model_for(&ctl).await;
         (provider, model)
     }
@@ -2720,7 +2763,27 @@ impl AiManager {
         ctl.begin().await;
         let start = std::time::Instant::now();
 
-        let active = self.effective_provider(&ctl).await;
+        let mut active = self.effective_provider(&ctl).await;
+        // SENSE OLLAMA: si el motor local no està instal·lat (o no escolta) i
+        // l'usuari té un proveïdor EN LÍNIA amb token, el xat continua amb
+        // aquell — NoOrbit funciona igual (editor, terminal, imatges, Blender).
+        if active == "ollama" && !self.is_running().await {
+            if let Some(remot) = self.first_working_remote() {
+                let (_, m) = self.session_labels(&ctl.id).await;
+                ctl.process(
+                    app,
+                    &remot,
+                    &m,
+                    "thinking",
+                    &format!(
+                        "Ollama no està instal·lat o no està en marxa: faig servir                          «{}» (el teu proveïdor en línia). NoOrbit funciona igual                          sense el motor local.",
+                        remot
+                    ),
+                    0,
+                );
+                active = remot;
+            }
+        }
         // Proveïdor remot: fa streaming SSE (emet «ai://process» token a token,
         // com Ollama). La cancel·lació és la del XAT que ha enviat el missatge.
         if active != "ollama" {
@@ -3035,11 +3098,14 @@ impl AiManager {
         // Model de RESERVA ja instal·lat si el triat no hi és (404): una sola
         // vegada — si el de reserva tampoc va (impossible en teoria), error.
         let mut fallback_used: Option<String> = None;
+        // Podem instal·lar Ollama en segon pla? Només si l'usuari NO té cap
+        // IA en línia configurada (respectem la seva elecció).
+        let auto_install = self.first_working_remote().is_none();
         let resp = loop {
             // El futur «send» reté el préstec de «req»: el contenim en un
             // bloc propi perquè mori ABANS de poder substituir el model.
             let resp = {
-                let send = Self::send_chat(&self.http_stream, &chat_url, &req);
+                let send = Self::send_chat(&self.http_stream, &chat_url, &req, auto_install);
                 tokio::pin!(send);
                 let resp = loop {
                 tokio::select! {
@@ -3463,7 +3529,10 @@ impl AiManager {
                 keep_alive,
                 options,
             };
-            let mut resp = Self::send_chat(&self.http, &chat_url, &req).await?;
+            // Podem instal·lar Ollama en segon pla? Només si l'usuari NO
+            // té cap IA en línia configurada.
+            let auto_install = self.first_working_remote().is_none();
+            let mut resp = Self::send_chat(&self.http, &chat_url, &req, auto_install).await?;
             // USUARI NOU SENSE CAP MODEL: el primer enviament a un Ollama
             // acabat d'instal·lar (o JA en marxa però buit) retorna 404.
             // Mateixa recuperació que el camí streaming: si Ollama no té cap
@@ -3483,24 +3552,24 @@ impl AiManager {
                     // El model DEMANAT no és: DESCARREGA'L (silenciós, sense
                     // AppHandle) i reintent una vegada amb ell.
                     if self.pull_model(None, &model_label).await.is_ok() {
-                        resp = Self::send_chat(&self.http, &chat_url, &req).await?;
+                        resp = Self::send_chat(&self.http, &chat_url, &req, auto_install).await?;
                     } else if let Some(fb) = Self::pick_fallback_model(&instalats) {
                         // La descàrrega ha fallat: reserva amb un JA instal·lat.
                         req.model = fb;
-                        resp = Self::send_chat(&self.http, &chat_url, &req).await?;
+                        resp = Self::send_chat(&self.http, &chat_url, &req, auto_install).await?;
                     } else {
                         // Res instal·lat útil: baixa l'inicial i reintent.
                         let nom = Self::starter_model_name();
                         self.pull_model(None, &nom).await?;
                         req.model = nom;
-                        resp = Self::send_chat(&self.http, &chat_url, &req).await?;
+                        resp = Self::send_chat(&self.http, &chat_url, &req, auto_install).await?;
                     }
                 } else {
                     // Ollama SENSE CAP model: baixem l'inicial i reintentem.
                     let nom = Self::starter_model_name();
                     self.pull_model(None, &nom).await?;
                     req.model = nom;
-                    resp = Self::send_chat(&self.http, &chat_url, &req).await?;
+                    resp = Self::send_chat(&self.http, &chat_url, &req, auto_install).await?;
                 }
             }
             if !resp.status().is_success() {
@@ -3532,6 +3601,7 @@ impl AiManager {
         http: &reqwest::Client,
         url: &str,
         req: &ChatRequest,
+        auto_install: bool,
     ) -> Result<reqwest::Response> {
         http.post(url)
             .json(req)
@@ -3539,7 +3609,11 @@ impl AiManager {
             .await
             // No propaguem l'error opac de reqwest: expliquem la CAUSA real
             // (temps exhaurit, Ollama aturat, port satur…) amb què fer.
-            .map_err(|e| anyhow!("Ollama no respon — {}", explain_send_failure(&e, url)))
+            .map_err(|e| {
+                // Només instal·lem Ollama en segon pla si l'usuari NO té cap
+                // IA en línia configurada (respectem la seva elecció).
+                anyhow!("Ollama no respon — {}", explain_send_failure(&e, url, auto_install))
+            })
     }
 
     /// Demana aturar la generació d'un xat (botó «Atura» de la interfície).

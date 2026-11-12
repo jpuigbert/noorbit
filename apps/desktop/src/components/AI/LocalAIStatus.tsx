@@ -8,8 +8,10 @@ import {
   Loader2,
   Play,
   Sparkles,
+  Cloud,
 } from "lucide-react";
 import { useAIStore } from "../../stores/aiStore";
+import { useProviderStore } from "../../stores/providerStore";
 import "./LocalAIStatus.css";
 
 /**
@@ -26,6 +28,7 @@ export type LocalAIState =
   | "stopped" // instal·lat però aturat
   | "no-model" // en marxa però sense cap model
   | "downloading" // baixant el model inicial
+  | "cloud" // IA en línia activa: Ollama és opcional
   | "ready";
 
 export interface LocalAIHealth {
@@ -82,10 +85,14 @@ export function useLocalAIHealth(): LocalAIHealth {
   const progress = pulls.length > 0 ? pulls[0][1] : null;
   const selected = useAIStore((s) => s.selectedModel);
 
+  // Si l'usuari ja té una IA EN LÍNIA activa (amb token), NoOrbit funciona
+  // igual: no l'amoinem amb «falta Ollama» (que és opcional).
+  const cloudActive = useProviderStore((s) => s.active !== "ollama" && s.active !== "");
+
   let state: LocalAIState = "checking";
   if (checked) {
-    if (!ollamaInstalled) state = "missing";
-    else if (!ollamaRunning) state = "stopped";
+    if (!ollamaInstalled) state = cloudActive ? "cloud" : "missing";
+    else if (!ollamaRunning) state = cloudActive ? "cloud" : "stopped";
     else if (pulls.length > 0) state = "downloading";
     else if (models.length === 0) state = "no-model";
     else state = "ready";
@@ -137,6 +144,8 @@ export function localAIStateLabel(h: LocalAIHealth): string {
       return "Cap model instal·lat: la IA no pot respondre";
     case "downloading":
       return h.progress ?? "Baixant el model…";
+    case "cloud":
+      return "IA al núvol (Ollama no cal)";
     case "ready":
       return h.model ? `A punt · ${h.model}` : "A punt";
   }
@@ -181,6 +190,20 @@ export default function LocalAIStatus() {
         <CheckCircle2 size={13} />
         <span className="lps-label">IA local</span>
         <span className="lps-detail">{h.model ?? "a punt"}</span>
+      </div>
+    );
+  }
+  if (h.state === "cloud") {
+    // IA EN LÍNIA: Ollama és opcional. Sense motor local no hi ha res a
+    // instal·lar ni a baixar: la línia és discreta i no avisa de res.
+    return (
+      <div
+        className="lps lps-ready"
+        title="Estàs fent servir una IA en línia: Ollama no és necessari."
+      >
+        <Cloud size={13} />
+        <span className="lps-label">IA al núvol</span>
+        <span className="lps-detail">Ollama opcional</span>
       </div>
     );
   }

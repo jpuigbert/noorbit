@@ -917,12 +917,23 @@ pub async fn hf_bay_details(
 /// DESCARREGA un model de Hugging Bay (amb progrés) i el registra a Ollama
 /// perquè aparegui al gestor de models i es pugui usar al xat. Retorna el nom
 /// del model ja instal·lat.
+/// Resultat de la descàrrega d'un model de Hugging Bay.
+#[derive(Debug, Clone, Serialize)]
+pub struct BayDownloadResult {
+    /// Cert si el model ja es pot fer servir (registrat a Ollama).
+    pub ok: bool,
+    /// Nom del model a Ollama (si s'ha pogut registrar).
+    pub model: Option<String>,
+    /// Explicació per a l'usuari (progrés, avisos o instruccions).
+    pub message: String,
+}
+
 #[command]
 pub async fn hf_bay_download(
     state: State<'_, AppState>,
     app: AppHandle,
     id: String,
-) -> Result<String, String> {
+) -> Result<BayDownloadResult, String> {
     use tauri::Emitter;
     let http = state.ai_manager.http_client();
     let det = crate::ai::hf_bay::details(&http, &id)
@@ -962,6 +973,30 @@ pub async fn hf_bay_download(
             "message": format!("registrant «{}» a Ollama…", nom)
         }),
     );
+    // SENSE OLLAMA: el model es baixa i es conserva, però no es pot executar
+    // (Ollama és el motor). NoOrbit segueix fent la resta de coses.
+    if crate::ai::ollama_binary().is_none() {
+        let _ = app.emit(
+            "ai://pull",
+            serde_json::json!({
+                "model": nom.clone(),
+                "message": format!("«{}» baixat (cal Ollama per usar-lo)", nom)
+            }),
+        );
+        return Ok(BayDownloadResult {
+            ok: false,
+            model: None,
+            message: format!(
+                "He baixat «{}» a {}. Per fer-lo servir necessites Ollama: prem \
+                 «Instal·la Ollama» a la barra d'estat (o al gestor de models) i el \
+                 podràs instal·lar sense perdre res. La resta de NoOrbit (editor, \
+                 terminal, Blender, imatges) ja funciona.",
+                nom,
+                path.to_string_lossy()
+            ),
+        });
+    }
+
     crate::ai::hf_bay::register_in_ollama(&nom, &path)
         .await
         .map_err(|e| e.to_string())?;
@@ -977,7 +1012,11 @@ pub async fn hf_bay_download(
             "message": format!("«{}» a punt!", nom)
         }),
     );
-    Ok(nom)
+    Ok(BayDownloadResult {
+        ok: true,
+        model: Some(nom.clone()),
+        message: format!("«{}» instal·lat i a punt!", nom),
+    })
 }
 
 /// Instal·la una ALTRA IA LOCAL apart d'Ollama: LM Studio, GPT4All, Jan

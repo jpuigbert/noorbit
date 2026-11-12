@@ -68,7 +68,6 @@ export default function AgentPanel() {
     createStructure,
     pushStep,
     appendStream,
-    setIncludeContext,
     clearChat,
     stop,
   } = useAgentStore();
@@ -94,10 +93,18 @@ export default function AgentPanel() {
     error,
     startedAt,
     lastElapsedMs,
-    includeContext,
     contextInfo,
     queue,
   } = sess;
+
+  // El codi del projecte és SEMPRE context (per norma). Al composer només
+  // cal una etiqueta curta; el detall complet viu al tooltip del badge.
+  const ctxCount = contextInfo?.match(/(\d+)\s+fitxers/)?.[1];
+  const ctxLabel = contextInfo?.startsWith("⚠️")
+    ? "Sense codi del projecte"
+    : ctxCount
+    ? `Codi del projecte · ${ctxCount} fitxers`
+    : null;
 
   const {
     models,
@@ -544,173 +551,169 @@ export default function AgentPanel() {
         </button>
       </div>
 
-      {/* IA D'AQUEST XAT: proveïdor local (Ollama) o qualsevol remot configurat,
-          independentment del que usin els altres xats oberts. */}
-      <div className="ap-ia-bar">
-        <Cpu size={13} className="ap-model-icon" />
-        <select
-          className="ap-model-select"
-          value={chatProvider}
-          onChange={(e) => setChatProvider(activeId, e.target.value || null)}
-          title={t("agent.providerHint")}
-        >
-          <option value="">{t("agent.providerGlobal")}</option>
-          <option value="ollama">Ollama (local)</option>
-          {providers
-            .filter((p) => p.enabled && p.id !== "ollama")
-            .map((p) => (
-              <option key={p.id} value={p.id}>
-                {/* Mostra també el model: així es veu QUINA IA s'usarà. */}
-                {p.name}
-                {p.model ? ` · ${p.model}` : ""}
-              </option>
-            ))}
-          {/* IAs de WEB: parlen per Internet via el navegador intern, amb el
-              compte de l'usuari (maig tokens). Són proveïdors més del xat:
-              tot el flux (historial, passos, fitxers) és el mateix. */}
-          {webIas.length > 0 && (
-            <optgroup label={t("webAi.optgroup")}>
-              {webIas.map((w) => (
-                <option key={w.id} value={`web:${w.id}`}>
-                  {w.name} · web
+      {/* ══ CONFIGURACIÓ DEL XAT: una sola targeta coherent ═══════════════
+          QUINA IA respon (proveïdor + model), QUI treballa (especialista)
+          i PER A QUINA PLATAFORMA (escriptori/Android/iOS). Abans eren tres
+          barres separades amb el mateix pes visual que omplien el panell. */}
+      <div className="ap-toolbar">
+        {/* Fila 1: IA i model d'aquest xat. */}
+        <div className="ap-toolbar-row">
+          <Cpu size={13} className="ap-model-icon" />
+          <select
+            className="ap-model-select"
+            value={chatProvider}
+            onChange={(e) => setChatProvider(activeId, e.target.value || null)}
+            title={t("agent.providerHint")}
+          >
+            <option value="">{t("agent.providerGlobal")}</option>
+            <option value="ollama">Ollama (local)</option>
+            {providers
+              .filter((p) => p.enabled && p.id !== "ollama")
+              .map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {p.model ? ` · ${p.model}` : ""}
                 </option>
               ))}
-            </optgroup>
-          )}
-        </select>
-        {/* En xat web no cal cap selector de model ni botons d'Ollama. */}
-        {isWebChat && (
-          <span style={{ fontSize: 11, color: "var(--text-3)" }}>
-            {t("webAi.webChatNote")}
-          </span>
-        )}
-        {/* Ollama Cloud: un sol proveïdor amb diversos models gratuïts al núvol.
-            El selector mostra el model ACTIU i en permet triar un altre. */}
-        {isCloudChat && (
-          <select
-            className="ap-model-select ap-model-perchat"
-            value={cloudProvider?.model ?? ""}
-            disabled={!cloudProvider}
-            onChange={(e) => pickCloudModel(e.target.value)}
-            title={t("agent.cloudModelHint")}
-          >
-            {!cloudProvider?.model && (
-              <option value="">{t("agent.cloudModelNone")}</option>
+            {/* IAs de WEB: parlen per Internet via el navegador intern. */}
+            {webIas.length > 0 && (
+              <optgroup label={t("webAi.optgroup")}>
+                {webIas.map((w) => (
+                  <option key={w.id} value={`web:${w.id}`}>
+                    {w.name} · web
+                  </option>
+                ))}
+              </optgroup>
             )}
-            {/* Si el model actiu no és dels de la llista base, l'afegim perquè
-                es mostri sempre la tria real. */}
-            {cloudProvider?.model &&
-            !OLLAMA_CLOUD_MODELS.some((m) => m.name === cloudProvider.model) ? (
-              <option value={cloudProvider.model}>{cloudProvider.model}</option>
-            ) : null}
-            {OLLAMA_CLOUD_MODELS.map((m) => (
-              <option key={m.name} value={m.name}>
-                {m.name}
-              </option>
-            ))}
           </select>
-        )}
-        {isLocalChat && (
-          <select
-            className="ap-model-select ap-model-perchat"
-            value={sess.model ?? ""}
-            disabled={models.length === 0}
-            onChange={(e) => setChatModel(activeId, e.target.value || null)}
-            title={t("agent.modelHint")}
+          {isWebChat && (
+            <span className="ap-tool-note">{t("webAi.webChatNote")}</span>
+          )}
+          {/* Ollama Cloud: selector del model del núvol. */}
+          {isCloudChat && (
+            <select
+              className="ap-model-select ap-model-perchat"
+              value={cloudProvider?.model ?? ""}
+              disabled={!cloudProvider}
+              onChange={(e) => pickCloudModel(e.target.value)}
+              title={t("agent.cloudModelHint")}
+            >
+              {!cloudProvider?.model && (
+                <option value="">{t("agent.cloudModelNone")}</option>
+              )}
+              {cloudProvider?.model &&
+              !OLLAMA_CLOUD_MODELS.some((m) => m.name === cloudProvider.model) ? (
+                <option value={cloudProvider.model}>{cloudProvider.model}</option>
+              ) : null}
+              {OLLAMA_CLOUD_MODELS.map((m) => (
+                <option key={m.name} value={m.name}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          )}
+          {/* Model local d'Ollama i gestió (recarregar/baixar). */}
+          {isLocalChat && (
+            <select
+              className="ap-model-select ap-model-perchat"
+              value={sess.model ?? ""}
+              disabled={models.length === 0}
+              onChange={(e) => setChatModel(activeId, e.target.value || null)}
+              title={t("agent.modelHint")}
+            >
+              <option value="">
+                {models.length === 0
+                  ? ollamaRunning
+                    ? t("agent.noModels")
+                    : t("agent.ollamaOffline")
+                  : t("agent.modelGlobal")}
+              </option>
+              {models.map((m) => (
+                <option key={m.name} value={m.name}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          )}
+          {isLocalChat && (
+            <>
+              <button
+                className="icon-btn"
+                title={t("common.refresh")}
+                onClick={() => loadModels()}
+              >
+                <RefreshCw size={13} />
+              </button>
+              <button
+                className="icon-btn"
+                title={t("agent.downloadModel")}
+                onClick={() => setShowDownload((v) => !v)}
+              >
+                <Download size={13} />
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* Fila 2: ROL (especialista) i PLATAFORMA objectiu del codi. */}
+        <div className="ap-toolbar-row ap-toolbar-row-role">
+          <div className="ap-inline-group">
+            <UserCog size={13} className="ap-model-icon" />
+            <select
+              className="ap-model-select ap-model-role"
+              value={sess.expertId}
+              onChange={(e) => setChatExpert(activeId, e.target.value)}
+              title={t("agent.expertDirect")}
+            >
+              <option value="">{t("agent.expertDirect")}</option>
+              {experts.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name} · {e.role}
+                </option>
+              ))}
+            </select>
+            <span className="ap-expert-count">({experts.length})</span>
+            {experts.length === 0 && (
+              <button
+                className="icon-btn"
+                onClick={goCreateExpert}
+                title={t("agent.expertNone")}
+              >
+                <Plus size={12} />
+              </button>
+            )}
+          </div>
+
+          <div
+            className="ap-platform"
+            title={
+              sess.platform === "android"
+                ? "Android natiu: Kotlin + Jetpack Compose"
+                : sess.platform === "ios"
+                ? "iOS natiu: Swift + SwiftUI"
+                : "Escriptori: Python, JS, Rust i qualsevol altre llenguatge"
+            }
           >
-            <option value="">
-              {models.length === 0
-                ? ollamaRunning
-                  ? t("agent.noModels")
-                  : t("agent.ollamaOffline")
-                : t("agent.modelGlobal")}
-            </option>
-            {models.map((m) => (
-              <option key={m.name} value={m.name}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-        )}
-        {/* Botons de gestió de models d'Ollama (recarregar llista i baixar un
-            model nou): només tenen sentit en xats LOCALS, no en els web. */}
-        {isLocalChat && (
-        <button
-          className="icon-btn"
-          title={t("common.refresh")}
-          onClick={() => loadModels()}
-        >
-          <RefreshCw size={13} />
-        </button>
-        )}
-        {isLocalChat && (
-        <button
-          className="icon-btn"
-          title={t("agent.downloadModel")}
-          onClick={() => setShowDownload((v) => !v)}
-        >
-          <Download size={13} />
-        </button>
-        )}
-      </div>
-
-      {/* SALUT DE LA IA LOCAL: diu clarament per què el xat no respon i
-          ofereix la solució amb un clic (instal·lar / engegar / baixar model).
-          Només en xats locals: en els web/cloud no fa falta. */}
-      {isLocalChat && <LocalAIStatus />}
-
-      {/* Selector de PLATAFORMA: condiciona el system prompt de la IA perquè
-          escriga codi NATIU (Kotlin/Compose o Swift/SwiftUI) dins l'estructura
-          que Android Studio / Xcode esperen. Afecta sol AQUEST xat. */}
-      <div className="ap-platform-bar" style={{ display: "flex", gap: 4, alignItems: "center" }}>
-        <PlatformButton
-          active={sess.platform === "desktop"}
-          onClick={() => setChatPlatform(activeId, "desktop")}
-          icon={<Monitor size={12} />}
-          label="Escriptor"
-        />
-        <PlatformButton
-          active={sess.platform === "android"}
-          onClick={() => setChatPlatform(activeId, "android")}
-          icon={<Smartphone size={12} />}
-          label="Android"
-        />
-        <PlatformButton
-          active={sess.platform === "ios"}
-          onClick={() => setChatPlatform(activeId, "ios")}
-          icon={<Apple size={12} />}
-          label="iOS"
-        />
-        <span style={{ fontSize: 11, color: "var(--text-3)", marginLeft: 6 }}>
-          {sess.platform === "android"
-            ? "Kotlin + Jetpack Compose (natiu)"
-            : sess.platform === "ios"
-            ? "Swift + SwiftUI (natiu)"
-            : "Lliurement: Python/JS/Rust/etc."}
-        </span>
-      </div>
-
-      {/* Mode expert per xat: les tasques d'AQUEST xat les resol l'expert triat. */}
-      <div className="ap-expert-bar">
-        <UserCog size={13} className="ap-model-icon" />
-        <select
-          className="ap-model-select"
-          value={sess.expertId}
-          onChange={(e) => setChatExpert(activeId, e.target.value)}
-        >
-          <option value="">{t("agent.expertDirect")}</option>
-          {experts.map((e) => (
-            <option key={e.id} value={e.id}>
-              {e.name} · {e.role}
-            </option>
-          ))}
-        </select>
-        <span className="ap-expert-count">({experts.length})</span>
-        {experts.length === 0 && (
-          <button className="btn sm" onClick={goCreateExpert}>
-            <Plus size={12} /> {t("agent.expertNone")}
-          </button>
-        )}
+            <button
+              className={"ap-plat" + (sess.platform === "desktop" ? " active" : "")}
+              onClick={() => setChatPlatform(activeId, "desktop")}
+            >
+              <Monitor size={12} /> Escriptori
+            </button>
+            <button
+              className={"ap-plat" + (sess.platform === "android" ? " active" : "")}
+              onClick={() => setChatPlatform(activeId, "android")}
+            >
+              <Smartphone size={12} /> Android
+            </button>
+            <button
+              className={"ap-plat" + (sess.platform === "ios" ? " active" : "")}
+              onClick={() => setChatPlatform(activeId, "ios")}
+            >
+              <Apple size={12} /> iOS
+            </button>
+          </div>
+        </div>
       </div>
 
       {showDownload && (
@@ -789,113 +792,126 @@ export default function AgentPanel() {
           onPaste={onPromptPaste}
           onKeyDown={onPromptKey}
         />
-        <div className="agent-actions">
-          {/* Interruptor: la IA d'aquest xat llegeix els fitxers reals del projecte. */}
-          <button
-            className={"btn sm ap-ctx" + (includeContext ? " active" : "")}
-            onClick={() => setIncludeContext(activeId, !includeContext)}
-            title={t("agent.ctxHint")}
-          >
-            <FolderTree size={13} /> {t("agent.ctxToggle")}
-          </button>
-          {/* Adjuntar QUALSEVOL fitxer: imatges com a entrada visual; codi/docs
-              com a context de text. També es poden arrossegar des del Finder. */}
-          <button
-            className="btn sm ap-ctx"
-            onClick={() => fileRef.current?.click()}
-            title="Adjunta un fitxer: imatges es mostren al xat; codi/documents s'envien com a context"
-          >
-            <Paperclip size={13} />
-          </button>
-          <input
-            ref={fileRef}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => {
-              void importImageFiles(Array.from(e.target.files ?? []));
-              e.target.value = "";
-            }}
-          />
-          {/* Exporta: obri la CARPETA del projecte obert amb el Finder/explorador. */}
-          <button
-            className="btn sm ap-ctx"
-            onClick={() => {
-              const root = useWorkspaceStore.getState().root;
-              if (root) void invoke("open_externally", { path: root }).catch(() => undefined);
-              else setAttachErr("No hi ha cap projecte obert.");
-            }}
-            title="Obri la carpeta del projecte amb l'aplicació per defecte"
-          >
-            <FolderOpen size={13} />
-          </button>
-          {/* Què està veient realment la IA: nre. de fitxers o avís. */}
-          {includeContext && contextInfo && (
-            <span className="ap-ctx-info">{contextInfo}</span>
-          )}
-        </div>
-        <div className="agent-actions">
-          {running ? (
-            <>
-              <button
-                className="btn sm"
-                disabled={!canSend}
-                onClick={handleSend}
-                title={t("agent.enqueueHint")}
-              >
-                <Send size={13} /> {t("agent.addToQueue")}
-              </button>
-              <button className="btn sm" onClick={() => newChat()} title={t("agent.newChatWhileRunningHint")}>
-                <Plus size={13} /> {t("agent.newChatWhileRunning")}
-              </button>
-              <button className="btn danger sm" onClick={() => void stop(activeId)}>
-                <Square size={13} /> {t("common.stop")}
-              </button>
-            </>
-          ) : (
-            <>
+        {/* Peu del composer: a l’esquerra, QUÈ veu la IA (el codi del
+            projecte va SEMPRE inclòs) i els adjunts; a la dreta, l’acció
+            principal. Les accions secundàries viuen fora, en una fila pròpia,
+            perquè no competisquen amb «Envia». */}
+        <div className="agent-actions ap-composer-actions">
+          <div className="ap-composer-tools">
+            <span
+              className={
+                "ap-ctx-badge" +
+                (contextInfo && contextInfo.startsWith("⚠️") ? " warn" : "")
+              }
+              title={
+                contextInfo ??
+                "La IA rep sempre el codi del projecte obert: les rutes de tots els fitxers i el contingut dels que hi caben."
+              }
+            >
+              <FolderTree size={12} />
+              {ctxLabel || t("agent.ctxAlways")}
+            </span>
+            {/* Adjuntar QUALSEVOL fitxer: imatges com a entrada visual;
+                codi/docs com a context. També es pot arrossegar del Finder. */}
+            <button
+              className="icon-btn"
+              onClick={() => fileRef.current?.click()}
+              title="Adjunta un fitxer: imatges es mostren al xat; codi/documents s'envien com a context"
+            >
+              <Paperclip size={13} />
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => {
+                void importImageFiles(Array.from(e.target.files ?? []));
+                e.target.value = "";
+              }}
+            />
+            <button
+              className="icon-btn"
+              onClick={() => {
+                const root = useWorkspaceStore.getState().root;
+                if (root) void invoke("open_externally", { path: root }).catch(() => undefined);
+                else setAttachErr("No hi ha cap projecte obert.");
+              }}
+              title="Obri la carpeta del projecte amb l'aplicació per defecte"
+            >
+              <FolderOpen size={13} />
+            </button>
+          </div>
+          <div className="ap-composer-primary">
+            {running ? (
+              <>
+                <button
+                  className="btn sm"
+                  disabled={!canSend}
+                  onClick={handleSend}
+                  title={t("agent.enqueueHint")}
+                >
+                  <Send size={13} /> {t("agent.addToQueue")}
+                </button>
+                <button
+                  className="icon-btn"
+                  onClick={() => newChat()}
+                  title={t("agent.newChatWhileRunningHint")}
+                >
+                  <Plus size={13} />
+                </button>
+                <button className="btn danger sm" onClick={() => void stop(activeId)}>
+                  <Square size={13} /> {t("common.stop")}
+                </button>
+              </>
+            ) : (
               <button className="btn primary sm" disabled={!canSend} onClick={handleSend}>
                 <Send size={13} /> {t("agent.send")}
               </button>
-              <button className="btn sm" disabled={disabled} onClick={() => plan(prompt, "text")}>
-                <ListChecks size={13} /> {t("agent.plan")}
-              </button>
-              <button className="btn sm" disabled={disabled} onClick={handleQuick}>
-                <Zap size={13} /> {t("agent.quick")}
-              </button>
-              {/* TREBALL EN EQUIP: amb un clic l'ordre va a TOTS els
-                  especialistes (els veus treballar a la sub-pestanya). Si
-                  encara no n'hi ha, el botó et porta a crear l'equip. */}
-              {experts.length > 0 ? (
-                <button
-                  className={"btn sm" + (teamMode ? " primary" : "")}
-                  disabled={disabled}
-                  title={t("agent.teamToggleHint")}
-                  onClick={() => setTeamMode(!teamMode)}
-                >
-                  <Users size={13} /> {t("agent.teamToggle")} ({experts.length})
-                </button>
-              ) : (
-                <button
-                  className="btn sm"
-                  disabled={disabled}
-                  title={t("agent.teamCreateHint")}
-                  onClick={goCreateExpert}
-                >
-                  <Users size={13} /> {t("agent.teamCreate")}
-                </button>
-              )}
-              <button
-                className="btn sm"
-                disabled={disabled}
-                onClick={handleScaffold}
-                title={t("agent.scaffoldHint")}
-              >
-                <FolderPlus size={13} /> {t("agent.scaffold")}
-              </button>
-            </>
-          )}
+            )}
+          </div>
         </div>
+      </div>
+
+      {/* ACCIONS SECUNDÀRIES: planificar, resposta ràpida, equip i crear el
+          projecte. Fila pròpia perquè no tapen l'acció principal. */}
+      {!running && (
+        <div className="ap-secondary-actions">
+          <button className="btn sm" disabled={disabled} onClick={() => plan(prompt, "text")}>
+            <ListChecks size={13} /> {t("agent.plan")}
+          </button>
+          <button className="btn sm" disabled={disabled} onClick={handleQuick}>
+            <Zap size={13} /> {t("agent.quick")}
+          </button>
+          {experts.length > 0 ? (
+            <button
+              className={"btn sm" + (teamMode ? " primary" : "")}
+              disabled={disabled}
+              title={t("agent.teamToggleHint")}
+              onClick={() => setTeamMode(!teamMode)}
+            >
+              <Users size={13} /> {t("agent.teamToggle")} ({experts.length})
+            </button>
+          ) : (
+            <button
+              className="btn sm"
+              disabled={disabled}
+              title={t("agent.teamCreateHint")}
+              onClick={goCreateExpert}
+            >
+              <Users size={13} /> {t("agent.teamCreate")}
+            </button>
+          )}
+          <button
+            className="btn sm"
+            disabled={disabled}
+            onClick={handleScaffold}
+            title={t("agent.scaffoldHint")}
+          >
+            <FolderPlus size={13} /> {t("agent.scaffold")}
+          </button>
+        </div>
+      )}
       </div>
 
       {/* Cua de missatges afegits mentre LA IA d'aquest xat treballa. */}
@@ -1266,29 +1282,6 @@ export default function AgentPanel() {
         </div>
       )}
     </div>
-  );
-}
-
-/** Botó de selecció de plataforma (Escriptor / Android / iOS). */
-function PlatformButton({
-  active,
-  onClick,
-  icon,
-  label,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-}) {
-  return (
-    <button
-      className={"btn sm" + (active ? " primary" : "")}
-      onClick={onClick}
-      style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
-    >
-      {icon} {label}
-    </button>
   );
 }
 

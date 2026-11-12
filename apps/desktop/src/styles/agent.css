@@ -920,3 +920,143 @@
   color: var(--text-0);
   border-color: var(--accent);
 }
+
+/* ═══ BARRA DE CONFIGURACIÓ UNIFICADA DEL XAT ═══════════════════════════
+   Abans hi havia tres barres (.ap-ia-bar / .ap-platform-bar / .ap-expert-bar)
+   amb el mateix pes visual i apilades: omplien el panell i empenyien el
+   composer. Ara és UNA targeta de dues files: dalt la IA i el model; baix el
+   rol (especialista) i la plataforma objectiu. */
+.ap-toolbar {
+  margin: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--bg-2) 72%, transparent);
+  backdrop-filter: blur(8px);
+  overflow: hidden;
+  flex: none;
+}
+.ap-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  min-width: 0;
+}
+.ap-toolbar-row + .ap-toolbar-row {
+  border-top: 1px solid var(--border);
+}
+.ap-toolbar-row-role {
+  justify-content: space-between;
+  gap: 10px;
+}
+.ap-inline-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+.ap-toolbar .ap-model-select {
+  max-width: none;
+  flex: 1 1 0;
+}
+.ap-toolbar .ap-model-role {
+  max-width: 190px;
+}
+.ap-tool-note {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+/* Control segmentat de plataforma: una sola peça, no tres botons solts. */
+.ap-platform {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  padding: 2px;
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  background: var(--bg-2);
+}
+.ap-plat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.ap-plat:hover {
+  color: var(--text-0);
+  background: var(--bg-3);
+}
+.ap-plat.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Peu del composer: context + adjunts a l'esquerra; acció principal a la dreta. */
+.ap-composer-actions {
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ap-composer-tools,
+.ap-composer-primary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* Insígnia del context: el codi del projecte va SEMPRE inclòs. El detall
+   complet (quants fitxers, quants caràcters…) viu al tooltip. */
+.ap-ctx-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  background: var(--bg-2);
+  color: var(--text-2);
+  font-size: 11px;
+  white-space: nowrap;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ap-ctx-badge svg {
+  color: var(--accent);
+  flex: none;
+}
+.ap-ctx-badge.warn {
+  color: var(--warning, #d9a441);
+  border-color: var(--warning, #d9a441);
+}
+.ap-ctx-badge.warn svg {
+  color: var(--warning, #d9a441);
+}
+
+/* Fila d'accions secundàries: planificar, ràpida, equip i crear projecte.
+   Viu per damunt del composer perquè no competisca amb «Envia». */
+.ap-secondary-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 6px;
+  flex-wrap: wrap;
+}
+
+/* Ordre coherent de la part baixa del panell: eines secundàries → «Aplica a»
+   → composer (l'entrada sempre és l'última cosa). */
+.agent-panel > .ap-secondary-actions { order: 3; }
+.agent-panel > .ap-apply-bar { order: 4; }
+.agent-panel > .agent-prompt { order: 5; }

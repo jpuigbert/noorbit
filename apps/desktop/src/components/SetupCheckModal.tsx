@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { useAIStore } from "../stores/aiStore";
+import { useProviderStore } from "../stores/providerStore";
 import { useUIStore } from "../stores/uiStore";
 import "./SetupCheckModal.css";
 
@@ -80,6 +81,9 @@ export default function SetupCheckModal() {
     setVisible(false);
   };
 
+  /// Hi ha una IA EN LÍNIA activa? llavors Ollama és opcional.
+  const cloudActive = useProviderStore((s) => s.active !== "ollama" && s.active !== "");
+
   const detect = async () => {
     const [ollama, ollamaUp, blender, comfy] = await Promise.all([
       invoke<boolean>("ollama_installed").catch(() => false),
@@ -98,7 +102,9 @@ export default function SetupCheckModal() {
       {
         id: "ollama",
         name: "Ollama — motor de la IA local",
-        desc: "El motor que fa que el xat funcioni al teu ordinador, sense Internet.",
+        desc: cloudActive
+          ? "Opcional: ja tens una IA en línia, el xat funciona sense Ollama. Instal·la'l si vols una IA local i gratuïta."
+          : "El motor que fa que el xat funcioni al teu ordinador, sense Internet. (Si vols IA al núvol, et pots saltar aquest pas.)",
         state: ollama ? "ok" : "todo",
         action: ollama
           ? undefined
@@ -187,8 +193,12 @@ export default function SetupCheckModal() {
     setSteps(next);
     // Obre la finestra si falta alguna cosa IMPORTANT (Ollama, servei, model
     // o Blender). ComfyUI és opcional i no la fa obrir sol.
+    // Amb IA EN LÍNIA, que falti Ollama NO és un problema: el modal no s'obre
+    // sol (sinó NoOrbit «avisaria» de res en cada arrencada).
     const faltaImportant = next.some(
-      (s) => (s.id === "ollama" || s.id === "serve" || s.id === "model" || s.id === "blender") && s.state !== "ok"
+      (s) =>
+        (s.id === "blender" || (!cloudActive && (s.id === "ollama" || s.id === "serve" || s.id === "model"))) &&
+        s.state !== "ok"
     );
     if (faltaImportant) setVisible(true);
   };

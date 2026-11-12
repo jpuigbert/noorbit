@@ -5,6 +5,7 @@ import { useWorkspaceStore } from "../stores/workspaceStore";
 import { useBlenderLiveStore } from "../stores/blenderLiveStore";
 import { useUnrealStore } from "../stores/unrealStore";
 import { useAIStore } from "../stores/aiStore";
+import { useProviderStore } from "../stores/providerStore";
 import { useUIStore } from "../stores/uiStore";
 import { useAIActivity } from "../stores/activityStore";
 import { useSystemStatsStore, memPercent, formatBytes } from "../stores/systemStatsStore";
@@ -45,17 +46,24 @@ export default function StatusBar() {
   // instal·lada però sense model = hi ha un pas pendent; no instal·lada.
   const ollamaInstalled = useAIStore((s) => s.ollamaInstalled);
   const models = useAIStore((s) => s.models);
-  const aiOk = ollama && ollamaInstalled && models.length > 0;
-  const aiLabel = !ollamaInstalled
-    ? "IA: no instal·lada"
-    : !ollama
-      ? "IA: aturada"
-      : models.length === 0
-        ? "IA: sense model"
-        : `IA: ${models.length} model${models.length === 1 ? "" : "s"}`;
-  const aiTitle = aiOk
-    ? "La IA local està instal·lada i en marxa."
-    : "Fes clic per posar la IA local en marxa (instal·lar, engegar o baixar model).";
+  // IA EN LÍNIA activa: Ollama és opcional i NoOrbit funciona igual. La
+  // barra no ha d'avisar de res en aquest cas.
+  const cloudActive = useProviderStore((s) => s.active !== "ollama" && s.active !== "");
+  const aiOk = cloudActive || (ollama && ollamaInstalled && models.length > 0);
+  const aiLabel = cloudActive
+    ? "IA: al núvol"
+    : !ollamaInstalled
+      ? "IA: no instal·lada"
+      : !ollama
+        ? "IA: aturada"
+        : models.length === 0
+          ? "IA: sense model"
+          : `IA: ${models.length} model${models.length === 1 ? "" : "s"}`;
+  const aiTitle = cloudActive
+    ? "Estàs fent servir una IA en línia: Ollama no és necessari. Fes clic per veure l'entorn."
+    : aiOk
+      ? "La IA local està instal·lada i en marxa."
+      : "Fes clic per posar la IA local en marxa (instal·lar, engegar o baixar model).";
 
   return (
     <div className="statusbar">
