@@ -359,7 +359,7 @@ pub async fn start(
     // Engega el servidor. Preferim «--no-webui» (evita obrir el navegador),
     // però les versions antigues de llama.cpp no el coneixen: si el procés
     // mor tot seguit, ho tornem a provar sense ell.
-    let mut engega = |amb_webui: bool| -> std::io::Result<std::process::Child> {
+    let engega = |amb_webui: bool| -> std::io::Result<std::process::Child> {
         let mut cmd = std::process::Command::new(&bin);
         cmd.arg("-m")
             .arg(&path)
