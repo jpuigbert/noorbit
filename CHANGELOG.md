@@ -3,6 +3,20 @@
 Totes les releases amb els seus binaris: <https://github.com/jpuigbert/noorbit/releases>.
 Les notes completes de cada release són a la pàgina del release corresponent.
 
+## 0.71.7-alpha (2026-11-12)
+
+**IA local sense Ollama (llama.cpp) + Hugging Bay + context compactat**
+
+- **Motor local sense Ollama**: secció nova al gestor de models per engegar els GGUF baixats amb `llama-server` (instal·lació amb binaris oficials de GitHub, vàlida a macOS, Windows i Linux); el servei es registra sol com a proveïdor local sense clau.
+- **Hugging Bay**: cerca de GGUF al mirror verificat, detalls amb SHA-256 i descàrrega amb progrés que registra el model a Ollama.
+- **Sense Ollama, tot funciona**: el xat cau a la IA en línia, el modal no s'obre sol i no hi ha instal·lacions forçades.
+- **Context compactat**: en lloc de retallar, es condensa (objectiu, pla, esquelet del codi) i la IA continua a trossos; s'allibera RAM abans.
+- **Codi, no documentació**: generació fitxer a fitxer, recordatori si la IA respon amb només `.md` i cap «bloc_N.md».
+- **Blender**: recordatori automàtic i `import bpy` automàtic; figures sense dir «Blender».
+- **Xat**: línia «què està fent la IA», raonament amagable i copiar en generació.
+
+---
+
 ## 0.71.6-alpha (2026-11-11)
 
 **APRENENATGE LOCAL — la IA que aprèn de les altres IA (en segon pla)**

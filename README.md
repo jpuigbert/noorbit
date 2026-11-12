@@ -13,6 +13,7 @@ Construïda amb [Tauri 2](https://tauri.app) + [React](https://react.dev) + [Typ
 ## Contents
 
 - [Què és NoOrbit](#què-és-noorbit)
+- [Novetats de la 0.71.7](#novetats-de-la-0717)
 - [Novetats de la 0.71.6](#novetats-de-la-0716)
 - [Novetats de la 0.71.5](#novetats-de-la-0715)
 - [Novetats de la 0.71.4](#novetats-de-la-0714)
@@ -47,6 +48,15 @@ Construïda amb [Tauri 2](https://tauri.app) + [React](https://react.dev) + [Typ
 Tota la documentació ampliada és a la **wiki**: <https://github.com/jpuigbert/noorbit/wiki>
 
 ---
+
+## Novetats de la 0.71.7
+
+- **IA local SENSE Ollama (llama.cpp)**: secció nova al gestor de models per fer córrer els **models GGUF** que has baixat amb el motor **llama.cpp**: s'instal·la amb un clic (els **binaris oficials** de GitHub: funciona fins i tot on Homebrew no en té, com els macOS vells), s'engega `llama-server` en segon pla i el servei es registra **automàticament com a proveïdor local** (sense clau) per xatejar-hi com una IA qualsevol. Multiplataforma: macOS, Windows i Linux.
+- **Hugging Bay**: cerca i descàrrega de models GGUF al **mirror verificat** de Hugging Face (amb SHA-256 i enllaços signats), amb progrés en viu i registre automàtic a Ollama. La teva línia de comandes pot ser: *buscar → baixar → executar*.
+- **Context COMPACTAT, no reduït**: quan la memòria no dona, NoOrbit **atura, allibera RAM** i **condensa** el context en un resum dens que conserva l'objectiu, el pla i **l'esquelet del codi** — i la IA **continua programant a trossos** en lloc de començar de zero.
+- **La IA crea CODI, no documentació**: el generador de projecte va **fitxer a fitxer** (a trossos) i recorda a la IA que escrigui codi real quan respon amb només `.md`; els fitxers a crear queden a la llista de tasques i es marquen a mesura.
+- **Blender que t'escolta**: si la IA respon amb prosa en lloc de codi `bpy`, NoOrbit li recorda què vols i ho torna a demanar; i el motor de figures es pot construir **sense dir «Blender»**.
+- **El xat mostra què està fent la IA** en viu (el pas real del motor), el **raonament es pot amagar** (🧠) i el text es pot **copiar mentre es genera**.
 
 ## Novetats de la 0.71.6
 
@@ -135,15 +145,15 @@ Els instal·ladors publicats es troben a la secció **Releases** del repositori:
 
 **👉 <https://github.com/jpuigbert/noorbit/releases>**
 
-Cada release inclou, per a cada sistema, l'arxiu corresponent (substitueix la versió per l'última publicada; els noms d'exemple són els de la **0.71.6-alpha**):
+Cada release inclou, per a cada sistema, l'arxiu corresponent (substitueix la versió per l'última publicada; els noms d'exemple són els de la **0.71.7-alpha**):
 
 | Sistema | Fitxer que has de descarregar |
 |---|---|
-| **macOS** (universal, Intel + Apple Silicon) | `NoOrbit_0.71.6-alpha_universal.dmg` |
-| **Windows** (10 / 11) | `NoOrbit_0.71.6-alpha_x64-setup.exe` |
-| **Linux** (Debian / Ubuntu) | `NoOrbit_0.71.6-alpha_amd64.deb` |
-| **Linux** (Fedora / RHEL) | `NoOrbit-0.71.6-alpha-1.x86_64.rpm` |
-| **Linux** (universal) | `NoOrbit_0.71.6-alpha_amd64.AppImage` |
+| **macOS** (universal, Intel + Apple Silicon) | `NoOrbit_0.71.7-alpha_universal.dmg` |
+| **Windows** (10 / 11) | `NoOrbit_0.71.7-alpha_x64-setup.exe` |
+| **Linux** (Debian / Ubuntu) | `NoOrbit_0.71.7-alpha_amd64.deb` |
+| **Linux** (Fedora / RHEL) | `NoOrbit-0.71.7-alpha-1.x86_64.rpm` |
+| **Linux** (universal) | `NoOrbit_0.71.7-alpha_amd64.AppImage` |
 
 L'índex automàtic de totes les versions i els seus enllaços de descàrrega directa és l'asset **`versions.json`** de l'últim release.
 
@@ -184,27 +194,27 @@ xattr -dr com.apple.quarantine /Applications/NoOrbit.app
 **Per què no es firma?** La signatura i notarització exigeixen un compte de desenvolupador d'Apple de pagament. Si vols una versió signada (sense bloquejos ni passos manuals), col·labora amb el projecte o crea un issue per prioritzar-ho: el workflow de CI ja prepara els binaris i només caldria afegir-hi els secrets `APPLE_SIGNING_IDENTITY`, `APPLE_ID` i `APPLE_APP_SPECIFIC_PASSWORD`.
 
 **Windows**
-1. Doble clic a `NoOrbit_0.71.6-alpha_x64-setup.exe`.
+1. Doble clic a `NoOrbit_0.71.7-alpha_x64-setup.exe`.
 2. S'instal·la **per a l'usuari actual**, sense necessitat de drets d'administrador.
 3. L'executable apareix al menú Inici.
 
 **Linux (Debian/Ubuntu)**
 ```bash
-sudo apt install ./NoOrbit_0.71.6-alpha_amd64.deb
+sudo apt install ./NoOrbit_0.71.7-alpha_amd64.deb
 # si el paquet ja està descarregat i vols instal·lar-lo "a la vella":
-sudo dpkg -i NoOrbit_0.71.6-alpha_amd64.deb && sudo apt -f install
+sudo dpkg -i NoOrbit_0.71.7-alpha_amd64.deb && sudo apt -f install
 ```
 Executa'l amb `no-orbit` o des del menú d'aplicacions.
 
 **Linux (Fedora/RHEL)**
 ```bash
-sudo dnf install ./NoOrbit-0.71.6-alpha-1.x86_64.rpm
+sudo dnf install ./NoOrbit-0.71.7-alpha-1.x86_64.rpm
 ```
 
 **Linux (AppImage)**
 ```bash
-chmod +x NoOrbit_0.71.6-alpha_amd64.AppImage
-./NoOrbit_0.71.6-alpha_amd64.AppImage
+chmod +x NoOrbit_0.71.7-alpha_amd64.AppImage
+./NoOrbit_0.71.7-alpha_amd64.AppImage
 ```
 
 ---
@@ -268,7 +278,7 @@ Rutes completes segons sistema:
 
 ```
 apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/
-├── dmg/NoOrbit_0.71.6-alpha_universal.dmg      ← compartiu això
+├── dmg/NoOrbit_0.71.7-alpha_universal.dmg      ← compartiu això
 └── macos/NoOrbit.app                     ← app "nua" (provable directament)
 ```
 
@@ -278,17 +288,17 @@ Per a només Intel (`--target x86_64-apple-darwin`) o només Apple Silicon (`--t
 
 ```
 apps\desktop\src-tauri\target\release\bundle\
-├── nsis\NoOrbit_0.71.6-alpha_x64-setup.exe      ← instal·lador clàssic (recomanat)
-└── msi\NoOrbit_0.71.6-alpha_x64_en-US.msi        ← paquet per a desplegaments empresarials (GPO/SCCM)
+├── nsis\NoOrbit_0.71.7-alpha_x64-setup.exe      ← instal·lador clàssic (recomanat)
+└── msi\NoOrbit_0.71.7-alpha_x64_en-US.msi        ← paquet per a desplegaments empresarials (GPO/SCCM)
 ```
 
 ### Linux (des de Linux)
 
 ```
 apps/desktop/src-tauri/target/release/bundle/
-├── deb/NoOrbit_0.71.6-alpha_amd64.deb            ← Debian / Ubuntu
-├── rpm/NoOrbit-0.71.6-alpha-1.x86_64.rpm         ← Fedora / RHEL
-└── appimage/NoOrbit_0.71.6-alpha_amd64.AppImage  ← universal (tots els distros)
+├── deb/NoOrbit_0.71.7-alpha_amd64.deb            ← Debian / Ubuntu
+├── rpm/NoOrbit-0.71.7-alpha-1.x86_64.rpm         ← Fedora / RHEL
+└── appimage/NoOrbit_0.71.7-alpha_amd64.AppImage  ← universal (tots els distros)
 ```
 
 En una ARM Linux (p. ex. Raspberry Pi) afegeix `--target aarch64-unknown-linux-gnu` i ajusta el nom del paquet.
@@ -348,4 +358,4 @@ Part del disseny i alguns fragments deriven o estan inspirats en **Visual Studio
 
 ## Estat del projecte
 
-Versió actual: **0.71.6-alpha** (vegeu [`CHANGELOG.md`](CHANGELOG.md)). El projecte està en desenvolupament actiu. Si trobes un bug o vols una funcionalitat, obre un [issue](https://github.com/jpuigbert/noorbit/issues).
+Versió actual: **0.71.7-alpha** (vegeu [`CHANGELOG.md`](CHANGELOG.md)). El projecte està en desenvolupament actiu. Si trobes un bug o vols una funcionalitat, obre un [issue](https://github.com/jpuigbert/noorbit/issues).
