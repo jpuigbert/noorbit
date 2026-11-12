@@ -37,9 +37,9 @@ export default function UnrealPanel() {
   const Result = () =>
     lastPythonResult ? (
       <pre className={"ue-result " + (lastPythonResult.success ? "ok" : "fail")}>
-        {lastPythonResult.output.join("\n")}
-        {lastPythonResult.errors.length > 0 &&
-          "\n⚠ " + lastPythonResult.errors.join("\n")}
+        {(lastPythonResult.output ?? []).join("\n")}
+        {(lastPythonResult.errors ?? []).length > 0 &&
+          "\n⚠ " + (lastPythonResult.errors ?? []).join("\n")}
       </pre>
     ) : null;
 

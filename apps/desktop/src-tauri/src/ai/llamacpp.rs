@@ -59,6 +59,13 @@ fn save_servers(list: &[LocalServer]) {
     }
 }
 
+/// Carpeta on NoOrbit deixa la llama.cpp quan la instal·la ell mateix
+/// (binaris oficials): així funciona fins i tot on Homebrew no té suport
+/// (macOS vell) i on l'usuari no vol安装了 res a mà.
+pub fn install_dir() -> Option<PathBuf> {
+    crate::config::AppConfig::data_dir().map(|d| d.join("llamacpp"))
+}
+
 /// Binari `llama-server` (si l'usuari té instal·lada llama.cpp).
 pub fn binary() -> Option<PathBuf> {
     if let Ok(p) = which::which("llama-server") {
@@ -80,7 +87,190 @@ pub fn binary() -> Option<PathBuf> {
             return Some(c);
         }
     }
+    // La instal·lació feta per NoOrbit (binaris oficials): hi pot haver una
+    // carpeta amb el tag dins (p. ex. «llama-b12318/llama-server»).
+    if let Some(dir) = install_dir() {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for e in entries.flatten() {
+                let p = e.path().join("llama-server");
+                if p.exists() {
+                    return Some(p);
+                }
+                // Pot ser un nivell més avall (l'arxiu traeu una carpeta).
+                if let Ok(sub) = std::fs::read_dir(e.path()) {
+                    for s in sub.flatten() {
+                        let p = s.path().join("llama-server");
+                        if p.exists() {
+                            return Some(p);
+                        }
+                    }
+                }
+            }
+        }
+    }
     None
+}
+
+/// Nom de l'asset oficial de llama.cpp per a aquesta plataforma.
+fn asset_guion() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        if cfg!(target_arch = "aarch64") {
+            "bin-macos-arm64"
+        } else {
+            "bin-macos-x64"
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if cfg!(target_arch = "aarch64") {
+            "bin-ubuntu-arm64"
+        } else {
+            "bin-ubuntu-x64"
+        }
+    }
+    #[cfg(windows)]
+    {
+        "bin-win-cpu-x64"
+    }
+}
+
+/// Instal·la la llama.cpp amb els BINARIS OFICIALS (GitHub releases): és la
+/// via que funciona a tot arreu, també on Homebrew no té binaris (macOS vell)
+/// i on l'usuari no té permisos d'instal·lar.
+///
+/// Retorna la ruta del «llama-server» instal·lat.
+pub async fn install_from_github(
+    http: &reqwest::Client,
+    app: Option<&tauri::AppHandle>,
+) -> Result<PathBuf> {
+    use tauri::Emitter;
+    let dir = install_dir().ok_or_else(|| anyhow!("No puc resoldre la carpeta de dades"))?;
+    std::fs::create_dir_all(&dir)?;
+
+    // 1) Última versió amb binaris per a la nostra plataforma.
+    let releases = http
+        .get("https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=5")
+        .header("User-Agent", "NoOrbit")
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| anyhow!("No s'ha pogut contactar amb GitHub: {}", e))?
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| anyhow!("Resposta de GitHub ill·legible: {}", e))?;
+
+    let mut url = None;
+    let mut nom = String::new();
+    if let Some(arr) = releases.as_array() {
+        for r in arr {
+            let Some(assets) = r.get("assets").and_then(|a| a.as_array()) else {
+                continue;
+            };
+            for a in assets {
+                let n = a.get("name").and_then(|v| v.as_str()).unwrap_or_default();
+                if n.contains(asset_guion()) && (n.ends_with(".tar.gz") || n.ends_with(".zip")) {
+                    url = a.get("browser_download_url").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    nom = n.to_string();
+                    break;
+                }
+            }
+            if url.is_some() {
+                break;
+            }
+        }
+    }
+    let url = url.ok_or_else(|| {
+        anyhow!(
+            "No he trobat cap binari oficial de llama.cpp per a aquesta plataforma              ({})",
+            asset_guion()
+        )
+    })?;
+
+    if let Some(app) = app {
+        let _ = app.emit(
+            "ai://pull",
+            serde_json::json!({ "model": "llama.cpp", "message": format!("descarregant {}…", nom) }),
+        );
+    }
+
+    // 2) Descarrega l'arquiu.
+    let arxiu = dir.join(&nom);
+    let resp = http
+        .get(&url)
+        .header("User-Agent", "NoOrbit")
+        .timeout(std::time::Duration::from_secs(600))
+        .send()
+        .await
+        .map_err(|e| anyhow!("No s'ha pogut baixar {}: {}", nom, e))?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("GitHub ha respost {}", resp.status()));
+    }
+    let total = resp.content_length().unwrap_or(0);
+    let mut out = std::fs::File::create(&arxiu)?;
+    let mut stream = resp.bytes_stream();
+    use futures::StreamExt;
+    use std::io::Write;
+    let mut written: u64 = 0;
+    let mut last_pct: i64 = -1;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        out.write_all(&chunk)?;
+        written += chunk.len() as u64;
+        if total > 0 {
+            let pct = (written * 100 / total) as i64;
+            if pct != last_pct {
+                last_pct = pct;
+                if let Some(app) = app {
+                    let _ = app.emit(
+                        "ai://pull",
+                        serde_json::json!({
+                            "model": "llama.cpp",
+                            "message": format!("descarregant llama.cpp — {}%", pct)
+                        }),
+                    );
+                }
+            }
+        }
+    }
+    let _ = std::io::Write::flush(&mut out);
+    drop(out);
+
+    // 3) Extreu (tar.gz o zip). El «tar» del sistema està a tothom.
+    let ok = if nom.ends_with(".zip") {
+        std::process::Command::new("unzip")
+            .arg("-o")
+            .arg(&arxiu)
+            .arg("-d")
+            .arg(&dir)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    } else {
+        std::process::Command::new("tar")
+            .arg("-xzf")
+            .arg(&arxiu)
+            .arg("-C")
+            .arg(&dir)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+    let _ = std::fs::remove_file(&arxiu);
+    if !ok {
+        return Err(anyhow!("No s'ha pogut descomprimir {}", nom));
+    }
+
+    // 4) Marca el binari com a executable.
+    let bin = binary().ok_or_else(|| {
+        anyhow!("He descomprimit {} però no hi trobo el «llama-server»", nom)
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755));
+    }
+    Ok(bin)
 }
 
 /// És instal·lada la llama.cpp?
@@ -164,15 +354,31 @@ pub async fn start(
         if let Ok(resp) = http.get(&url).timeout(std::time::Duration::from_secs(3)).send().await {
             if resp.status().is_success() {
                 if let Ok(v) = resp.json::<serde_json::Value>().await {
-                    if let Some(first) = v
+                    // Dos formats: «data:[{id}]» (OpenAI estàndard) i
+                    // «models:[{name}]» (el que retorna llama-server avui).
+                    let primer = v
                         .get("data")
                         .and_then(|d| d.as_array())
                         .and_then(|a| a.first())
-                    {
-                        model = first
+                        .or_else(|| {
+                            v.get("models")
+                                .and_then(|d| d.as_array())
+                                .and_then(|a| a.first())
+                        });
+                    if let Some(p) = primer {
+                        let nom = p
                             .get("id")
+                            .or_else(|| p.get("name"))
                             .and_then(|i| i.as_str())
                             .unwrap_or("model")
+                            .to_string();
+                        // El nom pot ser la ruta completa del GGUF: ens quedem
+                        // amb el nom del fitxer (el model que veu l'usuari).
+                        model = nom
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or(&nom)
+                            .trim_end_matches(".gguf")
                             .to_string();
                     }
                 }

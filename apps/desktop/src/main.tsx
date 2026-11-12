@@ -80,10 +80,39 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   }
 }
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
-  </React.StrictMode>
-);
+// ── GUARDA DE NAVEGADOR ────────────────────────────────────────────────
+// `pnpm dev` aixeca Vite a localhost:1420, però NoOrbit no és una web: les
+// crides a Tauri (finestra, fitxers, IA local, diàlegs) necessiten el pont
+// natiu. Si s'obri eixa URL en un navegador normal, abans petava amb
+// «Cannot read properties of undefined (reading 'metadata')» i eixia la
+// pantalla d'error genèrica. Ara expliquem què passa i com obrir l'app de
+// veritat, sense arrencar res.
+const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+if (!isTauri) {
+  const root = document.getElementById("root");
+  if (root) {
+    root.innerHTML = `
+      <div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:32px;background:#0d0d12;color:#e8e8f0;font-family:-apple-system,'Segoe UI',sans-serif;text-align:center">
+        <h1 style="font-size:19px;margin:0">NoOrbit s'ha d'obrir amb l'aplicació d'escriptori</h1>
+        <p style="max-width:560px;font-size:13px;line-height:1.6;color:#b4b4c4;margin:0">
+          Esta és la vista de desenvolupament (Vite). El navegador no té accés al
+          pont natiu de Tauri, així que no pot llegir el projecte, els fitxers ni
+          la IA local. No és cap error del codi.
+        </p>
+        <p style="max-width:560px;font-size:13px;line-height:1.6;color:#b4b4c4;margin:0">
+          Engega l'aplicació amb <code style="background:#1b1b24;padding:2px 6px;border-radius:5px;color:#e8e8f0">pnpm tauri dev</code>
+          (o obri la NoOrbit ja instal·lada). La finestra de Tauri carregarà
+          esta mateixa adreça amb totes les capacitats.
+        </p>
+      </div>`;
+  }
+} else {
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <React.StrictMode>
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    </React.StrictMode>
+  );
+}

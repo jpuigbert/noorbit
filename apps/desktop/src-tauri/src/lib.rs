@@ -245,6 +245,7 @@ pub fn run() {
             commands::ai::ollama_search_huggingface,
             commands::ai::hf_bay_search,
             commands::ai::llamacpp_status,
+            commands::ai::llamacpp_install,
             commands::ai::llamacpp_start,
             commands::ai::llamacpp_stop,
             commands::ai::hf_bay_details,

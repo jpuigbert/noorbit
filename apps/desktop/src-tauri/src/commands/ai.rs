@@ -908,6 +908,28 @@ pub async fn llamacpp_status() -> Result<LlamaCppStatus, String> {
     })
 }
 
+/// INSTAL·LA la llama.cpp (el motor local sense Ollama) amb els binaris
+/// oficials de GitHub — funciona a tothom, també on Homebrew no en té
+/// (macOS vell) o on l'usuari no vol installar res a mà. Si el binari ja hi
+/// és, no fa res.
+#[command]
+pub async fn llamacpp_install(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<String, String> {
+    if let Some(bin) = crate::ai::llamacpp::binary() {
+        return Ok(format!("La llama.cpp ja hi és: {}", bin.to_string_lossy()));
+    }
+    let http = state.ai_manager.http_client();
+    let bin = crate::ai::llamacpp::install_from_github(&http, Some(&app))
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(format!(
+        "llama.cpp instal·lada a {} — ja pots fer córrer els teus models en local.",
+        bin.to_string_lossy()
+    ))
+}
+
 /// Engega un model GGUF amb llama.cpp (sense Ollama) i registra el servei
 /// local com a proveïdor, perquè el xat el pugui fer servir.
 #[command]

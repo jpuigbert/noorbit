@@ -735,10 +735,10 @@ export default function ModelManagerModal() {
                 <button
                   className="btn sm primary"
                   onClick={async () => {
+                    // Binaris oficials de GitHub: funciona a tothom (Homebrew
+                    // no en té binaris en els macOS vells).
                     setLlamaMsg(t("ai.llamacppInstalling"));
-                    const r = await invoke<string>("install_local_ai", { which: "llamacpp" }).catch(
-                      (e) => String(e),
-                    );
+                    const r = await invoke<string>("llamacpp_install").catch((e) => String(e));
                     setLlamaMsg(r);
                     void loadLlama();
                   }}

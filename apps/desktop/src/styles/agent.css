@@ -941,6 +941,7 @@
   gap: 6px;
   padding: 5px 8px;
   min-width: 0;
+  flex-wrap: wrap;
 }
 .ap-toolbar-row + .ap-toolbar-row {
   border-top: 1px solid var(--border);
@@ -948,13 +949,14 @@
 .ap-toolbar-row-role {
   justify-content: space-between;
   gap: 10px;
+  flex-wrap: wrap;
 }
 .ap-inline-group {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
-  flex: 1;
+  min-width: 130px;
+  flex: 1 1 130px;
 }
 .ap-toolbar .ap-model-select {
   max-width: none;
@@ -969,6 +971,9 @@
   font-size: 11px;
   color: var(--text-3);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 /* Control segmentat de plataforma: una sola peça, no tres botons solts. */
 .ap-platform {
@@ -1057,7 +1062,7 @@
    mai no queda una fila coixa amb un sol botó penjat. */
 .ap-secondary-actions {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
   align-items: center;
   gap: 6px;
   padding: 2px 10px 6px;
@@ -1071,3 +1076,13 @@
 .agent-panel > .ap-secondary-actions { order: 3; }
 .agent-panel > .ap-apply-bar { order: 4; }
 .agent-panel > .agent-prompt { order: 5; }
+
+/* Composer una mica més compacte: la conversa guanya espai sense que el camp
+   d'escriptura quede incòmode (segueix creixent sol fins a 140 px). */
+.agent-prompt {
+  padding: 8px 10px;
+  gap: 6px;
+}
+.agent-prompt textarea {
+  min-height: 52px;
+}

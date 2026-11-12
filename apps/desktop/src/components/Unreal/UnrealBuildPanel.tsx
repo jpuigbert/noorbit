@@ -23,7 +23,10 @@ export default function UnrealBuildPanel() {
   const outRef = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
-    if (!engineRoot && installations.length > 0) setEngineRoot(installations[0]);
+    // Llista sempre-array: si el backend tornés null, això no ha de fer
+    // caure el panell de compilació (i amb ell, tota la interfície).
+    const inst = Array.isArray(installations) ? installations : [];
+    if (!engineRoot && inst.length > 0) setEngineRoot(inst[0]);
   }, [installations, engineRoot]);
 
   useEffect(() => {

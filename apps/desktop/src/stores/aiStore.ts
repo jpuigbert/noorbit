@@ -299,7 +299,7 @@ export const useAIStore = create<AIState>((set, get) => ({
         invoke<LoadedModel[]>("ollama_loaded_models"),
         invoke<string>("ollama_get_keep_alive"),
       ]);
-      set({ loaded, keepAlive: keepAlive ?? "" });
+      set({ loaded: loaded ?? [], keepAlive: keepAlive ?? "" });
     } catch {
       set({ loaded: [] });
     }
@@ -327,7 +327,7 @@ export const useAIStore = create<AIState>((set, get) => ({
   refreshProviders: async () => {
     try {
       const suggested = await invoke<SuggestedModel[]>("ollama_suggested_models");
-      set({ suggested });
+      set({ suggested: suggested ?? [] });
     } catch {
       /* ignore */
     }
@@ -342,7 +342,7 @@ export const useAIStore = create<AIState>((set, get) => ({
         query: query ?? "",
       });
       set({
-        cloud: cloud.length > 0 ? cloud : CLOUD_FALLBACK,
+        cloud: (cloud ?? []).length > 0 ? cloud : CLOUD_FALLBACK,
         cloudLoading: false,
       });
     } catch (e) {
@@ -379,7 +379,7 @@ export const useAIStore = create<AIState>((set, get) => ({
               source === "hf" ? "ollama_search_huggingface" : "civitai_search",
               { query: query ?? "" }
             );
-      set({ internet, internetLoading: false });
+      set({ internet: internet ?? [], internetLoading: false });
     } catch (e) {
       set({ internet: [], internetLoading: false, internetError: String(e) });
     }
@@ -489,7 +489,7 @@ export const useAIStore = create<AIState>((set, get) => ({
     }
     try {
       const volumes = await invoke<string[]>("list_external_volumes");
-      set({ volumes });
+      set({ volumes: volumes ?? [] });
     } catch {
       set({ volumes: [] });
     }
