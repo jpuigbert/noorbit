@@ -233,37 +233,35 @@ pub struct ChatProbe {
 /// resultat al títol del document (mateix mecanisme que `extract_text`).
 pub async fn chat_probe(app: &AppHandle) -> Result<ChatProbe> {
     let win = window(app).ok_or_else(|| anyhow!("El navegador intern no està obert"))?;
-    let nonce = chrono::Utc::now().timestamp_millis();
-    let marker = format!("NBCB#{}#", nonce);
-    let js = format!(
-        r#"(function(){{try{{var t=(document.body&&document.body.innerText)?document.body.innerText.slice(0,9000):'';var need=/(captcha|verify you are human|are you a robot|log in|sign in|create an account|get started|continue with|inicia sess|inicia sesi|registrat|regístrate)/i.test(t);var ok=false;try{{var els=document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]');for(var i=0;i<els.length;i++){{var x=els[i];if(!x.disabled&&(x.offsetWidth>0||x.offsetHeight>0)){{ok=true;break;}}}}}}catch(e){{}}document.title='{marker}'+(ok?'I':'-')+(need?'L':'-');}}catch(e){{document.title='{marker}ERR';}}}})();"#,
-        marker = marker
-    );
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
-    loop {
-        win.eval(&js)
-            .map_err(|e| anyhow!("No s'ha pogut sondejar la pàgina: {}", e))?;
-        tokio::time::sleep(Duration::from_millis(350)).await;
-        let title = win.title().unwrap_or_default();
-        if let Some(rest) = title.strip_prefix(&marker) {
-            win.set_title(BASE_TITLE).ok();
-            let url = win.url().map(|u| u.to_string()).unwrap_or_default();
-            if rest.starts_with("ERR") {
-                return Err(anyhow!("La pàgina ha bloquejat el sondeig"));
-            }
-            return Ok(ChatProbe {
-                has_input: rest.starts_with('I'),
-                login_needed: rest.ends_with('L'),
-                url,
-            });
-        }
-        if tokio::time::Instant::now() >= deadline {
-            win.set_title(BASE_TITLE).ok();
-            return Err(anyhow!(
-                "La pàgina encara no ha carregat (sondeig sense resposta)"
-            ));
-        }
+    // El sondeig torna el resultat DIRECTAMENT (JSON): res de títol, res de
+    // races amb la pàgina. Si encara no ha pintat, tornem a provar.
+    let js = r#"(function(){try{
+var t=(document.body&&document.body.innerText)?document.body.innerText.slice(0,9000):'';
+var need=/(captcha|verify you are human|are you a robot|log in|sign in|create an account|get started|continue with|inicia sess|inicia sesi|registrat|regístrate)/i.test(t);
+var ok=false;
+try{var els=document.querySelectorAll('textarea,[contenteditable="true"],[role="textbox"]');
+for(var i=0;i<els.length;i++){var x=els[i];if(!x.disabled&&(x.offsetWidth>0||x.offsetHeight>0)){ok=true;break;}}}
+catch(e){}
+return JSON.stringify({has_input:ok,login_needed:need,url:location.href,
+  ready:(document.readyState==='complete')});
+}catch(e){return JSON.stringify({error:String(e)});}})()"#
+    .to_string();
+    let raw = eval_json_retry(&win, &js, Duration::from_secs(12), 4).await?;
+    let v: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|_| anyhow!("El navegador no ha retornat un sondeig vàlid"))?;
+    if let Some(e) = v.get("error").and_then(|x| x.as_str()) {
+        return Err(anyhow!("La pàgina ha bloquejat el sondeig: {}", e));
     }
+    let url = v
+        .get("url")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| win.url().map(|u| u.to_string()).unwrap_or_default());
+    Ok(ChatProbe {
+        has_input: v.get("has_input").and_then(|x| x.as_bool()).unwrap_or(false),
+        login_needed: v.get("login_needed").and_then(|x| x.as_bool()).unwrap_or(false),
+        url,
+    })
 }
 
 /// Part final d'un text, per comparar l'estabilitat de la resposta sense
@@ -290,69 +288,63 @@ pub struct CodeBlock {
 /// rere un marcador únic, i el backend llegix el títol fins que apareix.
 pub async fn grab_code_blocks(app: &AppHandle) -> Result<Vec<CodeBlock>> {
     let win = window(app).ok_or_else(|| anyhow!("El navegador intern no està obert"))?;
-    let nonce = chrono::Utc::now().timestamp_millis();
-    let marker = format!("NBCODE#{}#", nonce);
-    let js = format!(
-        r#"(function(){{try{{
+    // L'script torna els blocs DIRECTAMENT (JSON). Abans passaven pel títol
+    // del document: si la pàgina l'escrivís (o trigués a carregar) el senyal es
+    // perdia i l'extracció fallava.
+    let js = r#"(function(){try{
 var els=document.querySelectorAll('pre code');
 if(!els.length)els=document.querySelectorAll('pre');
-var out=[];var seen={{}};
-for(var i=0;i<els.length&&out.length<12;i++){{
+var out=[];var seen={};
+for(var i=0;i<els.length&&out.length<12;i++){
   var c=els[i];
   var t=(c.innerText||'').replace(/\s+$/,'');
   if(t.length<4)continue;
   var key=t.slice(0,180);
   if(seen[key])continue;seen[key]=1;
   var lang='';
-  try{{
+  try{
     var chain=[c,c.parentElement,c.firstElementChild];
-    for(var k=0;k<chain.length&&!lang;k++){{
+    for(var k=0;k<chain.length&&!lang;k++){
       var el=chain[k];if(!el)continue;
-      var m=String(el.className||'').match(/language-([\w+#.-]+)/i);if(m){{lang=m[1];continue;}}
-      var d=el.getAttribute&&el.getAttribute('data-lang');if(d){{lang=d;continue;}}
-      var dl=el.closest&&el.closest('[data-lang]');if(dl){{lang=dl.getAttribute('data-lang');}}
-    }}
-  }}catch(e){{}}
-  out.push(lang+':::'+t.slice(0,14000));
-}}
-document.title='{marker}'+encodeURIComponent(JSON.stringify(out));
-}}catch(e){{document.title='{marker}ERR';}}}})();"#,
-        marker = marker
-    );
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
-    loop {
-        win.eval(&js)
-            .map_err(|e| anyhow!("No s'han pogut arreplegar els blocs de codi: {}", e))?;
-        tokio::time::sleep(Duration::from_millis(350)).await;
-        let title = win.title().unwrap_or_default();
-        if let Some(rest) = title.strip_prefix(&marker) {
-            win.set_title(BASE_TITLE).ok();
-            if rest.starts_with("ERR") {
-                return Err(anyhow!("La pàgina ha bloquejat l'extracció de codi"));
-            }
-            let json = urlencoding::decode(rest).map(|c| c.to_string()).unwrap_or(rest.to_string());
-            let raw: Vec<String> = serde_json::from_str(&json).unwrap_or_default();
-            return Ok(raw
-                .iter()
-                .map(|s| match s.split_once(":::") {
-                    Some((lang, code)) => CodeBlock {
-                        lang: lang.trim().to_string(),
-                        code: code.to_string(),
-                    },
-                    None => CodeBlock {
-                        lang: String::new(),
-                        code: s.clone(),
-                    },
-                })
-                .collect());
-        }
-        if tokio::time::Instant::now() >= deadline {
-            win.set_title(BASE_TITLE).ok();
-            return Err(anyhow!(
-                "La pàgina no ha respost a l'extracció de codi (potser encara carrega)"
-            ));
-        }
+      var m=String(el.className||'').match(/language-([\w+#.-]+)/i);if(m){lang=m[1];continue;}
+      var d=el.getAttribute&&el.getAttribute('data-lang');if(d){lang=d;continue;}
+      var dl=el.closest&&el.closest('[data-lang]');if(dl){lang=dl.getAttribute('data-lang');}
     }
+  }catch(e){}
+  out.push(lang+':::'+t.slice(0,14000));
+}
+return JSON.stringify({blocks:out});
+}catch(e){return JSON.stringify({error:String(e)});}})()"#
+    .to_string();
+    let raw = eval_json_retry(&win, &js, Duration::from_secs(12), 4).await?;
+    let v: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|_| anyhow!("El navegador no ha retornat codi vàlid"))?;
+    if let Some(e) = v.get("error").and_then(|x| x.as_str()) {
+        return Err(anyhow!("La pàgina ha bloquejat l'extracció de codi: {}", e));
+    }
+    let blocs: Vec<String> = v
+        .get("blocks")
+        .and_then(|x| x.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|b| b.as_str())
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(blocs
+        .iter()
+        .map(|s| match s.split_once(":::") {
+            Some((lang, code)) => CodeBlock {
+                lang: lang.trim().to_string(),
+                code: code.to_string(),
+            },
+            None => CodeBlock {
+                lang: String::new(),
+                code: s.clone(),
+            },
+        })
+        .collect())
 }
 
 /// Escriu la pregunta a la caixa d'entrada del xat web obert (com si
@@ -458,46 +450,84 @@ setTimeout(function(){{try{{
     }
 }
 
+
+/// Executa un script al navegador intern i REP el resultat a Rust (JSON).
+///
+/// Abans el resultat es passava pel TÍTOL del document: qualsevol pàgina que
+/// l'escrivís (SPAs, xats web) o que trigués a carregar esbojava el senyal i
+/// l'extracció fallava amb «la pàgina encara no ha carregat». Ara el script
+/// retorna el valor directament (`eval_with_callback` de Tauri 2): cap race,
+/// cap límit de temps del títol i la pàgina no es queda amb el títol esborrat.
+///
+/// L'script ha de capturar els seus propis errors i tornar-los com a JSON
+/// (a Windows les exceptions de l'eval no arriben al callback).
+async fn eval_json(win: &WebviewWindow, js: String, timeout: Duration) -> Result<String> {
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    // El callback de Tauri és un closure «Fn» (es pot cridar més d'una
+    // volta), i el canal de «oneshot» es consumeix: el guardem dins d'un
+    // Option protegit i l'extreu el primer resultat.
+    let slot = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
+    win.eval_with_callback(js, move |res| {
+        if let Ok(mut guard) = slot.lock() {
+            if let Some(tx) = guard.take() {
+                let _ = tx.send(res);
+            }
+        }
+    })
+    .map_err(|e| anyhow!("No s'ha pogut executar l'script al navegador: {}", e))?;
+    match tokio::time::timeout(timeout, rx).await {
+        Ok(Ok(s)) => Ok(s),
+        Ok(Err(_)) => Err(anyhow!("El navegador no ha retornat res")),
+        Err(_) => Err(anyhow!("El navegador no ha respost a temps")),
+    }
+}
+
+/// El mateix, però amb REINTENTS: moltes pàgines (xats, SPA)Needs uns ms
+/// després de la navegació per pintar el DOM. En lloc de fallar al primer
+/// intent, tornem a injectar l'script fins que respongui o es vagi el temps.
+async fn eval_json_retry(
+    win: &WebviewWindow,
+    js: &str,
+    timeout: Duration,
+    attempts: u32,
+) -> Result<String> {
+    let mut last = String::new();
+    for i in 0..attempts.max(1) {
+        match eval_json(win, js.to_string(), timeout / attempts.max(1)).await {
+            Ok(s) if !s.is_empty() && s != "null" => return Ok(s),
+            Ok(s) => last = s,
+            Err(e) => last = e.to_string(),
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let _ = i;
+    }
+    Err(anyhow!(
+        "La pàgina no ha respost ({})",
+        if last.is_empty() { "sense resposta" } else { &last }
+    ))
+}
+
 /// Llegeix el text renderitzat de la pàgina actual. Reinjecta l'script cada
 /// mig segon fins que el títol torna amb el marcador, o fins que expira
 /// `wait` (les pàgines amb JavaScript triguen a pintar). És asíncron: no
 /// bloqueja el runtime de Tauri mentre espera.
 pub async fn extract_text(app: &AppHandle, wait: Duration) -> Result<PageExtract> {
     let win = window(app).ok_or_else(|| anyhow!("El navegador intern no està obert"))?;
-    let nonce = chrono::Utc::now().timestamp_millis();
-    let marker = format!("NBEXT#{}#", nonce);
-    // L'script copia al títol (accessible des de qualsevol origen) la URL i
-    // el text visible, codificats per no trencar el marcador.
-    let js = format!(
-        r#"(function(){{try{{var t=(document.body&&document.body.innerText)?document.body.innerText.slice(0,12000):'';document.title='{marker}'+encodeURIComponent(location.href)+'#'+encodeURIComponent(t);}}catch(e){{document.title='{marker}ERR#'+String(e);}}}})();"#,
-        marker = marker
-    );
-    let deadline = tokio::time::Instant::now() + wait;
-    loop {
-        let _ = win.set_title(&format!("{} · {}", BASE_TITLE, "llegint…"));
-        win.eval(&js)
-            .map_err(|e| anyhow!("No s'ha pogut llegir la pàgina: {}", e))?;
-        // Espera curta perquè el DOM acabe de pintar i el títol canvie.
-        tokio::time::sleep(Duration::from_millis(400)).await;
-        let title = win.title().unwrap_or_default();
-        if let Some(rest) = title.strip_prefix(&marker) {
-            let mut parts = rest.splitn(2, '#');
-            let url = parts.next().unwrap_or("");
-            let text = parts.next().unwrap_or("");
-            if url == "ERR" {
-                win.set_title(BASE_TITLE).ok();
-                return Err(anyhow!("La pàgina ha bloquejat la lectura: {}", text));
-            }
-            win.set_title(BASE_TITLE).ok();
-            let decode = |s: &str| urlencoding::decode(s).map(|c| c.to_string()).unwrap_or_else(|_| s.to_string());
-            return Ok(PageExtract {
-                url: decode(url),
-                text: decode(text),
-            });
-        }
-        if tokio::time::Instant::now() >= deadline {
-            win.set_title(BASE_TITLE).ok();
-            return Err(anyhow!("La pàgina no ha respost a la lectura (potser encara carrega)"));
-        }
+    // L'script torna la URL i el text VISIBLES directament (JSON). No es
+    // toca el títol de la pàgina ni s'espera que ningú l'escrigui.
+    let js = r#"(function(){try{
+var t=(document.body&&document.body.innerText)?document.body.innerText.slice(0,12000):'';
+return JSON.stringify({url:location.href,text:t});
+}catch(e){return JSON.stringify({error:String(e)});}})()"#
+    .to_string();
+    let raw = eval_json_retry(&win, &js, wait.max(Duration::from_secs(4)), 4).await?;
+    let v: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|_| anyhow!("El navegador no ha retornat una lectura vàlida"))?;
+    if let Some(e) = v.get("error").and_then(|x| x.as_str()) {
+        return Err(anyhow!("La pàgina ha bloquejat la lectura: {}", e));
     }
+    Ok(PageExtract {
+        url: v.get("url").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+        text: v.get("text").and_then(|x| x.as_str()).unwrap_or_default().to_string(),
+    })
 }
