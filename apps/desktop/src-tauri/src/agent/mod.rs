@@ -1265,7 +1265,7 @@ demanar i ho aplicaré.",
         // Blender. Però en lloc de deixar l'usuari amb un missatge d'error,
         // li RECORDEM què volem i ho tornem a demanar UNA vegada (com les
         // imatges): el 90% dels casos es resol en el segon intent.
-        if let Err(e) = crate::blender::guard_python(&code) {
+        if let Err(_e) = crate::blender::guard_python(&code) {
             progress(
                 app,
                 "blender",
