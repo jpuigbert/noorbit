@@ -59,6 +59,15 @@ fn save_servers(list: &[LocalServer]) {
     }
 }
 
+/// Nom del binari segons el sistema operatiu.
+pub fn exe_name() -> &'static str {
+    if cfg!(windows) {
+        "llama-server.exe"
+    } else {
+        "llama-server"
+    }
+}
+
 /// Carpeta on NoOrbit deixa la llama.cpp quan la instal·la ell mateix
 /// (binaris oficials): així funciona fins i tot on Homebrew no té suport
 /// (macOS vell) i on l'usuari no vol安装了 res a mà.
@@ -90,20 +99,18 @@ pub fn binary() -> Option<PathBuf> {
     // La instal·lació feta per NoOrbit (binaris oficials): hi pot haver una
     // carpeta amb el tag dins (p. ex. «llama-b12318/llama-server»).
     if let Some(dir) = install_dir() {
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            for e in entries.flatten() {
-                let p = e.path().join("llama-server");
+        let exe = exe_name();
+        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let p = e.path().join(exe);
+            if p.exists() {
+                return Some(p);
+            }
+            // Pot ser un nivell més avall (l'arxiu traeu una carpeta) i a
+            // Windows els DLL són al mateix lloc: el servidor el troba sol.
+            for s in std::fs::read_dir(e.path()).into_iter().flatten().flatten() {
+                let p = s.path().join(exe);
                 if p.exists() {
                     return Some(p);
-                }
-                // Pot ser un nivell més avall (l'arxiu traeu una carpeta).
-                if let Ok(sub) = std::fs::read_dir(e.path()) {
-                    for s in sub.flatten() {
-                        let p = s.path().join("llama-server");
-                        if p.exists() {
-                            return Some(p);
-                        }
-                    }
                 }
             }
         }
@@ -131,7 +138,11 @@ fn asset_guion() -> &'static str {
     }
     #[cfg(windows)]
     {
-        "bin-win-cpu-x64"
+        if cfg!(target_arch = "aarch64") {
+            "bin-win-cpu-arm64"
+        } else {
+            "bin-win-cpu-x64"
+        }
     }
 }
 
@@ -238,14 +249,32 @@ pub async fn install_from_github(
 
     // 3) Extreu (tar.gz o zip). El «tar» del sistema està a tothom.
     let ok = if nom.ends_with(".zip") {
-        std::process::Command::new("unzip")
-            .arg("-o")
-            .arg(&arxiu)
-            .arg("-d")
-            .arg(&dir)
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        #[cfg(windows)]
+        {
+            // A Windows no hi ha «unzip»: hi ha PowerShell.
+            std::process::Command::new("powershell")
+                .arg("-NoProfile")
+                .arg("-Command")
+                .arg(format!(
+                    "Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
+                    arxiu.to_string_lossy(),
+                    dir.to_string_lossy()
+                ))
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        }
+        #[cfg(not(windows))]
+        {
+            std::process::Command::new("unzip")
+                .arg("-o")
+                .arg(&arxiu)
+                .arg("-d")
+                .arg(&dir)
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        }
     } else {
         std::process::Command::new("tar")
             .arg("-xzf")
@@ -327,23 +356,42 @@ pub async fn start(
         ));
     }
 
-    let mut cmd = std::process::Command::new(&bin);
-    cmd.arg("-m")
-        .arg(&path)
-        .arg("--host")
-        .arg("127.0.0.1")
-        .arg("--port")
-        .arg(port.to_string())
-        .arg("-c")
-        .arg(ctx.to_string())
-        .arg("--no-webui")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    // Procés independent: sobreviu al tancament de NoOrbit.
-    let child = cmd
-        .spawn()
+    // Engega el servidor. Preferim «--no-webui» (evita obrir el navegador),
+    // però les versions antigues de llama.cpp no el coneixen: si el procés
+    // mor tot seguit, ho tornem a provar sense ell.
+    let mut engega = |amb_webui: bool| -> std::io::Result<std::process::Child> {
+        let mut cmd = std::process::Command::new(&bin);
+        cmd.arg("-m")
+            .arg(&path)
+            .arg("--host")
+            .arg("127.0.0.1")
+            .arg("--port")
+            .arg(port.to_string())
+            .arg("-c")
+            .arg(ctx.to_string());
+        if !amb_webui {
+            cmd.arg("--no-webui");
+        }
+        cmd.stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        #[cfg(windows)]
+        {
+            // CREATE_NO_WINDOW: engegar el servidor no obre cap consola
+            // negra per davant de l'usuari.
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000);
+        }
+        cmd.spawn()
+    };
+
+    let mut child = engega(false)
         .map_err(|e| anyhow!("No s'ha pogut engegar llama-server: {}", e))?;
+    // Si ha mort de seguida (opció no reconeguda), ho intentem sense ella.
+    if let Ok(Some(_)) = child.try_wait() {
+        child = engega(true)
+            .map_err(|e| anyhow!("No s'ha pogut engegar llama-server: {}", e))?;
+    }
     let pid = child.id();
 
     // Espera que l'API OpenAI-compatible respongui (fins a 3 minuts: en CPU
@@ -418,6 +466,13 @@ pub fn stop(port: u16) -> bool {
         return false;
     };
     let srv = list.remove(s);
+    #[cfg(windows)]
+    let _ = std::process::Command::new("taskkill")
+        .args(["/PID", &srv.pid.to_string(), "/F"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    #[cfg(not(windows))]
     let _ = std::process::Command::new("kill")
         .arg(srv.pid.to_string())
         .stdout(std::process::Stdio::null())
@@ -436,4 +491,38 @@ pub fn is_alive(port: u16) -> bool {
         std::time::Duration::from_millis(400),
     )
     .is_ok()
+}
+
+#[cfg(test)]
+mod proves {
+    use super::*;
+
+    /// El nom del binari ha de portar «.exe» a Windows (altrament el motor
+    /// no s'en troba) i el guió de l'asset oficial ha de triar l'arquitectura
+    /// correcta de la plataforma.
+    #[test]
+    fn noms_calculats_per_plataforma() {
+        #[cfg(windows)]
+        assert_eq!(exe_name(), "llama-server.exe");
+        #[cfg(not(windows))]
+        assert_eq!(exe_name(), "llama-server");
+
+        let g = asset_guion();
+        assert!(g.starts_with("bin-"), "guió d'asset inesperat: {}", g);
+        #[cfg(target_os = "macos")]
+        assert!(g.contains("macos"), "hauria de ser macOS: {}", g);
+        #[cfg(target_os = "linux")]
+        assert!(g.contains("ubuntu"), "hauria de ser ubuntu: {}", g);
+        #[cfg(windows)]
+        assert!(g.contains("win"), "hauria de ser windows: {}", g);
+    }
+
+    /// El nom del model que es veu ha de ser el NOM DEL FITXER, no la ruta
+    /// completa del GGUF (que és el que retorna llama-server).
+    #[test]
+    fn el_nom_del_model_es_legible() {
+        let brut = "/Users/jo/models/SmolLM2-135M-Q4_K_M.gguf";
+        let net = brut.rsplit('/').next().unwrap().trim_end_matches(".gguf");
+        assert_eq!(net, "SmolLM2-135M-Q4_K_M");
+    }
 }
