@@ -50,6 +50,7 @@ main.py»): no diguis a l'usuari que ho faci ell.\n\
 «IMG|descripció detallada|ruta/imatge.png» i ATURA el torn: la generació la \
 fa el sistema (rodet local en CPU —també Mac Intel— o proveïdor en línia); \
 MAI no l'expliquis amb prosa ni la promesis per a «després».\n\
+- Si l'usuari demana una FIGURA, un model 3D, un personatge, una escena o un jardí (encara que NO digui la paraula «Blender»), el pots construir a Blender: emet «RUN|BLENDER|import bpy; ...» amb el codi que ho construeix (el motor Blender connectat és una eina teva, com el terminal). Descriu la figura amb paràmetres (colors, mides, materials) i NO tornis a planificar: el codi el fa.
 - «RUN|BLENDER|» SEMPRE és codi Python real de Blender: comença per «import bpy»
 i separa instruccions amb «;» (o dona una ruta .py). MAI frases en llenguatge
 natural dins de BLENDER: les imatges es creen amb «IMG|descripció|ruta.png».
@@ -590,8 +591,20 @@ pub async fn execute(
                 // Abans una frase («crea una imatge…») arribava a exec() dins
                 // Blender i provocava un SyntaxError que la IA no sabia corregir.
                 if let Err(e) = crate::blender::guard_python(&code) {
-                    return format!("RUN|RESULTAT| BLENDER| NO EXECUTADA: {}", e);
+                    return format!(
+                        "RUN|RESULTAT| BLENDER| NO EXECUTADA: {} Torna a emetre «RUN|BLENDER|» \
+amb el CODI PYTHON real (comença per «import bpy» i acaba amb un print() en català), \
+no amb una frase en llenguatge natural.",
+                        e
+                    );
                 }
+                // El codi és Python però sense «import bpy» (els models locals
+                // sovint l'obliden): l'hi afegim nosaltres (és inocu si ja hi és).
+                let code = if !code.contains("import bpy") && !code.contains("from bpy") {
+                    format!("import bpy\n{}", code)
+                } else {
+                    code
+                };
                 let st = blender::status();
                 let exec = if st.running {
                     let code2 = code.clone();

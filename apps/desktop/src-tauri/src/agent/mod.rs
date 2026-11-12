@@ -1259,15 +1259,51 @@ demanar i ho aplicaré.",
         }
         progress(app, "ia", "La IA està escrivint l'script per a Blender…", true);
         let reply = ai.chat(prompt, Some(system)).await?;
-        let code = Self::extract_code(&reply);
+        let mut code = Self::extract_code(&reply);
         // Guarda: si la IA no ha generat codi Python (resposta en prosa,
-        // sense bloc ```python), no ho executem — evita el SyntaxError a Blender.
+        // sense bloc ```python), no ho executem — evita el SyntaxError a
+        // Blender. Però en lloc de deixar l'usuari amb un missatge d'error,
+        // li RECORDEM què volem i ho tornem a demanar UNA vegada (com les
+        // imatges): el 90% dels casos es resol en el segon intent.
         if let Err(e) = crate::blender::guard_python(&code) {
-            progress(app, "blender", "La IA no ha generat codi Python", false);
-            return Ok((
-                format!("❓ No puc aplicar a Blender: {}\n\nResposta de la IA:\n{}", e, reply.trim()),
-                false,
-            ));
+            progress(
+                app,
+                "blender",
+                "La IA no ha generat codi Python; li recordo què volem i ho torno a demanar…",
+                true,
+            );
+            let nudge = format!(
+                "La teva resposta anterior NO era codi Python, així que NO s'ha \
+executat res a Blender.\n\nRespon NOMÉS amb UN sol bloc ```python que comenci per \
+«import bpy» i que faci la tasca de veritat (bpy.ops.* o bpy.data.*). Cap text \
+al voltant.\n\nTasca: {}\n\nSi la tasca és una figura o una escena, recorda les \
+RECEPTES del manual (nan de jardí, materials, càmera…).",
+                prompt
+            );
+            let reply2 = match ai.chat(&nudge, Some(system)).await {
+                Ok(r) => r,
+                Err(e) => {
+                    progress(app, "blender", "El 2n intent ha fallat", false);
+                    return Ok((
+                        format!("❓ No puc aplicar a Blender: {}\n\nError: {}", e, reply.trim()),
+                        false,
+                    ));
+                }
+            };
+            let code2 = Self::extract_code(&reply2);
+            if let Err(e2) = crate::blender::guard_python(&code2) {
+                progress(app, "blender", "El 2n intent tampoc és codi Python", false);
+                return Ok((
+                    format!("❓ No puc aplicar a Blender: {}\n\nResposta de la IA:\n{}", e2, reply2.trim()),
+                    false,
+                ));
+            }
+            code = code2;
+        }
+        // Si el codi és Python però no importa «bpy» (els models locals
+        // sovint l'obliden), l'hi afegim nosaltres: és inocu si ja hi és.
+        if !code.contains("import bpy") && !code.contains("from bpy") {
+            code = format!("import bpy\n{}", code);
         }
         progress(app, "ia", "Script generat", true);
         // L'execució és blocant (socket): va al thread blocking.
