@@ -294,6 +294,13 @@ pub async fn grab_code_blocks(app: &AppHandle) -> Result<Vec<CodeBlock>> {
     let js = r#"(function(){try{
 var els=document.querySelectorAll('pre code');
 if(!els.length)els=document.querySelectorAll('pre');
+// Xats web i eines no sempre tenen <pre>: busquem altres contenidors
+// habituals de codi (classes «language-…», «highlight», «code»…).
+if(!els.length){
+  var sel='[class*="language-"],[class*="highlight"],[class*="code-block"],div.code,span.code,td.code,pre';
+  els=document.querySelectorAll(sel);
+}
+// Si tampoc hi ha res, el codi pot ser dins del TEXT visible, entre clausilles.
 var out=[];var seen={};
 for(var i=0;i<els.length&&out.length<12;i++){
   var c=els[i];
@@ -312,6 +319,19 @@ for(var i=0;i<els.length&&out.length<12;i++){
     }
   }catch(e){}
   out.push(lang+':::'+t.slice(0,14000));
+}
+// RESPUALTA: el codi dins del text visible, entre clausilles (```lang … ```).
+if(!out.length){
+  var txt=(document.body&&document.body.innerText)?document.body.innerText:'';
+  var re=/```([a-zA-Z0-9+#._-]*)\n([\s\S]{4,14000}?)```/g, m;
+  while((m=re.exec(txt))&&out.length<12){
+    var lang2=(m[1]||'').trim();
+    var code2=m[2].replace(/\s+$/,'');
+    if(code2.length<4)continue;
+    var key2=code2.slice(0,180);
+    if(seen[key2])continue;seen[key2]=1;
+    out.push(lang2+':::'+code2);
+  }
 }
 return JSON.stringify({blocks:out});
 }catch(e){return JSON.stringify({error:String(e)});}})()"#

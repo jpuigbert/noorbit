@@ -2641,9 +2641,11 @@ export const useAgentStore = create<AgentState>((set, get) => {
         if (blocks.length === 0) {
           patch(sid, {
             error:
-              "No he trobat cap bloc de codi a la pàgina del navegador. És possible que " +
-              "la IA web encara estigui escrivint, que el codi estigui dins d'un requadre " +
-              "(«Veure codi») o que el navegador no estigui obert.",
+              "No he trobat cap bloc de codi a la pàgina del navegador. Pot ser que la IA " +
+              "web encara estigui escrivint (espera uns segons i torna-ho a provar), que el " +
+              "codi estigui dins d'un requadre tancat («Veure codi»), o que el navegador " +
+              "no tingui cap pàgina oberta. Si és el primer cop, obre la pàgina del " +
+              "navegador i torna a prémer el botó.",
           });
           get().finalizeTurn(sid);
           return null;
