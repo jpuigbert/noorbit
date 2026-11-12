@@ -21,6 +21,9 @@
 .btn:hover {
   background: var(--bg-4);
 }
+.btn:active {
+  transform: translateY(1px);
+}
 .btn.primary {
   /* Degradat de la casa (canvia amb el tema: violeta-blau en fosc,
      jade-dauretat en «Verd i daurat»…) — lectura AA garantida. */
@@ -43,6 +46,9 @@
   background: transparent;
   border-color: var(--error);
   color: var(--error);
+}
+.btn.danger:hover {
+  background: color-mix(in srgb, var(--error) 12%, transparent);
 }
 .btn.sm {
   padding: 4px 8px;
@@ -72,6 +78,14 @@
   color: var(--text-0);
   font-size: 12.5px;
   outline: none;
+  transition:
+    border-color var(--speed-fast) var(--ease-out),
+    box-shadow var(--speed-fast) var(--ease-out);
+}
+.field input:hover,
+.field select:hover,
+.field textarea:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border-2));
 }
 .field input:focus,
 .field select:focus,
@@ -126,6 +140,14 @@
   color: var(--text-0);
   border: 1px solid var(--border-2);
   border-radius: var(--radius-sm, 6px);
+  outline: none;
+  transition:
+    border-color var(--speed-fast) var(--ease-out),
+    box-shadow var(--speed-fast) var(--ease-out);
+}
+.tree-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .tree-dialog-actions {
   display: flex;
@@ -178,9 +200,15 @@
   border: 1px solid var(--border-2);
   color: var(--text-0);
   font-size: 12.5px;
+  transition:
+    background var(--speed-fast) var(--ease-out),
+    border-color var(--speed-fast) var(--ease-out);
 }
 .lp-btn:hover {
   background: var(--bg-4);
+}
+.lp-btn:active {
+  transform: translateY(1px);
 }
 .lp-btn.danger {
   background: transparent;
@@ -211,6 +239,12 @@
   font-size: 12.5px;
   color: var(--text-2);
   border-bottom: 2px solid transparent;
+  transition:
+    color var(--speed-fast) var(--ease-out),
+    border-color var(--speed-fast) var(--ease-out);
+}
+.pm-tab:hover {
+  color: var(--text-0);
 }
 .pm-tab.active {
   color: var(--text-0);
@@ -348,6 +382,7 @@
 .onb-card:hover {
   transform: translateY(-2px);
   border-color: var(--border-2);
+  box-shadow: var(--shadow-sm);
 }
 .onb-card.picked {
   border-color: var(--accent);

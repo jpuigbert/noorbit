@@ -716,7 +716,11 @@ no amb una frase en llenguatge natural.",
                         Err(e) => format!("RUN|RESULTAT| UNREAL| error Python: {}", e),
                     }
                 } else {
-                    let engines = launcher::detect_engine_installations();
+                    // Escaneig del disc (pot trigar): en un fil a part.
+                    let engines =
+                        tauri::async_runtime::spawn_blocking(launcher::detect_engine_installations)
+                            .await
+                            .unwrap_or_default();
                     let uproject = root.as_ref().and_then(|r| find_uproject(r));
                     if engines.is_empty() {
                         "RUN|RESULTAT| UNREAL| Unreal Engine no està instal·lat. Obri \

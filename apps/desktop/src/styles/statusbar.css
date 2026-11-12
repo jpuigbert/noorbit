@@ -61,7 +61,7 @@
 }
 .status-dot.on {
   background: var(--success);
-  box-shadow: 0 0 6px rgba(74, 222, 128, 0.55);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--success) 55%, transparent);
 }
 .status-dot.off {
   background: var(--text-3);

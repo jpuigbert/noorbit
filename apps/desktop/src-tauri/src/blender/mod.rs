@@ -24,7 +24,8 @@ use std::time::Duration;
 use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Manager};
 
-pub const DEFAULT_SOCKET_PORT: u16 = 9876;
+/// Port per defecte del pont de Blender (font única: `crate::ports`).
+pub const DEFAULT_SOCKET_PORT: u16 = crate::ports::BLENDER_BRIDGE_PORT;
 const AUTH_KEY: &str = "noorbit";
 
 /// Acumula bytes del socket fins a tenir un objecte JSON vàlid. L'add-on
@@ -483,7 +484,16 @@ pub fn locate_bridge(app: &AppHandle) -> Option<PathBuf> {
 
 /// Arrenca Blender amb el pont (via `-P`) perquè obri el port 9876.
 pub fn launch_with_bridge(app: &AppHandle) -> Result<String> {
-    if port_open(DEFAULT_SOCKET_PORT) {
+    // El port CONFIGURAT (Configuració ▸ Blender) s'injecta per entorn: el
+    // script Python el llegeix i obri AQUELL port. Abans el Python sempre
+    // obria el 9876 i la configuració era ignorada (el client connectava al
+    // port configurat i no hi havia res).
+    let port = crate::config::AppConfig::load()
+        .ok()
+        .map(|c| c.blender.socket_port)
+        .filter(|p| *p != 0)
+        .unwrap_or(DEFAULT_SOCKET_PORT);
+    if port_open(port) {
         return Ok("Ja hi ha un Blender connectat".into());
     }
     let binary = detect_blender_binary().ok_or_else(|| anyhow!("Blender no instal·lat"))?;
@@ -492,11 +502,12 @@ pub fn launch_with_bridge(app: &AppHandle) -> Result<String> {
     std::process::Command::new(&binary)
         .arg("-P")
         .arg(&bridge)
+        .env(crate::ports::ENV_BLENDER_PORT, port.to_string())
         .spawn()
         .map_err(|e| anyhow!("No s'ha pogut arrencar Blender: {}", e))?;
     // Espera fins que el port obri (fins a ~30 s).
     for _ in 0..60 {
-        if port_open(DEFAULT_SOCKET_PORT) {
+        if port_open(port) {
             return Ok("Blender connectat".into());
         }
         std::thread::sleep(Duration::from_millis(500));

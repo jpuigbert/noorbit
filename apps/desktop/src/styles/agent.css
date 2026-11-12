@@ -44,7 +44,7 @@
 }
 .mod-chip.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border-color: transparent;
 }
 .agent-actions {
@@ -425,6 +425,13 @@
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  transition:
+    border-color var(--speed-fast) var(--ease-out),
+    box-shadow var(--speed-fast) var(--ease-out);
+}
+.ex-card:hover {
+  border-color: var(--border-2);
+  box-shadow: var(--shadow-sm);
 }
 .ex-card-main {
   flex: 1;
@@ -725,7 +732,7 @@
 }
 .chat-bubble.user {
   background: var(--accent-grad) !important;
-  color: #fff !important;
+  color: var(--on-accent) !important;
   border: none !important;
   border-bottom-right-radius: 4px !important;
   font-weight: 400;
@@ -784,7 +791,7 @@
 .ap-chat-tab.active {
   background: var(--accent-soft) !important;
   color: var(--accent-hover) !important;
-  box-shadow: inset 0 0 0 1px rgba(124, 92, 255, 0.35);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .ap-chat-tab:hover:not(.active) {
   background: var(--bg-3) !important;
@@ -837,9 +844,9 @@
 .btn.primary {
   background: var(--accent-grad) !important;
   border: none !important;
-  color: #fff !important;
+  color: var(--on-accent) !important;
   font-weight: 500;
-  box-shadow: 0 2px 8px rgba(124, 92, 255, 0.35);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .btn.primary:hover:not(:disabled) {
   filter: brightness(1.12);
@@ -1010,7 +1017,7 @@
 }
 .ap-plat.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 /* Peu del composer: context + adjunts a l'esquerra; acció principal a la dreta. */

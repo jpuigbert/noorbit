@@ -36,6 +36,13 @@ export interface AiConnection {
   kind: string;
   label: string;
   createdAt: number;
+  /// Adreça del lloc (només per a connexions web).
+  url?: string;
+  /// Usuari del lloc (WordPress).
+  username?: string;
+  /// Contrasenya d'aplicació (WordPress). Desada al compte de l'usuari:
+  /// és la seva credencial, mai al codi ni al servidor.
+  secret?: string;
 }
 
 export interface ProfileUpdates {
@@ -55,6 +62,11 @@ interface AuthState {
   switchAccount: (email: string, password: string) => Promise<NoOrbitAccount>;
   updateProfile: (updates: ProfileUpdates, password?: string) => Promise<void>;
   deleteAccount: (id: string, password: string) => Promise<void>;
+  /// Afegeix una CONNEXIÓ al compte (p. ex. el marketplace de temes
+  /// WordPress: lloc, usuari i contrasenya d'aplicació). És la credencial
+  /// de l'usuari, desada al seu compte local.
+  addConnection: (conn: Omit<AiConnection, "id" | "createdAt">) => AiConnection;
+  removeConnection: (id: string) => void;
 }
 
 function loadAccounts(): NoOrbitAccount[] {
@@ -242,6 +254,41 @@ export const useAuthStore = create<AuthState>((set, get) => {
       } else {
         set({ accounts });
       }
+    },
+
+    /// Connexió al marketplace (temes WordPress) desada al compte de l'usuari.
+    addConnection: (conn) => {
+      const user = get().user;
+      if (!user) throw authErrors.noAccount;
+      const c: AiConnection = {
+        ...conn,
+        id: newId(),
+        createdAt: Date.now(),
+      };
+      const accounts = get().accounts.map((a) =>
+        a.id === user.id ? { ...a, connections: [...a.connections, c] } : a
+      );
+      persistAccounts(accounts);
+      set({
+        accounts,
+        user: accounts.find((a) => a.id === user.id) ?? null,
+      });
+      return c;
+    },
+
+    removeConnection: (id) => {
+      const user = get().user;
+      if (!user) return;
+      const accounts = get().accounts.map((a) =>
+        a.id === user.id
+          ? { ...a, connections: a.connections.filter((c) => c.id !== id) }
+          : a
+      );
+      persistAccounts(accounts);
+      set({
+        accounts,
+        user: accounts.find((a) => a.id === user.id) ?? null,
+      });
     },
   };
 });

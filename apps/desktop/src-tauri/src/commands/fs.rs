@@ -192,8 +192,14 @@ fn nearest_existing_canonical(p: &Path) -> Result<PathBuf, String> {
 #[tauri::command]
 pub async fn create_dir(path: String) -> Result<(), String> {
     let p = guard_in_root(&path)?;
-    std::fs::create_dir_all(&p)
-        .map_err(|e| format!("No s'ha pogut crear la carpeta {}: {}", p.display(), e))
+    // spawn_blocking: crear carpetes grans (node_modules…) pot trigar
+    // segons i, fet en el runtime async, congelava tota la interfície.
+    tauri::async_runtime::spawn_blocking(move || {
+        std::fs::create_dir_all(&p)
+            .map_err(|e| format!("No s'ha pogut crear la carpeta {}: {}", p.display(), e))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Esborra un fitxer o carpeta (recursivament) dins del projecte.
@@ -208,12 +214,17 @@ pub async fn delete_path(path: String) -> Result<(), String> {
             }
         }
     }
-    let res = if p.is_dir() {
-        std::fs::remove_dir_all(&p)
-    } else {
-        std::fs::remove_file(&p)
-    };
-    res.map_err(|e| format!("No s'ha pogut esborrar {}: {}", p.display(), e))
+    // spawn_blocking: esborrar una carpeta gran és lent i bloquejava el runtime.
+    tauri::async_runtime::spawn_blocking(move || {
+        let res = if p.is_dir() {
+            std::fs::remove_dir_all(&p)
+        } else {
+            std::fs::remove_file(&p)
+        };
+        res.map_err(|e| format!("No s'ha pogut esborrar {}: {}", p.display(), e))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Reanomena/mou un fitxer o carpeta dins del projecte.
@@ -221,10 +232,15 @@ pub async fn delete_path(path: String) -> Result<(), String> {
 pub async fn rename_path(from: String, to: String) -> Result<(), String> {
     let f = guard_in_root(&from)?;
     let t = guard_in_root(&to)?;
-    if let Some(parent) = t.parent() {
-        std::fs::create_dir_all(parent).ok();
-    }
-    std::fs::rename(&f, &t).map_err(|e| format!("No s'ha pogut reanomenar: {}", e))
+    // spawn_blocking: crear els pares + rename pot trigar si el disc és lent.
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(parent) = t.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        std::fs::rename(&f, &t).map_err(|e| format!("No s'ha pogut reanomenar: {}", e))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -333,8 +349,15 @@ pub async fn collect_project_files(
                     continue;
                 }
                 let p = e.path();
-                if p.is_dir() {
+                // file_type NO segueix symlinks: un enllaç a un directori no
+                // s'es Explora (un cicle `a/link -> .` feia la recerca
+                // infinita i creixia la memòria sense límit).
+                let ft = e.file_type().ok();
+                if ft.map(|t| t.is_dir()).unwrap_or(false) {
                     stack.push(p);
+                    continue;
+                }
+                if ft.map(|t| t.is_symlink()).unwrap_or(false) {
                     continue;
                 }
                 let ext = p
@@ -421,8 +444,13 @@ pub async fn search_files(query: String, limit: usize) -> Result<Vec<SearchHit>,
                     continue;
                 }
                 let p = e.path();
-                if p.is_dir() {
+                // file_type NO segueix symlinks (evita cicles infinits).
+                let ft = e.file_type().ok();
+                if ft.map(|t| t.is_dir()).unwrap_or(false) {
                     stack.push(p);
+                    continue;
+                }
+                if ft.map(|t| t.is_symlink()).unwrap_or(false) {
                     continue;
                 }
                 let ext = p
@@ -575,11 +603,16 @@ pub async fn find_definition(
             for e in entries.flatten() {
                 let p = e.path();
                 let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
-                if p.is_dir() {
+                // file_type NO segueix symlinks (cicles infinits).
+                let ft = e.file_type().ok();
+                if ft.map(|t| t.is_dir()).unwrap_or(false) {
                     if name == ".git" || IGNORED.contains(&name.as_str()) {
                         continue;
                     }
                     stack.push(p);
+                    continue;
+                }
+                if ft.map(|t| t.is_symlink()).unwrap_or(false) {
                     continue;
                 }
                 let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_string();

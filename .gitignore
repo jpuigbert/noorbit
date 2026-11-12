@@ -15,3 +15,4 @@ apps/desktop/src-tauri/gen/
 
 # descarregats temporals dels artefactes de CI per a penjar-los al Release
 /.release-dl/
+dist-portable/

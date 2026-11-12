@@ -143,7 +143,12 @@ fn port_open(port: u16) -> bool {
 /// `http` s'usa per confirmar que l'endpoint realment respon abans de
 /// marcar una IA com a «running» (un port obert no sempre és la seva API).
 pub async fn discover_all(http: &reqwest::Client) -> Vec<ExternalIa> {
-    let table = process_table();
+    // La taula de processos (`ps aux`) i les sondes TCP bloquejen: es fan
+    // en un fil a part perquè el runtime async no quedi esperant (aquesta
+    // funció s'crida periòdicament per l'agent).
+    let table = tauri::async_runtime::spawn_blocking(process_table)
+        .await
+        .unwrap_or_default();
     let mut out = Vec::new();
     for c in CANDIDATES {
         let base_url = format!("http://127.0.0.1:{}", c.port);
@@ -153,7 +158,16 @@ pub async fn discover_all(http: &reqwest::Client) -> Vec<ExternalIa> {
             .any(|k| table.contains(&k.to_lowercase()));
         // El port escolta i l'API respon (processos i rutes dels binaris).
         // Un candidat sense port (deepinfer) no fa prova d'endpoint.
-        let endpoint_alive = c.port != 0 && port_open(c.port) && probe_api(http, &base_url, c.api).await;
+        // La sonda TCP bloqueja (400 ms per port): anem en un fil a part.
+        let probe_port = c.port;
+        let port_alive = if probe_port != 0 {
+            tauri::async_runtime::spawn_blocking(move || port_open(probe_port))
+                .await
+                .unwrap_or(false)
+        } else {
+            false
+        };
+        let endpoint_alive = c.port != 0 && port_alive && probe_api(http, &base_url, c.api).await;
         // Per a dsh també compta la instal·lació AUTOGESTIONADA dins de les
         // dades de NoOrbit (sempre fora del PATH de la app gràfica).
         let installed = c.binaries.iter().any(|b| which::which(b).is_ok())

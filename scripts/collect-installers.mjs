@@ -13,7 +13,7 @@
  * No compila res: només recol·lecta. Per construir, usa primer
  * `pnpm app:build:mac` (o el target que corresponga) i després `pnpm installers`.
  */
-import { readdirSync, statSync, mkdirSync, copyFileSync, existsSync, rmSync } from "node:fs";
+import { readdirSync, statSync, mkdirSync, copyFileSync, existsSync, rmSync, cpSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -60,6 +60,16 @@ function extOf(name) {
   return m ? (m[0] === ".AppImage" ? ".AppImage" : m[0].toLowerCase()) : "";
 }
 
+/// Extracció de l'arquitectura del bundle a partir de la ruta
+/// (…/target/<arquitectura>/release/bundle/…) → serveix per no col·lisionar
+/// els «NoOrbit.app» de x86_64, aarch64 i universal.
+function archOf(fullPath) {
+  const parts = fullPath.split("/");
+  const idx = parts.lastIndexOf("target");
+  if (idx >= 0 && idx + 1 < parts.length) return parts[idx + 1];
+  return "";
+}
+
 function main() {
   if (!existsSync(BUNDLE_BASE)) {
     console.error("No s'ha trobat cap sortida de build en src-tauri/target.");
@@ -86,15 +96,27 @@ function main() {
   const copied = [];
   for (const src of found) {
     // .app és un directori: el copiem recursivament; la resta, fitxers.
+    // ATENCIÓ: dos bundles de arquitectures diferides tenen el mateix nom
+    // («NoOrbit.app»): sense el sufix d'arquitectura, el segon esborrava el
+    // primer i l'usuari només en veia un (sense cap avís).
     const isDir = statSync(src).isDirectory();
-    const dest = join(OUT_DIR, basename(src));
+    let dest = join(OUT_DIR, basename(src));
+    if (isDir) {
+      const arch = archOf(src);
+      if (arch && arch !== "release") {
+        dest = join(OUT_DIR, `${arch}-${basename(src)}`);
+      }
+    }
     if (isDir) {
       rmSync(dest, { recursive: true, force: true });
-      copyTree(src, dest);
+      // cpSync amb verbatimSymlinks: els bundles .app tenen symlinks
+      // (Frameworks, Versions/Current); copiar-los «a mà» els desreferenciava
+      // i podia deixar l'app trencada.
+      cpSync(src, dest, { recursive: true, verbatimSymlinks: true });
     } else {
       copyFileSync(src, dest);
     }
-    copied.push(`${basename(src)}  ←  ${src.replace(ROOT + "/", "")}`);
+    copied.push(`${basename(dest)}  ←  ${src.replace(ROOT + "/", "")}`);
   }
 
   console.log(`\n✔ ${copied.length} paquet(s) preparats a:  ${OUT_DIR}`);
@@ -111,5 +133,9 @@ function copyTree(from, to) {
     else copyFileSync(a, b);
   }
 }
+
+// (Es manté per compatibilitat; la còpia principal usa cpSync, que sí que
+// preserva els symlinks dels bundles .app.)
+void copyTree;
 
 main();

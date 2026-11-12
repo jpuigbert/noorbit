@@ -23,14 +23,19 @@
   /* Nous tokens premium (mantenen els antics intactes per compatibilitat) */
   --accent-grad: linear-gradient(135deg, #7c5cff 0%, #5ea2ef 100%);
   --accent-soft: rgba(124, 92, 255, 0.13);
+  /* Text sobre superfícies d'accent: blanc per defecte; el tema groc el
+     canvia a fosc per garantir contrast AA sobre el seu accent clar. */
+  --on-accent: #fff;
+  /* Daurat de remat compartit (núvol d'equip, detalls càlids). */
+  --gold: #e8c465;
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 6px 24px rgba(0, 0, 0, 0.45);
   --radius-lg: 12px;
   --radius-xl: 16px;
 
   /* Segell «high-end»: un únic ritme d'espaiat i de moviment per a tot.
-     Qualsevol component nou hauria de consumir ests tokens (no px solts):
-     és el que fa que l'apapp sencera sembre sameit de la mateixa escola. */
+     Qualsevol component nou hauria de consumir aquests tokens (no px solts):
+     és el que fa que l'app sencera sembli sortida de la mateixa escola. */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -86,6 +91,7 @@ body {
   --accent-soft: rgba(109, 74, 255, 0.09);
   --shadow-sm: 0 1px 3px rgba(20, 20, 40, 0.08);
   --shadow-md: 0 6px 24px rgba(20, 20, 40, 0.12);
+  --shadow-lg: 0 18px 50px rgba(20, 20, 40, 0.18);
 
   --success: #16a34a;
   --error: #dc2626;
@@ -111,6 +117,8 @@ body {
   --accent: #8b9dff;
   --accent-hover: #a3b1ff;
   --accent-2: #4dd0e1;
+  --accent-grad: linear-gradient(135deg, #8b9dff 0%, #4dd0e1 100%);
+  --accent-soft: rgba(139, 157, 255, 0.14);
 
   --success: #5cd08a;
   --error: #f08080;
@@ -136,6 +144,8 @@ body {
   --accent: #34d399;
   --accent-hover: #5eead4;
   --accent-2: #a3e635;
+  --accent-grad: linear-gradient(135deg, #34d399 0%, #a3e635 100%);
+  --accent-soft: rgba(52, 211, 153, 0.13);
 
   --success: #4ade80;
   --error: #f87171;
@@ -190,6 +200,10 @@ body {
   --accent: #facc15;
   --accent-hover: #fde047;
   --accent-2: #fb923c;
+  --accent-grad: linear-gradient(135deg, #facc15 0%, #fb923c 100%);
+  --accent-soft: rgba(250, 204, 21, 0.14);
+  /* Accent clar: el text a sobre ha de ser fosc per llegir-se bé. */
+  --on-accent: #1a1606;
 
   --success: #a3e635;
   --error: #f87171;
@@ -255,11 +269,16 @@ select {
   height: 22px;
   border-radius: var(--radius-sm);
   color: var(--text-2);
-  transition: all 0.12s;
+  transition:
+    background var(--speed-fast) var(--ease-out),
+    color var(--speed-fast) var(--ease-out);
 }
 .icon-btn:hover {
   background: var(--bg-3);
   color: var(--text-0);
+}
+.icon-btn:active {
+  background: var(--bg-4);
 }
 
 /* ---- Dreceres de teclat («⌘S»): fitxa de tecles, visible a menús ---- */
@@ -283,6 +302,23 @@ select {
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* Selecció de text tenyida amb l'accent del tema (no el blau del sistema). */
+::selection {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+/* Accessibilitat: qui demana menys moviment, el té — els estats es
+   mantenen, només desapareixen les animacions i transicions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 .spin {

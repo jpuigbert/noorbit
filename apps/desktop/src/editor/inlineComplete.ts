@@ -36,13 +36,33 @@ const TIMEOUT_MS = 6_000;
 interface Timer {
   t: ReturnType<typeof setTimeout> | null;
   gen: number;
+  /// Id de la petició d'inferència EN VOL per a aquest model (per cancel·lar-la).
+  inflight: string | null;
 }
 
 const timers = new Map<string, Timer>();
+let requestSeq = 0;
+
+/// Avisa el backend que ja no ens interessa la inferència en vol: al servidor
+/// s'atura la generació (deixa de gastar CPU/GPU i RAM). Sense això, la
+/// inferència vella continuava fins a expirar el temps límit.
+function cancelRequest(requestId: string | null) {
+  if (!requestId) return;
+  void invoke("ai_inline_complete_cancel", { requestId }).catch(() => undefined);
+}
+
+/// Guard de registre: `registerInlineCompletionsProvider` ACUMULA providers
+/// (no substitueix). L'editor es remunta (canvi de layout, StrictMode) i,
+/// sense aquest guard, cada muntatge afegia 14 providers més: Monaco els
+/// consultava TOTS → cada pulsació disparava N peticions d'inferència al
+/// backend (2-3 vegades el cost de CPU i xarxa).
+let registered = false;
 
 /// Registra el provider als llenguatge principals. S'ha de cridar UNA vegada
 /// per editor muntat (des de onMount, on el món de monaco ja és a punt).
 export function registerInlineComplete(mon: typeof import("monaco-editor")) {
+  if (registered) return;
+  registered = true;
   const LANGS = [
     "typescript",
     "typescriptreact",
@@ -68,15 +88,24 @@ export function registerInlineComplete(mon: typeof import("monaco-editor")) {
           token: import("monaco-editor").CancellationToken
         ): Promise<L.InlineCompletions> => {
           const key = model.uri.toString();
+          // Model tancat: netegem el seu debounce (fuita menor).
+          if (model.isDisposed()) {
+            timers.delete(key);
+            return { items: [] };
+          }
           // Debounce: cancel·la la petició anterior del mateix model.
           let timer = timers.get(key);
           if (!timer) {
-            timer = { t: null, gen: 0 };
+            timer = { t: null, gen: 0, inflight: null };
             timers.set(key, timer);
           }
           timer.gen += 1;
           const myGen = timer.gen;
           if (timer.t) clearTimeout(timer.t);
+          // L'usuari ha seguit escrivint: la inferència anterior (si encara
+          // s'està generant al servidor) ja no serveix → s'atura de debò.
+          cancelRequest(timer.inflight);
+          timer.inflight = null;
           // Espera el debonce (o la cancel·lació de Monaco).
           const slept = new Promise<boolean>((res) => {
             timer!.t = setTimeout(() => res(false), DEBOUNCE_MS);
@@ -95,11 +124,18 @@ export function registerInlineComplete(mon: typeof import("monaco-editor")) {
           if (prefix.trim().length < 3) return { items: [] };
 
           const langId = model.getLanguageId();
+          requestSeq += 1;
+          const requestId = "inline-" + requestSeq;
+          timer.inflight = requestId;
           const shot = invoke<string>("ai_inline_complete", {
             prefix,
             suffix,
             language: langId,
+            requestId,
           });
+          // Si Monaco cancel·la el suggeriment (o l'editor es tanca), la
+          // inferència s'atura al servidor igualment.
+          const onCancel = token.onCancellationRequested(() => cancelRequest(requestId));
           try {
             const text = await Promise.race([
               shot,
@@ -111,7 +147,13 @@ export function registerInlineComplete(mon: typeof import("monaco-editor")) {
             if (!insight || myGen !== timer.gen) return { items: [] };
             return { items: [{ insertText: insight }] };
           } catch {
+            // Timeout o error: es cancel·la la petició al backend perquè la
+            // generació no continuï consumint CPU/GPU i RAM en segon pla.
+            cancelRequest(requestId);
             return { items: [] };
+          } finally {
+            onCancel.dispose();
+            if (timer.inflight === requestId) timer.inflight = null;
           }
         },
         handleItemDidShow() {},

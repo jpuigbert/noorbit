@@ -112,6 +112,8 @@ export default function MenuBar() {
     ai: [
       { label: t("ai.manager"), action: act("ai.models") },
       { label: t("ai.catalog"), action: act("ai.catalog") },
+      { label: t("menu.huggingBay"), action: act("ai.huggingBay") },
+      { label: t("menu.publishTheme"), action: act("ai.publishTheme") },
       { label: t("menu.remoteServer"), action: act("ai.remoteServer") },
       { label: t("plugins.title"), action: act("ai.plugins") },
       { sep: true, label: "" },

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Folder, MemoryStick } from "lucide-react";
 import { useT } from "../i18n";
 import { useWorkspaceStore } from "../stores/workspaceStore";
 import { useBlenderLiveStore } from "../stores/blenderLiveStore";
@@ -76,7 +76,7 @@ export default function StatusBar() {
         <span className="status-item">{t("status.ready")}</span>
       )}
       <span className="status-item">
-        {t("status.workspace")}: {folderName ?? t("status.noWorkspace")}
+        <Folder size={12} /> {t("status.workspace")}: {folderName ?? t("status.noWorkspace")}
       </span>
       <ProblemsBadge />
       <UpdateBadge />
@@ -88,7 +88,7 @@ export default function StatusBar() {
           className="status-item"
           title={`RAM usada ${mem ? formatBytes(mem.used) : ""} de ${mem ? formatBytes(mem.total) : ""}`}
         >
-          {t("status.ram")}: {ramPct}%
+          <MemoryStick size={12} /> {t("status.ram")}: {ramPct}%
         </span>
       )}
       <span className="status-item status-ai" onClick={() => setShowSetupCheck(true)} title={aiTitle}>

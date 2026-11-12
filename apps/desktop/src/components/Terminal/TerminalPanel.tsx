@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Eraser, Terminal as TerminalIcon } from "lucide-react";
+import { ChevronDown, Eraser, Square, Terminal as TerminalIcon } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { useT } from "../../i18n";
 import { useUIStore } from "../../stores/uiStore";
-import { useTerminalStore } from "../../stores/terminalStore";
+import { useTerminalStore, currentCallId } from "../../stores/terminalStore";
+import { toastError } from "../../stores/toastStore";
 
 /// Terminal integrat (panell inferior, com VS Code). Executa comandes dins
 /// la carpeta del projecte obert i mostra la sortida mentre va arribant.
@@ -68,6 +70,20 @@ export default function TerminalPanel() {
           {running && <span className="terminal-running">{t("terminal.running")}</span>}
         </span>
         <div className="terminal-tools">
+          {running && (
+            <button
+              className="btn sm"
+              onClick={() => {
+                // Atura la comanda en execució (mata el grup de processos).
+                void invoke("kill_command", { callId: currentCallId() }).catch((e) =>
+                  toastError("No s'ha pogut aturar la comanda", e)
+                );
+              }}
+              title={t("terminal.stop")}
+            >
+              <Square size={12} />
+            </button>
+          )}
           <button className="btn sm" onClick={clear} title={t("terminal.clear")}>
             <Eraser size={12} />
           </button>

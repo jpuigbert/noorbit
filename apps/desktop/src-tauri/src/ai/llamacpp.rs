@@ -72,7 +72,21 @@ pub fn exe_name() -> &'static str {
 /// (binaris oficials): així funciona fins i tot on Homebrew no té suport
 /// (macOS vell) i on l'usuari no vol安装了 res a mà.
 pub fn install_dir() -> Option<PathBuf> {
+    // Si l'usuari ha triat un DISC EXTERN per al motor local, el binari hi
+    // viu (i el model es pot servir des d'allà).
+    if let Ok(cfg) = crate::config::AppConfig::load() {
+        let d = cfg.ai.llamacpp_dir.trim();
+        if !d.is_empty() {
+            return Some(PathBuf::from(d));
+        }
+    }
     crate::config::AppConfig::data_dir().map(|d| d.join("llamacpp"))
+}
+
+/// Carpeta on es desen els models GGUF que fa servir el motor local (pot ser
+/// un disc extern).
+pub fn models_dir() -> PathBuf {
+    crate::ai::hf_bay::models_dir()
 }
 
 /// Binari `llama-server` (si l'usuari té instal·lada llama.cpp).
@@ -310,9 +324,9 @@ pub fn installed() -> bool {
 /// Models GGUF ja baixats al disc (per poder-los engegar sense Ollama).
 pub fn downloaded_models() -> Vec<(String, u64)> {
     let mut out = Vec::new();
-    let Some(dir) = crate::config::AppConfig::data_dir().map(|d| d.join("models")) else {
-        return out;
-    };
+    // La carpeta pot ser un DISC EXTERN: si no hi és muntat, no hi ha models
+    // (i el model no se'l pot endur d'un lloc a un altre sense el disc).
+    let dir = models_dir();
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return out;
     };
@@ -459,6 +473,60 @@ pub async fn start(
     ))
 }
 
+/// El procés del PID és realment el nostre `llama-server`? Els PIDs es
+/// reciclen: sense aquesta comprovació, un PID desat podria pertànyer a un
+/// altre procés (i el mataríem nosaltres, sense voler).
+fn is_our_server(pid: u32) -> bool {
+    #[cfg(windows)]
+    {
+        let out = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {}", pid), "/NH"])
+            .output();
+        match out {
+            Ok(o) => {
+                let s = String::from_utf8_lossy(&o.stdout).to_lowercase();
+                s.contains("llama-server")
+            }
+            Err(_) => false,
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let out = std::process::Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "comm="])
+            .output();
+        match out {
+            Ok(o) => {
+                let s = String::from_utf8_lossy(&o.stdout).to_lowercase();
+                s.contains("llama-server")
+            }
+            Err(_) => false,
+        }
+    }
+}
+
+/// Atura TOTS els servidors locals que NoOrbit hagi engegat. S'crida en
+/// sortir de l'app: sense això, els `llama-server` queviuen com a processos
+/// orfes (i el port quedava ocupat per a la sessió següent).
+pub fn stop_all() {
+    for s in servers() {
+        let _ = stop(s.port);
+    }
+}
+
+/// Neteja els registres de servidors ORFES (l'app va morir de cop i el
+/// `llama-server` es va quedar viu, o al revés: el registre es va quedar però
+/// el procés ja no hi és). Es crida en arrencar: si no, el port apareix
+/// «ocupat» per un servei que ja no existeix i el motor local no arrenca.
+pub fn cleanup_stale() {
+    let mut list = servers();
+    let before = list.len();
+    list.retain(|s| is_our_server(s.pid));
+    if list.len() != before {
+        save_servers(&list);
+    }
+}
+
 /// Atura un servidor local.
 pub fn stop(port: u16) -> bool {
     let mut list = servers();
@@ -466,18 +534,21 @@ pub fn stop(port: u16) -> bool {
         return false;
     };
     let srv = list.remove(s);
-    #[cfg(windows)]
-    let _ = std::process::Command::new("taskkill")
-        .args(["/PID", &srv.pid.to_string(), "/F"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
-    #[cfg(not(windows))]
-    let _ = std::process::Command::new("kill")
-        .arg(srv.pid.to_string())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+    // No matem un PID que ja no és el nostre (PID reciclat).
+    if is_our_server(srv.pid) {
+        #[cfg(windows)]
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &srv.pid.to_string(), "/F"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        #[cfg(not(windows))]
+        let _ = std::process::Command::new("kill")
+            .arg(srv.pid.to_string())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
     save_servers(&list);
     true
 }

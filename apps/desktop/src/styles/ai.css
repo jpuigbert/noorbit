@@ -220,22 +220,22 @@
 }
 .proc-live {
   background: rgba(34, 197, 94, 0.18);
-  color: #4ade80;
+  color: var(--success);
 }
 .proc-think {
   background: rgba(234, 179, 8, 0.18);
-  color: #facc15;
+  color: var(--warning);
 }
 .proc-done {
-  background: rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--text-0) 10%, transparent);
   color: var(--text-1);
 }
 .proc-err {
   background: rgba(248, 81, 73, 0.2);
-  color: #f87171;
+  color: var(--error);
 }
 .proc-idle {
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--text-0) 8%, transparent);
   color: var(--text-2);
 }
 .proc-meta {
@@ -275,7 +275,7 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   margin-bottom: 8px;
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--text-0) 3%, transparent);
 }
 .proc-sec > summary {
   cursor: pointer;
@@ -328,12 +328,12 @@
   font-style: italic;
 }
 .proc-block-err {
-  color: #f87171;
+  color: var(--error);
 }
 .proc-error {
-  border: 1px solid rgba(248, 81, 73, 0.45);
-  background: rgba(248, 81, 73, 0.1);
-  color: #fca5a5;
+  border: 1px solid color-mix(in srgb, var(--error) 45%, transparent);
+  background: color-mix(in srgb, var(--error) 10%, transparent);
+  color: var(--error);
   border-radius: 6px;
   padding: 8px;
   margin-bottom: 8px;
@@ -469,4 +469,25 @@
 }
 .prov-row.off .prov-main {
   opacity: 0.55;
+}
+
+/* ---- Carpetes del motor local i dels models GGUF (disc extern) ---- */
+.mm-llama-dirs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+.mm-llama-dirs .mm-custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.mm-llama-dirs input {
+  flex: 1;
+  min-width: 180px;
+  font-size: 11.5px;
 }

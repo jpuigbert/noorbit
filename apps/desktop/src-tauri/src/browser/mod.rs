@@ -502,6 +502,15 @@ async fn eval_json(win: &WebviewWindow, js: String, timeout: Duration) -> Result
     }
 }
 
+/// Executa un script al navegador intern i en retorna el resultat (JSON).
+/// És la versió PÚBLICA de `eval_json`: permet que altres mòduls (com el
+/// «Pujar» de temes) facin coses al navegador: llegir el nonce de WordPress,
+/// pujar un fitxer amb la sessió de l'usuari, etc.
+pub async fn run_js(app: &AppHandle, js: &str, timeout: Duration) -> Result<String> {
+    let win = window(app).ok_or_else(|| anyhow!("El navegador intern no està obert"))?;
+    eval_json(&win, js.to_string(), timeout).await
+}
+
 /// El mateix, però amb REINTENTS: moltes pàgines (xats, SPA)Needs uns ms
 /// després de la navegació per pintar el DOM. En lloc de fallar al primer
 /// intent, tornem a injectar l'script fins que respongui o es vagi el temps.

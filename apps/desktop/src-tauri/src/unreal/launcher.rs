@@ -10,7 +10,7 @@ use tokio::net::TcpStream;
 use tokio::process::Command;
 use tokio::time::sleep;
 
-const DEFAULT_RC_PORT: u16 = 30010;
+const DEFAULT_RC_PORT: u16 = crate::ports::UNREAL_RC_PORT;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LaunchReport {
@@ -208,6 +208,16 @@ pub async fn launch_editor(
     for arg in extra_args {
         cmd.arg(arg);
     }
+
+    // El port CONFIGURAT (Configuració ▸ Unreal) s'injecta per entorn: el
+    // bootstrap.py el llegeix i obri AQUELL port. Abans el Python sempre
+    // obria el 30010 i la configuració era ignorada.
+    let rc_port = crate::config::AppConfig::load()
+        .ok()
+        .map(|c| c.unreal.rc_port)
+        .filter(|p| *p != 0)
+        .unwrap_or(crate::ports::UNREAL_RC_PORT);
+    cmd.env(crate::ports::ENV_UNREAL_PORT, rc_port.to_string());
 
     // Habilita Remote Control API i Python Editor Script (per si el .uproject
     // no ha pogut ser parchejat; l'un no treu l'altre).

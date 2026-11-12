@@ -18,6 +18,7 @@ import StatusBar from "./components/StatusBar";
 import Sidebar from "./components/Sidebar";
 import EditorPane from "./components/Editor/EditorPane";
 import RightPanel from "./components/RightPanel/RightPanel";
+import PanelErrorBoundary from "./components/PanelErrorBoundary";
 // Panells GRANS AMB LAZY: el seu codi és un chunk apart que només baixa quan
 // el flag que els obre és actiu per primer cop (arrencada més ràpida i poc
 // JS per analitzar). Els diàlegs mitjans (⌘P, quick open…) queden estàtics:
@@ -34,6 +35,8 @@ const OnboardingModalComponent = lazy(() => import("./components/OnboardingModal
 /// Detecció de l'entorn a l'obrir: si falta Ollama/Blender, pregunta si els
 /// vols instal·lar (instal·lació automàtica nativa del sistema operatiu).
 import SetupCheckModal from "./components/SetupCheckModal";
+import HuggingBayModal from "./components/AI/HuggingBayModal";
+import PublishThemeModal from "./components/Publish/PublishThemeModal";
 import ComputerConfirmModal from "./components/Computer/ComputerConfirmModal";
 import CommandPalette from "./components/CommandPalette";
 import QuickOpen from "./components/QuickOpen";
@@ -42,6 +45,7 @@ import TerminalPanel from "./components/Terminal/TerminalPanel";
 import ReviewPill from "./components/Editor/ReviewPill";
 import { markForPath, resolveMark } from "./stores/editReviewStore";
 import StartupScreen from "./components/StartupScreen";
+import Toaster from "./components/Toaster";
 /// Autodesat (com l'«Auto Save» de VS Code): desa el fitxer obert poc
 /// després de l'últim canvi i també quan la finestra perd el focus.
 function useAutosave() {
@@ -105,15 +109,24 @@ export default function App() {
   // resta de finestres): preventDefault + modal propi. Sense plugin extern.
   useEffect(() => {
     let un: (() => void) | undefined;
+    let disposed = false;
     void getCurrentWebviewWindow()
       .onCloseRequested((e) => {
         e.preventDefault();
         setAskClose(true);
       })
       .then((u) => {
-        un = u;
-      });
-    return () => un?.();
+        // Amb StrictMode el cleanup pot córrer ABANS que la promesa resolgui:
+        // sense aquest guard, l'unlisten es perdia i el handler quedava viu
+        // per sempre (duplicat a cada remuntatge).
+        if (disposed) u();
+        else un = u;
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      un?.();
+    };
   }, []);
 
   const closeNow = () => {
@@ -155,10 +168,26 @@ export default function App() {
     // aboca els passos de l'agent (i els seus fallos) perquè l'usuari puga
     // veure QUÈ ha fallat quan una comanda o generació no ix bé.
     installConsoleCapture();
-    void listen<{ label: string; detail: string; ok: boolean }>("agent://progress", (e) => {
-      const { label, detail, ok } = e.payload;
-      logBackend(label, detail, ok ? "info" : "error");
-    });
+    // Escoltador global dels passos de l'agent. Es registra amb cleanup
+    // (StrictMode munta dues vegades: sense cleanup, cada pas es registra
+    // dos cops) i amb catch (un registre fallat no pot deixar el rebuig
+    // sense gestionar).
+    {
+      let un: (() => void) | undefined;
+      let disposed = false;
+      void listen<{ label: string; detail: string; ok: boolean }>("agent://progress", (e) => {
+        const { label, detail, ok } = e.payload ?? { label: "", detail: "", ok: true };
+        logBackend(label, detail, ok ? "info" : "error");
+      })
+        .then((u) => {
+          if (disposed) u();
+          else un = u;
+        })
+        .catch(() => undefined);
+      // La finestra es manté oberta tota la vida de l'app: el cleanup és
+      // per remuntatges (StrictMode/HMR), no per tancament.
+      window.addEventListener("beforeunload", () => un?.(), { once: true });
+    }
     if (!useWorkspaceStore.getState().root) {
       useUIStore.getState().setShowStartup(true);
     }
@@ -315,13 +344,26 @@ export default function App() {
       <div className="app-body">
         {sidebarOpen && <Sidebar />}
         <div className="app-main">
-          <EditorPane />
+          {/* Cada zona gran va amb la seva pròpia xarxa de seguretat: si un
+              panell peta, només mor AQUELL panell — la resta de NoOrbit
+              (xat, editor, terminal) continua funcionant. */}
+          <PanelErrorBoundary label="Error a l'editor">
+            <EditorPane />
+          </PanelErrorBoundary>
           <ReviewPill />
         </div>
-        {rightPanelOpen && <RightPanel />}
+        {rightPanelOpen && (
+          <PanelErrorBoundary label="Error al panell lateral">
+            <RightPanel />
+          </PanelErrorBoundary>
+        )}
       </div>
-      <TerminalPanel />
+      <PanelErrorBoundary label="Error al terminal">
+        <TerminalPanel />
+      </PanelErrorBoundary>
       <StatusBar />
+      {/* Avisos visibles: cap operació important pot fallar en silenci. */}
+      <Toaster />
 
       {/* Modals HQ: només es MUNTEN quan el seu flag és actiu (ja no winyen
           cap byte del seu codi a l'arrencada, i el chunk baixa amb un clic). */}
@@ -335,6 +377,10 @@ export default function App() {
         {useUIStore((s) => s.showNewProject) && <NewProjectModal />}
         {useUIStore((s) => s.showRemoteServer) && <RemoteServerModal />}
         {useUIStore((s) => s.showOnboarding) && <OnboardingModalComponent />}
+        {/* Menú «Hugging Bay»: cercar/baixar models GGUF del mirror. */}
+        {useUIStore((s) => s.showHuggingBay) && <HuggingBayModal />}
+        {/* Menú «Pujar»: publicar temes WordPress al marketplace. */}
+        {useUIStore((s) => s.showPublishTheme) && <PublishThemeModal />}
       </Suspense>
       <ComputerConfirmModal />
       {/* Detecció d'entorn a l'obrir: es mostra SOL si falta algun component

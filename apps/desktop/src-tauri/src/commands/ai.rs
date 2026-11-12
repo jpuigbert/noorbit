@@ -531,7 +531,15 @@ async fn chat_with_tools(
             // «@file: x.py» i «RUN|python3 x.py» en el mateix torn, el fitxer
             // ha d'existir JA al disc quan s'executa (si no: «No such file»).
             // La materialització del frontend reescriurà el definitiu després.
-            let pre = runtools::write_announced_files(&app, &text);
+            // L'escriptura al disc és I/O bloquejant: es fa en un fil a part
+            // perquè el runtime async (streaming del xat) no quedi aturat.
+            let app_pre = app.clone();
+            let text_pre = text.clone();
+            let pre = tauri::async_runtime::spawn_blocking(move || {
+                runtools::write_announced_files(&app_pre, &text_pre)
+            })
+            .await
+            .unwrap_or_default();
             if !pre.is_empty() {
                 report.push_str(&format!(
                     "RUN|RESULTAT| fitxers escrits al projecte abans d'executar: {}\n",
@@ -542,7 +550,13 @@ async fn chat_with_tools(
             // abans d'executar perquè «RUN|python3 x.py» vega el codi ja
             // modificat. L'informe torna al model perquè corregeixi els CERCA
             // que no han coincidit.
-            let edits = runtools::apply_edit_blocks(&app, &text);
+            let app_ed = app.clone();
+            let text_ed = text.clone();
+            let edits = tauri::async_runtime::spawn_blocking(move || {
+                runtools::apply_edit_blocks(&app_ed, &text_ed)
+            })
+            .await
+            .unwrap_or_default();
             if !edits.is_empty() {
                 report.push_str(&format!(
                     "RUN|RESULTAT| edicions aplicades: {}\n",
@@ -895,16 +909,67 @@ pub struct LlamaCppStatus {
     pub models: Vec<(String, u64)>,
     /// Servidors locals en marxa.
     pub running: Vec<crate::ai::llamacpp::LocalServer>,
+    /// Carpeta on es desen els models GGUF (pot ser un disc extern).
+    pub models_dir: String,
+    /// Carpeta on viu el motor local (pot ser un disc extern).
+    pub engine_dir: String,
+}
+
+/// TRIA les carpetes del motor local i dels models GGUF: permet posar-los
+/// en un DISC EXTERN (USB, HDD) i treballar des d'allà. Una carpeta buida
+/// torna al comportament per defecte (dades de NoOrbit).
+#[command]
+pub async fn llamacpp_set_dirs(
+    models_dir: Option<String>,
+    engine_dir: Option<String>,
+) -> Result<String, String> {
+    let mut cfg = crate::config::AppConfig::load().map_err(|e| e.to_string())?;
+    if let Some(d) = models_dir {
+        let d = d.trim().to_string();
+        if !d.is_empty() && std::fs::create_dir_all(&d).is_err() {
+            return Err(format!("No puc crear la carpeta «{}».", d));
+        }
+        cfg.ai.gguf_dir = d;
+    }
+    if let Some(d) = engine_dir {
+        let d = d.trim().to_string();
+        if !d.is_empty() && std::fs::create_dir_all(&d).is_err() {
+            return Err(format!("No puc crear la carpeta «{}».", d));
+        }
+        cfg.ai.llamacpp_dir = d;
+    }
+    cfg.save().map_err(|e| e.to_string())?;
+    let mut msg = String::new();
+    if cfg.ai.gguf_dir.is_empty() {
+        msg.push_str("Els models GGUF es desen a les dades de NoOrbit.");
+    } else {
+        msg.push_str(&format!("Models GGUF: {}. ", cfg.ai.gguf_dir));
+    }
+    if cfg.ai.llamacpp_dir.is_empty() {
+        msg.push_str("Motor local a les dades de NoOrbit.");
+    } else {
+        msg.push_str(&format!("Motor local: {}.", cfg.ai.llamacpp_dir));
+    }
+    Ok(msg)
 }
 
 #[command]
 pub async fn llamacpp_status() -> Result<LlamaCppStatus, String> {
     let bin = crate::ai::llamacpp::binary();
+    let cfg = crate::config::AppConfig::load().ok();
     Ok(LlamaCppStatus {
         installed: bin.is_some(),
         binary: bin.map(|p| p.to_string_lossy().to_string()),
         models: crate::ai::llamacpp::downloaded_models(),
         running: crate::ai::llamacpp::servers(),
+        models_dir: cfg
+            .as_ref()
+            .map(|c| c.ai.gguf_dir.clone())
+            .unwrap_or_default(),
+        engine_dir: cfg
+            .as_ref()
+            .map(|c| c.ai.llamacpp_dir.clone())
+            .unwrap_or_default(),
     })
 }
 
@@ -930,6 +995,47 @@ pub async fn llamacpp_install(
     ))
 }
 
+/// Registra un servei local (llama.cpp) com a PROVEÏDOR del xat, de manera
+/// que l'usuari el pugui triar com qualsevol altre IA (sense cap clau: és
+/// local).
+fn register_local_provider(
+    state: &AppState,
+    id: &str,
+    name: &str,
+    base: &str,
+    model: &str,
+) -> Result<(), String> {
+    let mut api = state.api_manager.lock().map_err(|e| e.to_string())?;
+    let item = crate::api::AiProvider {
+        id: id.to_string(),
+        name: name.to_string(),
+        base_url: base.to_string(),
+        model: model.to_string(),
+        kind: "openai".to_string(),
+        auth: crate::api::AuthScheme::None,
+        header_name: String::new(),
+        token: String::new(),
+        enabled: true,
+    };
+    // Si ja existia (servidor reiniciat), l'actualitzem; si no, l'afegim.
+    if api.list().iter().any(|p| p.id == id) {
+        let _ = api.update(
+            id,
+            Some(item.name.clone()),
+            Some(item.base_url.clone()),
+            Some(item.model.clone()),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+    } else {
+        let _ = api.add(item);
+    }
+    Ok(())
+}
+
 /// Engega un model GGUF amb llama.cpp (sense Ollama) i registra el servei
 /// local com a proveïdor, perquè el xat el pugui fer servir.
 #[command]
@@ -947,34 +1053,8 @@ pub async fn llamacpp_start(
         .map_err(|e| e.to_string())?;
 
     // Registrem el servei local com a proveïdor (sense clau: és local).
-    let mut api = state.api_manager.lock().map_err(|e| e.to_string())?;
-    let item = crate::api::AiProvider {
-        id: id.clone(),
-        name: name.clone(),
-        base_url: base.clone(),
-        model: name.rsplit("· ").next().unwrap_or("").trim().to_string(),
-        kind: "openai".to_string(),
-        auth: crate::api::AuthScheme::None,
-        header_name: String::new(),
-        token: String::new(),
-        enabled: true,
-    };
-    // Si ja existia (servidor reiniciat), l'actualitzem; si no, l'afegim.
-    if api.list().iter().any(|p| p.id == id) {
-        let _ = api.update(
-            &id,
-            Some(item.name.clone()),
-            Some(item.base_url.clone()),
-            Some(item.model.clone()),
-            None,
-            None,
-            None,
-            None,
-            None,
-        );
-    } else {
-        let _ = api.add(item);
-    }
+    let model = name.rsplit("· ").next().unwrap_or("").trim().to_string();
+    register_local_provider(&state, &id, &name, &base, &model)?;
     Ok(format!("{} · {}", name, base))
 }
 
@@ -1006,17 +1086,122 @@ pub async fn hf_bay_search(
         .collect())
 }
 
+/// PÀGINA de resultats amb ordenació i cursor: és el que permet el «menú
+/// Hugging Bay» amb els 5 més descarregats de cada pàgina i la paginació.
+#[derive(Debug, Clone, Serialize)]
+pub struct BayPage {
+    pub models: Vec<crate::ai::hf_bay::BayModel>,
+    /// Cursor de la pàgina següent (buit = no hi ha més).
+    pub next_cursor: Option<String>,
+    /// Total de models que hi ha al mirror.
+    pub total: u64,
+}
+
+#[command]
+pub async fn hf_bay_page(
+    state: State<'_, AppState>,
+    query: Option<String>,
+    sort: Option<String>,
+    cursor: Option<String>,
+    limit: Option<usize>,
+) -> Result<BayPage, String> {
+    let http = state.ai_manager.http_client();
+    let (models, next, total) = crate::ai::hf_bay::search_page(
+        &http,
+        query.as_deref().unwrap_or(""),
+        sort.as_deref().unwrap_or("best"),
+        cursor.as_deref(),
+        limit.unwrap_or(5),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(BayPage {
+        models,
+        next_cursor: next,
+        total,
+    })
+}
+
 /// Detalls d'un model de Hugging Bay: fitxer recomanat, mida, SHA-256 i
-/// l'enllaç de descàrrega signat.
+/// l'enllaç de descàrrega signat. Amb `quant` es demana una quantització
+/// concreta (p. ex. «Q4_K_M»).
 #[command]
 pub async fn hf_bay_details(
     state: State<'_, AppState>,
     id: String,
+    quant: Option<String>,
 ) -> Result<crate::ai::hf_bay::BayDetails, String> {
     let http = state.ai_manager.http_client();
-    crate::ai::hf_bay::details(&http, &id)
+    crate::ai::hf_bay::details(&http, &id, quant.as_deref())
         .await
         .map_err(|e| e.to_string())
+}
+
+/// DESCARREGA un model de Hugging Bay i l'INSTAL·LA **NATIVAMENT**: es
+/// guarda el GGUF i s'engega amb llama.cpp (el motor de GGUF), de manera que
+/// el model es pot fer servir al xat **sense tenir Ollama instal·lat**.
+///
+/// Si la llama.cpp no hi és, NoOrbit la instal·la (binaris oficials) i
+/// després engega el model. El servei es registra com a proveïdor local.
+#[command]
+pub async fn hf_bay_install_native(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    id: String,
+    quant: Option<String>,
+) -> Result<BayDownloadResult, String> {
+    use tauri::Emitter;
+    let http = state.ai_manager.http_client();
+    let avisa = |m: &str| {
+        let _ = app.emit(
+            "ai://pull",
+            serde_json::json!({ "model": id.clone(), "message": m }),
+        );
+    };
+    avisa("descarregant el model de Hugging Bay…");
+    let (det, path) = crate::ai::hf_bay::fetch_gguf(&http, Some(&app), &id, quant.as_deref())
+        .await
+        .map_err(|e| e.to_string())?;
+    let nom = crate::ai::hf_bay::ollama_name(&det.model.repo);
+
+    // El motor local (llama.cpp): si no hi és, l'instal·lem nosaltres.
+    if !crate::ai::llamacpp::installed() {
+        avisa("instal·lant el motor local (llama.cpp)…");
+        crate::ai::llamacpp::install_from_github(&http, Some(&app))
+            .await
+            .map_err(|e| format!("No s'ha pogut instal·lar el motor local: {}", e))?;
+    }
+
+    // Engega el model i registra'l com a proveïdor del xat.
+    avisa(&format!("engegant «{}»…", nom));
+    let port = crate::ai::llamacpp::DEFAULT_PORT;
+    let (pid, name, base) = crate::ai::llamacpp::start(
+        &http,
+        &path.to_string_lossy(),
+        port,
+        4096,
+    )
+    .await
+    .map_err(|e| {
+        format!(
+            "He baixat «{}» a {}, però no l'he pogut engegar: {}",
+            nom,
+            path.to_string_lossy(),
+            e
+        )
+    })?;
+    let model = name.rsplit("· ").next().unwrap_or("").trim().to_string();
+    register_local_provider(&state, &pid, &name, &base, &model)?;
+
+    Ok(BayDownloadResult {
+        ok: true,
+        model: Some(nom.clone()),
+        message: format!(
+            "«{}» instal·lat NATIVAMENT (llama.cpp, sense Ollama) i engegat a {}. \
+             Tria'l al selector de proveïdor del xat i ja hi podràs parlar.",
+            nom, base
+        ),
+    })
 }
 
 /// DESCARREGA un model de Hugging Bay (amb progrés) i el registra a Ollama
@@ -1038,10 +1223,11 @@ pub async fn hf_bay_download(
     state: State<'_, AppState>,
     app: AppHandle,
     id: String,
+    quant: Option<String>,
 ) -> Result<BayDownloadResult, String> {
     use tauri::Emitter;
     let http = state.ai_manager.http_client();
-    let det = crate::ai::hf_bay::details(&http, &id)
+    let det = crate::ai::hf_bay::details(&http, &id, quant.as_deref())
         .await
         .map_err(|e| e.to_string())?;
     let file = det
@@ -1066,9 +1252,16 @@ pub async fn hf_bay_download(
         crate::ai::hf_bay::ollama_name(&det.model.repo),
         file.path.rsplit('/').next().unwrap_or("model.gguf")
     );
-    let path = crate::ai::hf_bay::download_file(&http, Some(&app), &id, &url, &dest_name)
-        .await
-        .map_err(|e| e.to_string())?;
+    let path = crate::ai::hf_bay::download_file(
+        &http,
+        Some(&app),
+        &id,
+        &url,
+        &dest_name,
+        file.sha256.as_deref(),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
 
     let nom = crate::ai::hf_bay::ollama_name(&det.model.repo);
     let _ = app.emit(
@@ -1078,24 +1271,24 @@ pub async fn hf_bay_download(
             "message": format!("registrant «{}» a Ollama…", nom)
         }),
     );
-    // SENSE OLLAMA: el model es baixa i es conserva, però no es pot executar
-    // (Ollama és el motor). NoOrbit segueix fent la resta de coses.
+    // SENSE OLLAMA: el model es baixa i es conserva, i el motor NATIU
+    // (llama.cpp) el pot fer servir igual. No cal instal·lar Ollama per usar
+    // un model de Hugging Bay: el menú «Hugging Bay» ofereix les dues vies.
     if crate::ai::ollama_binary().is_none() {
         let _ = app.emit(
             "ai://pull",
             serde_json::json!({
                 "model": nom.clone(),
-                "message": format!("«{}» baixat (cal Ollama per usar-lo)", nom)
+                "message": format!("«{}» baixat (el motor local el pot fer servir)", nom)
             }),
         );
         return Ok(BayDownloadResult {
             ok: false,
             model: None,
             message: format!(
-                "He baixat «{}» a {}. Per fer-lo servir necessites Ollama: prem \
-                 «Instal·la Ollama» a la barra d'estat (o al gestor de models) i el \
-                 podràs instal·lar sense perdre res. La resta de NoOrbit (editor, \
-                 terminal, Blender, imatges) ja funciona.",
+                "He baixat «{}» a {}. No tens Ollama instal·lat, però el model és \
+                 LLIBRE: prem «Instal·la nativament» (motor local llama.cpp) per \
+                 poder-lo fer servir al xat sense instal·lar res més.",
                 nom,
                 path.to_string_lossy()
             ),
@@ -1572,6 +1765,40 @@ const CPU_MODEL_DEFAULT_URL: &str =
     "https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors";
 const CPU_MODEL_DEFAULT_NAME: &str = "sd-v1-5-pruned-emaonly.safetensors";
 
+/// Valida un nom de fitxer de model: un únic component de ruta (sense
+/// separadors, sense `..`) i amb extensió de model coneguda.
+fn sanitize_model_file_name(name: &str) -> Option<String> {
+    let n = name.trim();
+    if n.is_empty()
+        || n == "."
+        || n == ".."
+        || n.contains('/')
+        || n.contains('\\')
+        || n.contains('\0')
+    {
+        return None;
+    }
+    let lower = n.to_lowercase();
+    const OK: &[&str] = &[
+        "gguf", "safetensors", "bin", "pt", "pth", "ckpt", "onnx", "model",
+    ];
+    let ext = lower.rsplit('.').next().unwrap_or("");
+    if !OK.contains(&ext) {
+        return None;
+    }
+    Some(n.to_string())
+}
+
+/// Valida la URL de descàrrega: només http(s) (mai `file://` ni FTP) i sense
+/// credencials embarcades.
+fn sanitize_download_url(url: &str) -> String {
+    let u = url.trim();
+    if u.starts_with("https://") || u.starts_with("http://") {
+        return u.to_string();
+    }
+    CPU_MODEL_DEFAULT_URL.to_string()
+}
+
 /// Baixa un model d'imatge (.gguf/.safetensors) a la carpeta del rodet de CPU
 /// amb progrés a «ai://sd-model». Per defecte, el SD 1.5 llest per CPU (≈2 GB).
 #[command]
@@ -1586,6 +1813,12 @@ pub async fn image_cpu_download_model(
     let name = name
         .filter(|n| !n.trim().is_empty())
         .unwrap_or_else(|| CPU_MODEL_DEFAULT_NAME.to_string());
+    // El nom ve de l'exterior: ha de ser un únic component de ruta (sinó
+    // `../../` escriuria fora de la carpeta de models) i una extensió de
+    // model coneguda (evita que es desi un executable).
+    let name = sanitize_model_file_name(&name)
+        .ok_or_else(|| "Nom de model no vàlid.".to_string())?;
+    let url = sanitize_download_url(&url);
     let dir = crate::imgen::sd_models_dir().map_err(|e| e.to_string())?;
     let final_path = dir.join(&name);
     if final_path.exists() {
@@ -1940,5 +2173,44 @@ mod nudge_tests {
             "fes el codi del projecte",
             "Millora de l'estructura del README.md: això seria el document."
         ));
+    }
+}
+
+#[cfg(test)]
+mod proves_descarga {
+    use super::{sanitize_download_url, sanitize_model_file_name};
+
+    /// El nom del model és un únic component de ruta: sense això, un
+    /// «../../evil.gguf» escriuria fora de la carpeta de models.
+    #[test]
+    fn el_nom_del_model_es_saneja() {
+        assert_eq!(
+            sanitize_model_file_name("model.gguf").as_deref(),
+            Some("model.gguf")
+        );
+        assert_eq!(
+            sanitize_model_file_name("sd-v1-5-pruned-emaonly.safetensors").as_deref(),
+            Some("sd-v1-5-pruned-emaonly.safetensors")
+        );
+        // Els perillosos es rebutgen.
+        assert!(sanitize_model_file_name("../evil.gguf").is_none());
+        assert!(sanitize_model_file_name("/etc/passwd").is_none());
+        assert!(sanitize_model_file_name("..").is_none());
+        // Extensions que no són de model: rebutjades (no es desi un executable).
+        assert!(sanitize_model_file_name("model.sh").is_none());
+        assert!(sanitize_model_file_name("model.exe").is_none());
+    }
+
+    /// Només s'accepten URL http(s): mai `file://` ni FTP.
+    #[test]
+    fn la_url_de_descarga_es_saneja() {
+        assert_eq!(
+            sanitize_download_url("https://exemple.com/model.gguf"),
+            "https://exemple.com/model.gguf"
+        );
+        assert_eq!(
+            sanitize_download_url("file:///etc/passwd"),
+            super::CPU_MODEL_DEFAULT_URL
+        );
     }
 }

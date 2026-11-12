@@ -11,12 +11,38 @@ fn skills_dir(state: &State<'_, AppState>) -> Result<PathBuf, String> {
     Ok(guard.skills_dir().to_path_buf())
 }
 
+/// Valida un nom de skill derivat d'entrada externa (repo, URL, zip): ha de ser
+/// un únic component de ruta. Sense això, un nom com `..` fa que
+/// `remove_dir_all(dir.join(name))` esborri la carpeta de dades de NoOrbit.
+fn safe_name(name: &str, fallback: &str) -> String {
+    let n = name.trim();
+    if !n.is_empty()
+        && n != "."
+        && n != ".."
+        && !n.contains('/')
+        && !n.contains('\\')
+        && !n.contains('\0')
+    {
+        n.to_string()
+    } else {
+        fallback.to_string()
+    }
+}
+
 fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), String> {
     std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
     for entry in std::fs::read_dir(from).map_err(|e| e.to_string())?.flatten() {
         let path = entry.path();
         let dest = to.join(entry.file_name());
-        if path.is_dir() {
+        // file_type NO segueix symlinks: un enllaç a un directori es copia com
+        // a enllaç, no com a contingut (evita bucles infinits amb cicles).
+        let is_real_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        // Els SYMLINKS es salten: el seu contingut podseria venir de fora del
+        // repositori (i copiant-lo es duria el que altres enllocs no tenen).
+        if entry.file_type().map(|t| t.is_symlink()).unwrap_or(false) {
+            continue;
+        }
+        if is_real_dir {
             copy_dir_recursive(&path, &dest)?;
         } else {
             std::fs::copy(&path, &dest).map_err(|e| e.to_string())?;
@@ -54,17 +80,26 @@ pub async fn skills_install_github(
 
     let url = format!("https://github.com/{}.git", owner.trim_matches('/'));
     let tmp = std::env::temp_dir().join(format!("noorbit-skill-{}", uuid::Uuid::new_v4()));
-    let mut cmd = std::process::Command::new("git");
-    cmd.args(["clone", "--depth", "1"]);
-    if let Some(b) = &branch {
-        cmd.args(["--branch", b]);
-    }
-    let status = cmd
-        .arg(&url)
-        .arg(&tmp)
-        .status()
-        .map_err(|e| format!("No s'ha pogut executar git: {}", e))?;
+    // El clonatge pot trigar MINUTS (xarxa): es fa en un fil a part perquè
+    // el runtime async no quedi congelat (i la interfície, bloquejada).
+    let url_clone = url.clone();
+    let tmp_clone = tmp.clone();
+    let cloned = tauri::async_runtime::spawn_blocking(move || {
+        let mut cmd = std::process::Command::new("git");
+        cmd.args(["clone", "--depth", "1"]);
+        if let Some(b) = &branch {
+            cmd.args(["--branch", b]);
+        }
+        cmd.arg(&url_clone)
+            .arg(&tmp_clone)
+            .status()
+            .map_err(|e| format!("No s'ha pogut executar git: {}", e))
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let status = cloned.map_err(|e| e)?;
     if !status.success() {
+        let _ = std::fs::remove_dir_all(&tmp);
         return Err(format!("git clone ha fallat per {}", url));
     }
 
@@ -74,12 +109,14 @@ pub async fn skills_install_github(
         return Err(format!("La carpeta {} no existeix al repositori", name_sub));
     }
 
-    let skill_name = name_sub
-        .rsplit('/')
-        .next()
-        .filter(|s| !s.is_empty())
-        .unwrap_or(&owner)
-        .to_string();
+    let skill_name = safe_name(
+        name_sub
+            .rsplit('/')
+            .next()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&owner),
+        &owner,
+    );
     let dest = dir.join(&skill_name);
     let _ = std::fs::remove_dir_all(&dest);
     copy_dir_recursive(&src, &dest)?;
@@ -100,6 +137,15 @@ pub async fn skills_install_github(
     }
 }
 
+/// Mida màxima d'un SKILL.md descarregat (2 MB és amplíssim per a un
+/// document de skill): evita que una URL mal-intencionada omplui el disc.
+const MAX_SKILL_BYTES: u64 = 2 * 1024 * 1024;
+
+/// Límits per als zips de skills: 20 MB comprimits i 50 MB descomprimits
+/// (evita que un zip enorme — o una «bomba zip» — ompli el disc).
+const MAX_SKILL_ZIP_BYTES: u64 = 20 * 1024 * 1024;
+const MAX_SKILL_EXTRACT_BYTES: u64 = 50 * 1024 * 1024;
+
 /// Instal·la una skill des d una URL directa a un fitxer .md.
 #[command]
 pub async fn skills_install_url(
@@ -108,6 +154,14 @@ pub async fn skills_install_url(
 ) -> Result<Skill, String> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err("La URL ha de començar per http(s)://".into());
+    }
+    // Fora de localhost, només HTTPS: el contingut d'una skill és codi que
+    // l'agent pot arribar a executar.
+    if url.starts_with("http://")
+        && !url.contains("127.0.0.1")
+        && !url.contains("localhost")
+    {
+        return Err("Cal una URL https:// (o http:// a localhost).".into());
     }
     let dir = skills_dir(&state)?;
     let client = reqwest::Client::builder()
@@ -118,15 +172,38 @@ pub async fn skills_install_url(
     if !resp.status().is_success() {
         return Err(format!("Error HTTP {}", resp.status()));
     }
-    let body = resp.text().await.map_err(|e| e.to_string())?;
+    // Límit de mida: es comprova el Content-Length i, si no hi ha, es llegeix
+    // com a molt fins al límit.
+    if let Some(len) = resp.content_length() {
+        if len > MAX_SKILL_BYTES {
+            return Err(format!(
+                "El fitxer és massa gran ({} MB; el màxim és {} MB)",
+                len / 1_000_000,
+                MAX_SKILL_BYTES / 1_000_000
+            ));
+        }
+    }
+    let mut body = Vec::new();
+    let mut stream = resp.bytes_stream();
+    use futures::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| e.to_string())?;
+        if body.len() as u64 + chunk.len() as u64 > MAX_SKILL_BYTES {
+            return Err("El fitxer és massa gran (màxim 2 MB).".into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    let body = String::from_utf8_lossy(&body).to_string();
 
-    let name = url
-        .rsplit('/')
-        .next()
-        .filter(|s| !s.is_empty())
-        .unwrap_or("skill.md")
-        .trim_end_matches(".md")
-        .to_string();
+    let name = safe_name(
+        url.rsplit('/')
+            .next()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("skill.md"),
+        "skill.md",
+    );
+    let name = name.trim_end_matches(".md").to_string();
+    let name = safe_name(&name, "skill");
     let dest_dir = dir.join(&name);
     std::fs::create_dir_all(&dest_dir).map_err(|e| e.to_string())?;
     std::fs::write(dest_dir.join("SKILL.md"), body).map_err(|e| e.to_string())?;
@@ -152,6 +229,14 @@ pub async fn skills_install_zip(
     let dir = skills_dir(&state)?;
 
     let bytes: Vec<u8> = if source.starts_with("http://") || source.starts_with("https://") {
+        // Mateixa regla que skills_install_url: fora de localhost, només
+        // HTTPS (el contingut d'una skill és codi que l'agent pot executar).
+        if source.starts_with("http://")
+            && !source.contains("127.0.0.1")
+            && !source.contains("localhost")
+        {
+            return Err("Cal una URL https:// (o http:// a localhost).".into());
+        }
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(120))
             .build()
@@ -160,23 +245,46 @@ pub async fn skills_install_zip(
         if !resp.status().is_success() {
             return Err(format!("Error HTTP {}", resp.status()));
         }
-        resp.bytes().await.map_err(|e| e.to_string())?.to_vec()
+        if let Some(len) = resp.content_length() {
+            if len > MAX_SKILL_ZIP_BYTES {
+                return Err(format!(
+                    "El zip és massa gran ({} MB; el màxim és {} MB)",
+                    len / 1_000_000,
+                    MAX_SKILL_ZIP_BYTES / 1_000_000
+                ));
+            }
+        }
+        // Es llegeix com a molt fins al límit (sense Content-Length també).
+        let mut body = Vec::new();
+        let mut stream = resp.bytes_stream();
+        use futures::StreamExt;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| e.to_string())?;
+            if body.len() as u64 + chunk.len() as u64 > MAX_SKILL_ZIP_BYTES {
+                return Err("El zip és massa gran (màxim 20 MB).".into());
+            }
+            body.extend_from_slice(&chunk);
+        }
+        body
     } else {
+        let meta = std::fs::metadata(&source)
+            .map_err(|e| format!("No trobat {}: {}", source, e))?;
+        if meta.len() > MAX_SKILL_ZIP_BYTES {
+            return Err("El zip és massa gran (màxim 20 MB).".into());
+        }
         std::fs::read(&source).map_err(|e| format!("No trobat {}: {}", source, e))?
     };
 
     let reader = std::io::Cursor::new(bytes);
     let mut archive = zip::ZipArchive::new(reader).map_err(|e| e.to_string())?;
-    let root_name = source
-        .rsplit('/')
-        .next()
-        .unwrap_or("skill")
-        .trim_end_matches(".zip")
-        .to_string();
+    let root_name = source.rsplit('/').next().unwrap_or("skill");
+    let root_name = root_name.trim_end_matches(".zip");
+    let root_name = safe_name(root_name, "skill");
     let dest = dir.join(&root_name);
     let _ = std::fs::remove_dir_all(&dest);
     std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
 
+    let mut total_extracted: u64 = 0;
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
         let rel = match file.enclosed_name() {
@@ -192,6 +300,11 @@ pub async fn skills_install_zip(
             }
             let mut buf = Vec::new();
             file.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+            total_extracted += buf.len() as u64;
+            if total_extracted > MAX_SKILL_EXTRACT_BYTES {
+                let _ = std::fs::remove_dir_all(&dest);
+                return Err("El zip descomprimit és massa gran (màxim 50 MB).".into());
+            }
             std::fs::write(&out, buf).map_err(|e| e.to_string())?;
         }
     }
@@ -321,11 +434,9 @@ pub async fn skills_uninstall(
     match target {
         Some(path) => {
             let p = Path::new(&path);
-            let skill_root = if p.file_name().map(|n| n == "SKILL.md").unwrap_or(false) {
-                p.parent().unwrap_or(p).to_path_buf()
-            } else {
-                p.parent().unwrap_or(p).to_path_buf()
-            };
+            // Tant si és un SKILL.md com un fitxer .md pla, la skill és la
+            // carpeta que el conté.
+            let skill_root = p.parent().unwrap_or(p).to_path_buf();
             // només dins del directori de skills de l'usuari
             if skill_root.starts_with(&dir) {
                 let _ = std::fs::remove_dir_all(&skill_root);
@@ -337,5 +448,26 @@ pub async fn skills_uninstall(
             Ok(())
         }
         None => Err(format!("Skill '{}' no trobada", id)),
+    }
+}
+
+#[cfg(test)]
+mod proves {
+    use super::safe_name;
+
+    /// Un nom de skill derivat de l'exterior ha de ser un únic component de
+    /// ruta: si no, `remove_dir_all(dir.join(name))` esborria la carpeta de
+    /// dades de NoOrbit (o qualsevol cosa del sistema).
+    #[test]
+    fn els_noms_de_skill_invalids_es_descarten() {
+        assert_eq!(safe_name("python", "fallback"), "python");
+        assert_eq!(safe_name("  meu-skill  ", "fallback"), "meu-skill");
+        // Els perillosos cauen al nom segur.
+        assert_eq!(safe_name("..", "fallback"), "fallback");
+        assert_eq!(safe_name(".", "fallback"), "fallback");
+        assert_eq!(safe_name("", "fallback"), "fallback");
+        assert_eq!(safe_name("../../etc", "fallback"), "fallback");
+        assert_eq!(safe_name("a/b", "fallback"), "fallback");
+        assert_eq!(safe_name("a\\b", "fallback"), "fallback");
     }
 }

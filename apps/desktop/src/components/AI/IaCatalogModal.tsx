@@ -49,7 +49,7 @@ export default function IaCatalogModal() {
 
   useEffect(() => {
     if (show) void load();
-  }, [show]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [show]);
 
   if (!show) return null;
 

@@ -5,6 +5,7 @@ import { DEFAULT_UNREAL_CONFIG } from "../core/unreal/client";
 import { useExpertStore } from "./expertStore";
 import { useTaskListStore } from "./taskListStore";
 import { useWorkspaceStore } from "./workspaceStore";
+import { useAIStore } from "./aiStore";
 import { lintOffline } from "../editor/diagnostics";
 import {
   armAllMarks,
@@ -15,146 +16,90 @@ import {
   noteLiveWriteStart,
 } from "./editReviewStore";
 
-export type Modality = "image" | "code" | "text" | "3d";
-/// Destí exterior on aplicar una ordre escrita al xat.
-export type ApplyTarget = "blender" | "unreal";
+// ── MÒDULS EXTRETS (abans tot era ací dins) ─────────────────────────────────
+// La lògica pura viu a ./agent/*: tipus, utilitats de xat, prompts, parsers
+// de fitxers i directrius. agentStore es queda amb l'estat i les accions
+// (invoke, stores). L'API pública es manté: els components importen els
+// mateixos símbols des d'ací.
+import type {
+  Modality,
+  ApplyTarget,
+  BackendInfo,
+  TimelineStep,
+  ChatMessage,
+  TokenUsage,
+  HistoryTurn,
+  ChatSession,
+  AgentResult,
+  EditBlock,
+} from "./agent/types";
+import {
+  extractChatImagePaths,
+  newId,
+  defaultShowThinking,
+  defaultCtx,
+  toHistory,
+  threadOf,
+  LS_KEY,
+  chatLsKey,
+  isOOM,
+  isCancelled,
+  isBodyCut,
+  isRetriableError,
+  toErrorText,
+  isSmallModel,
+} from "./agent/chatUtils";
+import {
+  SCAFFOLD_SYSTEM,
+  MANIFEST_SYSTEM,
+  FILE_SYSTEM,
+  PLATFORM_ANDROID,
+  PLATFORM_IOS,
+  COMPUTER_ORDER_RE,
+  AGENT_CREATION_SYSTEM,
+  COMPACT_SYSTEM,
+  MEMORY_SYSTEM,
+  CONTEXT_SYSTEM,
+  CONSOLIDATION_SYSTEM,
+} from "./agent/prompts";
+import {
+  parseManifest,
+  stripUiArtifacts,
+  parseFileBlocks,
+  parseDirDirectives,
+  extractFromProse,
+  extractRecommendedPaths,
+  parseDeleteDirectives,
+  extractSingleFileContent,
+  esBlocDeDocumentacio,
+  nomesDocumentacio,
+  extractTreePaths,
+  parseEditBlocks,
+  REC_EXT,
+} from "./agent/fileBlocks";
+import {
+  parseAgentDirectives,
+  stripAgentDirectiveLines,
+  parseUseDirectives,
+  parseTodoDirectives,
+} from "./agent/directives";
 
-export interface BackendInfo {
-  id: string;
-  name: string;
-  modality: string;
-  available: boolean;
-  detail: string | null;
-}
-
-export interface TimelineStep {
-  label: string;
-  detail: string;
-  ok: boolean;
-  at: number;
-}
-
-/// Un torn del xat: una bombolla d'usuari o de la IA. Les respostes de la IA
-/// poden portre el raonament (thinking), els pas de progrés i la durada.
-export interface ChatMessage {
-  role: "user" | "assistant";
-  text: string;
-  thinking?: string | null;
-  steps?: TimelineStep[];
-  elapsedMs?: number | null;
-  at: number;
-  error?: boolean;
-  /// Rutes absolutes d'imatges adjuntes o generades (es mostren al xat i
-  /// es poden copiar; els models amb visió d'Ollama les reben com a entrada).
-  images?: string[];
-  /// Comptabilització de tokens del torn (entrada/sortida i context ocupat).
-  /// Especialment útil amb les APIs de núvol: s'hi veu què costa cada
-  /// resposta i quant del context s'ha consumit.
-  usage?: TokenUsage;
-}
-
-/// Consum de tokens d'un torn, tal com l'informa el proveïdor.
-export interface TokenUsage {
-  provider: string;
-  model: string;
-  /// Tokens d'entrada (prompt + sistema + historial).
-  input: number;
-  /// Tokens generats.
-  output: number;
-  total: number;
-  /// Finestra de context del model (tokens).
-  contextWindow: number;
-  /// Percentatge del context ocupat pels tokens d'entrada.
-  contextUsedPct: number;
-}
-
-/// Extreu les rutes absolutes d'imatge (png/jpg/webp/gif/bmp) que apareixen
-/// en un text: serveix perquè la IA (i l'usuari) vega les imatges que el
-/// backend genera i desa a disc sense haver d'afegir cap format nou.
-export function extractChatImagePaths(text: string): string[] {
-  const re =
-    /(\/[^\s"'`()<>]+?\.(?:png|jpe?g|webp|gif|bmp))|(?:[A-Za-z]:\\E[^\s"'`<>]+?\.(?:png|jpe?g|webp|gif|bmp))/gi;
-  const found = text.match(re) ?? [];
-  return Array.from(new Set(found));
-}
-
-/// Torn de conversa que s'envia al backend perquè la IA (o un FORK) no perda
-/// el fil: rol i contingut tal com es van escriure.
-export interface HistoryTurn {
-  role: string;
-  content: string;
-}
-
-/// UN XAT COMPLE. Cada xat treballa per la seva banda: té la seva conversa,
-/// la seva cua, el seu proveïdor/model i la seva generació en curs (o cap).
-/// Així es pot donar una ordre a la IA i obrir un altre xat —amb la IA local
-/// o la remota configurada— per continuar el treball en paral·lel, i fer
-/// forks d'una conversa per provar un altre camí sense perdre l'original.
-export interface ChatSession {
-  /// Projecte (bucket) a l'ambit d'aquest xat: els historials d'altres
-  /// projectes no es mostren així aquí. Es posa al crear el xat i es
-  /// reescriu en canviar de projecte.
-  bucket: string;
-  id: string;
-  title: string;
-  createdAt: number;
-  /// Fork: xat d'origen i índex del missatge del qual va brollar.
-  parentId: string | null;
-  originIndex: number | null;
-  /// IA D'AQUEST XAT: null = la global (el proveïdor actiu a la configuració).
-  provider: string | null;
-  /// Model d'Ollama per a aquest xat: null = el model global triat.
-  model: string | null;
-  /// Especialista d'aquest xat ("" = agent de text directe).
-  expertId: string;
-  /// Plataforma objectiu quan es genera codi: «desktop» (per defecte, qualsevol
-  /// llenguatge d'escriptori), «android» (Kotlin + Compose natiu) o «ios»
-  /// (Swift + SwiftUI natiu). Afecta SCAFFOLD_SYSTEM i les pistes de context.
-  platform: "desktop" | "android" | "ios";
-  /// Cert si aquest xat adjunta el codi del projecte a cada missatge.
-  includeContext: boolean;
-  messages: ChatMessage[];
-  /// Missatges afegits mentre la IA treballa; s'executen en cua al acabar.
-  queue: string[];
-  running: boolean;
-  stopped: boolean;
-  startedAt: number | null;
-  lastElapsedMs: number | null;
-  /// Text rebut en directe (streaming) durant la generació d'aquest xat.
-  stream: string | null;
-  timeline: TimelineStep[];
-  lastResult: string | null;
-  lastThinking: string | null;
-  error: string | null;
-  contextInfo: string | null;
-}
+export type {
+  Modality,
+  ApplyTarget,
+  BackendInfo,
+  TimelineStep,
+  ChatMessage,
+  TokenUsage,
+  HistoryTurn,
+  ChatSession,
+} from "./agent/types";
+export { extractChatImagePaths } from "./agent/chatUtils";
+export { extractRecommendedPaths } from "./agent/fileBlocks";
 
 /// Xat heretat de les tasques que no venen d'un xat múltiple (autònomes,
 /// ajudants de Blender…). El backend l'anomena igual: DEFAULT_SESSION.
 const DEFAULT_ID = "main";
-
-function newId(): string {
-  return "x" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-}
-
-/// El raonament es mostra per defecte; l'usuari el pot amagar (preferència
-/// global, es recorda entre sessions).
-function defaultShowThinking(): boolean {
-  try {
-    return localStorage.getItem("noorbit.showThinking") !== "0";
-  } catch {
-    return true;
-  }
-}
-
-function defaultCtx(): boolean {
-  // PER NORMA: la IA de l'Agent treballa SEMPRE amb el codi real del projecte
-  // obert. Abans es podia desactivar i es recordava entre sessions; això feia
-  // que la IA responguera «a cegues» i no creara els fitxers correctes.
-  // Si un projecte és enorme, el context es retalla sol (buildContext) i els
-  // reintents per falta de memòria el redueixen encara més.
-  return true;
-}
 
 function blankSession(id: string, over: Partial<ChatSession> = {}): ChatSession {
   return {
@@ -185,44 +130,6 @@ function blankSession(id: string, over: Partial<ChatSession> = {}): ChatSession 
   };
 }
 
-/// La conversa precedent que acompanya cada missatge nou (per CONTINUAR el
-/// treball i perquè un FORK herete el fil). S'acota per no desbordar la
-/// memòria dels models: els últims torns, cadascun retallat. Finestra àmplia
-/// (16 torns) perquè el xat RECORDERA les consultes anteriors i responga en
-/// conseqüència; cada torn conserva 12.000 caràcters —abans 6.000— perquè un
-/// fitxer llegit en un torn anterior no arribe MEITAT tallat al següent; el
-/// backend encara compacta més si la RAM del model no abasta.
-function toHistory(messages: ChatMessage[]): HistoryTurn[] {
-  return messages
-    .filter((m) => m.text.trim() && !m.error)
-    .slice(-16)
-    .map((m) => ({ role: m.role, content: m.text.slice(0, 12000) }));
-}
-
-/// FIL MÍNIM per a l'últim recurs de memòria: abans el nivell 3 BORRAVA tota
-/// la conversa — canviaves de IA, pujava el context, entrava el recurs… i el
-/// model ja no sabia res: dir «continua» era inútil. Ara conserva els últims
-/// 6 torns retallats: poc RAM, però el model SAB què s'estava fent.
-function threadOf(history: HistoryTurn[]): HistoryTurn[] {
-  return history.slice(-6).map((t) => ({
-    role: t.role,
-    content: t.content.slice(0, 800),
-  }));
-}
-
-/// Persistència dels xats oberts (conversa inclosa) a localStorage.
-/// ABANS era un calaix global («noorbit.chats»): en obrir un projecte nou
-/// apareixien els xats antics. Ara cada projecte té el seu propi calaix
-/// («noorbit.chats::<arrel>») i, en canviar de projecte, es desen i es
-/// carreguen els xats D'AQUELL projecte.
-const LS_KEY = "noorbit.chats";
-
-/// Clau del projecte obert ara mateix; sense projecte es fa servir un calaix
-/// propi (ja no és el clau global antic, que era compartit per a TODO).
-function chatLsKey(root: string | null): string {
-  return root ? `${LS_KEY}::${root}` : `${LS_KEY}::__no_project__`;
-}
-
 /// Bucket (projecte) dels xats que tenim en memòria. Només es canvia amb
 /// «switchChatBucket» — mai a mà.
 let currentBucket: string | null = null;
@@ -236,661 +143,14 @@ async function fetchThinking(sid: string): Promise<string | null> {
   }
 }
 
-/// Gestió dels errors: els de memòria d'Ollama es tradueixen a un missatge
-/// clar en català; la cancel·lació no es mostra com a error.
-function isOOM(e: unknown): boolean {
-  const s = String(e).toLowerCase();
-  return (
-    s.includes("out of memory") ||
-    s.includes("oom") ||
-    s.includes("could not allocate") ||
-    s.includes("failed to allocate")
-  );
-}
-
-function isCancelled(e: unknown): boolean {
-  return String(e).includes("cancel·lat");
-}
-
-/// El model ha tallat la descàrrega de la resposta (manca de memòria per a un
-/// context gran o temps màxim exhaurit). El backend ja comprimeix el context i
-/// reintenta; aquest missatge només es veu si també falla el segon intent.
-function isBodyCut(e: unknown): boolean {
-  const s = String(e).toLowerCase();
-  return (
-    s.includes("error decoding response body") ||
-    s.includes("stream tallat") ||
-    s.includes("payload was not fully received")
-  );
-}
-
-/// Errors que Justifiquen un reintent AUTOMÀTIC amb MENYS context: OOM dur
-/// (el model no cap) o «body cut» (s'ha tallat a mitanda). En ambdós casos,
-/// NoOrbit torna a intentar-ho retallant el context; si continua fallant,
-/// ho fa Sense context; i com a últim recurs, Sense històrial.
-function isRetriableError(e: unknown): boolean {
-  return isOOM(e) || isBodyCut(e);
-}
-
-function toErrorText(e: unknown): string {
-  if (isOOM(e))
-    return "Memòria insuficient: el model és massa gran per a aquest ordinador. NoOrbit ho ha tornat a provar amb MENYS context i ha continuat fallant. Prova un model més lleuger (p. ex. :3b o quantitzat q4).";
-  if (isBodyCut(e))
-    return "La memòria no ha abastat tot el context i la resposta s'ha tallat. NoOrbit ho ha reintentat AUTOMÀTICAMENT alliberant RAM i COMPACTANT el context (resum dens que conserva l'objectiu, el pla i l'esquelet del codi) → sense codi → sense historial, i ha tornat a fallar. Desactiva «Inclou el codi» o usa un model més lleuger.";
-  return String(e);
-}
-
-/// Instruccions per a l'agent «crea-fitxers»: forcen un format estricte
-/// `@file: <ruta>` perquè es puga parçar i escriure cada fitxer de veritat.
-/// Inclou un exemple concret (few-shot): els models petits obeyen molt
-/// millor un exemple copiable que instruccions abstractes.
-const SCAFFOLD_SYSTEM =
-  "ETS UN GENERADOR DE PROJECTES. Has d'emetre NOMÉS fitxers, en aquest " +
-  "format exacte, sense cap explicació, títol ni text al voltant.\n" +
-  "Cada fitxer comença amb una línia «@file: <ruta_relativa>» i continua amb " +
-  "el seu contingut fins al següent «@file:».\n\n" +
-  "EXEMPLE de resposta CORRECTA:\n" +
-  "@file: app.py\n" +
-  "from flask import Flask\n" +
-  "app = Flask(__name__)\n\n" +
-  "@file: db.py\n" +
-  "from flask_sqlalchemy import SQLAlchemy\n\n" +
-  "@file: README.md\n" +
-  "# Projecte\nInstal·lació: pip install -r requirements.txt\n\n" +
-  "Regles: rutes relatives sense «/» inicial; usa SEMPRE la ruta completa amb " +
-  "les subcarpetes (p. ex. src/models/order.py) perquè NoOrbit creï també les " +
-  "carpetes; si vols una carpeta buida (estructura), emet una línia " +
-  "«@dir: <ruta>» (p. ex. @dir: assets/textures). Genera TOTS els fitxers " +
-  "perquè el projecte funcioni (codi, configuració, requirements.txt i " +
-  "README.md) i, si el projecte té lògica, inclou proves reals dins tests/ " +
-  "(o la carpeta de proves del llenguatge). No escriguis res més enllà de " +
-  "blocs «@file:» i línies «@dir:».";
-
-/// System prompt del pla de reserva: només la LLISTA DE RUTES (una per línia),
-/// tasca molt més senzilla que un model dèbil sí que pot resoldre.
-const MANIFEST_SYSTEM =
-  "Respon NOMÉS amb una llista de rutes de fitxers, una per línia, sense " +
-  "números, guions ni explicacions.\nExemple:\napp.py\ndb.py\nmodels/order.py\nREADME.md";
-
-/// Sistema per generar el contingut d'UN SOL fitxer: un model dèbil (1.5b)
-/// no pot escriure 20 fitxers d'un cop (s'atura, s'omple de prosa i crea
-/// blocs «bloc_2.md»), però sí que pot fer-ne un de cada vegada. A trossos,
-/// com la feina real.
-const FILE_SYSTEM =
-  "ETS UN PROGRAMADOR. Escriu el fitxer demanat COMPLET, dins un sol bloc de " +
-  "codi, i NO escriguis cap text al voltant (ni «Aquí tens», ni «Millora:», ni " +
-  "cap explicació): només el codi. El contingut ha de ser CÓDI REAL que es " +
-  "pugui executar: sense «...», sense «(implementa aquí)», sense talls i sense " +
-  "placeholders. Si el fitxer és de documentació, escriu-lo igual, curt i útil.";
-
-/// Extreu el contingut d'UN fitxer de la resposta del model: si ve en
-/// «@file: ruta» agafem el bloc; si ve en codi «```» agafem el codi; si no,
-/// el text net (un model pot escriure un .php sencer sense tanques).
-function extractSingleFileContent(raw: string): string {
-  const r = (raw || "").trim();
-  if (!r) return "";
-  const blocs = parseFileBlocks(r);
-  if (blocs.length > 0) {
-    const b = blocs.reduce((a, c) => (c.content.length > a.content.length ? c : a));
-    return b.content.trim();
+/// Model d'Ollama triat globalment (per saber si el xat actual treballa amb
+/// un model petit).
+function selectedModelLocal(): string | null {
+  try {
+    return useAIStore.getState().selectedModel;
+  } catch {
+    return null;
   }
-  const fence = r.match(/```[\w+#.-]*\n([\s\S]*?)```/);
-  if (fence) return fence[1].trim();
-  // Sense codi identificable: què queda és el text sencer (p. ex. un fitxer
-  // .php sense codi fences).
-  return r;
-}
-
-/// Els fitxers «bloc_N.md» són fragments de documentació que els models locals
-/// inventen en lloc de codi: NO són codi del projecte i no s'han de crear.
-function esBlocDeDocumentacio(path: string): boolean {
-  return /^bloc[_-]?\d+\.(md|txt|markdown)$/i.test((path.split("/").pop() || "").trim());
-}
-
-/// Una resposta que només és documentació (.md) quan l'usuari demana CODI.
-function nomesDocumentacio(text: string): boolean {
-  const blocs = parseFileBlocks(text);
-  if (blocs.length === 0) return false;
-  return blocs.every((b) => /\.(md|markdown|txt|rst)$/i.test(b.path));
-}
-
-/// ── Platform hints: s'ANTOPOSEN al SCAFFOLD_SYSTEM quan el xat té una
-/// plataforma mòbil seleccionada. Així la IA escriu codi NATIU (Kotlin/Compose
-/// per a Android; Swift/SwiftUI per a iOS) dins l'estructura oficial que
-/// Android Studio / Xcode esperen. Sense embolcalls web (capacitor/cordova).
-const PLATFORM_ANDROID =
-  "PLATAFORMA OBJECTIU: Android NATIU (Kotlin + Jetpack Compose, minSdk 24).\n" +
-  "Genera un projecte Gradle-Kotlin complet amb AQUESTA estructura:\n" +
-  "  settings.gradle.kts, build.gradle.kts (arrel), gradle.properties\n" +
-  "  app/build.gradle.kts, app/proguard-rules.pro\n" +
-  "  app/src/main/AndroidManifest.xml\n" +
-  "  app/src/main/res/values/strings.xml, themes.xml\n" +
-  "  app/src/main/kotlin/<package>/MainActivity.kt  (composable @Composable)\n" +
-  "  app/src/main/kotlin/<package>/ui/… (pantalles, components)\n" +
-  "  app/src/main/kotlin/<package>/data/… (models i repositoris)\n" +
-  "  README.md (instruccions per obrir amb Android Studio)\n" +
-  "Regles EXTROGES:\n" +
-  "  • Usa Material 3 (androidx.compose.material3) i Compose BOM.\n" +
-  "  • Totes les rutes han de ser vàlides RELATIVES a l'arrel del projecte.\n" +
-  "  • NO generes .aar ni binaris. NOMÉS codi font, .kts/.kt/.xml/.md.\n" +
-  "  • Inclou un MainActivity amb «setContent { … }» executable.\n" +
-  "  • No usis Flutter, React Native, Capacitor, Ionic ni cap altre embolcall.";
-
-const PLATFORM_IOS =
-  "PLATAFORMA OBJECTIU: iOS NATIU (Swift 5.10 + SwiftUI, iOS 17).\n" +
-  "Genera un projecte Swift Package executable (estructura que Xcode pot obrir i\n" +
-  "compilar) amb AQUESTS fitxers:\n" +
-  "  Package.swift  (o Project.xcodeproj/project.pbxproj si ho saps fer)\n" +
-  "  Sources/<App>/<App>App.swift  (@main struct … : App)\n" +
-  "  Sources/<App>/ContentView.swift\n" +
-  "  Sources/<App>/Views/… (pantalles i components)\n" +
-  "  Sources/<App>/Models/… (structs + ObservableObject)\n" +
-  "  Resources/Assets.xcassets/AppIcon.appiconset/Contents.json\n" +
-  "  Resources/Info.plist\n" +
-  "  README.md (com obrir-lo a Xcode)\n" +
-  "Regles EXTROGES:\n" +
-  "  • SwiftUI: res de Storyboard, res d'UIKit excepte UISViewControllerRepresentable puntual.\n" +
-  "  • Rutes relatives a l'arrel del workspace (Package.swift a dalt).\n" +
-  "  • No generes .ipa, .xcarchive ni binaris. NOMÉS .swift/.plist/.json/.md.\n" +
-  "  • No usis Flutter, React Native, Capacitor, Ionic ni cap altre embolcall.";
-
-/// ORDRES CLARes D'ORDINADOR, en llenguatge natural (català d'aquest Mac):
-/// comencen amb un verb del sistema, no tenen cap signe de pregunta i no
-/// s'enfilan massa. Tota altra frase segueix al model de text com sempre.
-/// El límit `@computer:? qualsevol cosa` engloba el cas general.
-const COMPUTER_ORDER_RE =
-  /^(?:obri?m?\b|obre\b|arrenca\b|engega\b|tanca\b|atura\b|mou\b|renomena\b|copia\b|esborra\b|elimina\b|mata\b|llista\b|repàs\b|fes\b[^?]{0,40}\bcaptura\b|crea\b[^?]{0,60}\bcarpeta\b)[^?]{0,160}$/i;
-
-/// Nota que ensenya a la IA la directriu «@agent:» — el mateix mecanisme que
-/// «@file:» però per CREAR agents especialistes (com els subagents de Qoder).
-/// S'inclou en tots els system prompts de xat perquè el model sàpigua que pot
-/// fer-ho i com ha de formatar la línia.
-const AGENT_CREATION_SYSTEM =
-  "AGENTS ESPECIALISTES QUE POTS CREAR: si la tasca és prou complexa o barreja " +
-  "dominis (p. ex. frontend + base de dades + proves), pots DEMANAR que es cree " +
-  "un agent especialista per a cada part, com un expert real. Emet una línia " +
-  "per agent amb aquest format exacte:\n" +
-  "@agent: Nom | Rol curt | Instruccions de sistema (què ha de fer, com, i en " +
-  "quin llenguatge/format)\n" +
-  "NoOrbit el crearà automaticament com un especialista persistent (panell " +
-  "«Especialistes») que l'usuari podrà triar, llançar en solitari o posar en " +
-  "equip. Crea'n NOMÉS si apporta valor real; reutilitza els que ja existeixen " +
-  "(NoOrbit no en duplica cap pel nom). Pots omplir les 3 parts o només el " +
-  "nom: «@agent: Revisor de seguretat».\n" +
-  "DELEGAR EN ELS AGENTS (AJUDA'T D'ELLS): quan ja hi hagi especialistes " +
-  "(els creats per tu o els de l'usuari), NO ho resolges tot tu sol. Emet una " +
-  "línia per cada subtasca que volguessis encarregar a un agent amb aquest " +
-  "format exacte:\n" +
-  "@use: NomAgent | tasca concreta que ha de resoldre\n" +
-  "NoOrbit llançarà ESE agent (un model local) perquè treballe en la seua " +
-  "part ARA MATEIX, i et retornarà la seua solució ací mateix perquè la " +
-  "CONSOLIDIS amb la resta del teu treball. Usa el NOM exacte de l'especialista. " +
-  "Pots delegar diverses subtasques en diversos agents al mateix missatge.\n\n" +
-  "LLISTA DE TASQUES (per no perdre't ni tu ni els agents): manté un checklist. " +
-  "Quan identifiques una tasca pendient, afegeix-la amb una línia:\n" +
-  "@todo: descripció curta de la tasca\n" +
-  "Quan COMENCES a treballar-ne una, marca-la EN CURS amb una línia:\n" +
-  "@doing: text de la tasca que fas ara (l'usuari veurà el progrés en viu a la llista)\n" +
-  "Quan en completes una, marca-la amb:\n" +
-  "@done: text exacte de la tasca completada\n" +
-  "NoOrbit mostra eixa llista a tot el xat i la manté visible per a tots els " +
-  "agents. Compleix-les abans de donar la tasca per acabada.\n\n" +
-  "Respon sempre en català.";
-
-/// Sistema base MÍNIM que s'aplica SEMPRE, encara que «Inclou el codi» estiga
-/// tancat: dos regles que l'usuari ha demanat expressament —
-/// 1) MEMÒRIA: si el missatge continua el treball anterior, usa la conversa;
-///    si és una consulta nova sense relació, respon-ne només la nova.
-/// 2) FITXERS REALS: el codi generat s'ha d'emetre amb «@file:» perquè
-///    NoOrbit l'escriga al projecte (i sobreesciga la versió modificada).
-const MEMORY_SYSTEM =
-  AGENT_CREATION_SYSTEM +
-  "Tens el historial complet d'aquest xat. Si el missatge actual CONTINUA " +
-  "una tasca o consulta anterior, respon en conseqüència servant-la com a " +
-  "base. Si és una consulta NOVA sense cap relació, respon NOMÉS a la nova. " +
-  "Quan generes o modifiquis codi d'un projecte, emet cada fitxer amb una " +
-  "línia «@file: ruta/real» seguida del contingut COMPLET: NoOrbit el crea o " +
-  "sobreescriu SOL al projecte obert. Per modificar un fitxer existent usa " +
-  "la seua ruta EXACTA.\n" +
-  "PER EDITAR només un tros d'un fitxer (millor que reemetre'l sencer): " +
-  "«@edit: ruta» + marcador «<<<<<<< CERCA» + el text EXACTE que vols canviar " +
-  "+ «=======» + el text NOU (buit = ESBORRAR-lo) + «>>>>>>>».\n" +
-  "IMPORTANT: emet cada fitxer UNA SOLA VEGADA (no repeteixis el mateix " +
-  "@file: ni el mateix bloc de codi). Si un fitxer ja existeix, reemet-lo " +
-  "amb «@edit:» o «@file:» una sola vegada i prou.\n" +
-  "PER ESBORRAR un fitxer sencer: una línia «@delete: ruta». " +
-  "Si la petició és FER codi («fes…», «implementa…», «crea…», «afegeix…», " +
-  "«arregla…») o PROVES («tests», «proves»), la resposta HA de portar els " +
-  "fitxers amb «@file:» i el codi COMPLET; les proves són fitxers reals " +
-  "(p. ex. tests/test_*.py o la carpeta de proves del projecte), mai una " +
-  "explicació, i si cal executar-les afegeix «RUN|<comanda>». No diguis que " +
-  "ho has fet si no has emès cap «@file:». " +
-  "Respon sempre en català.";
-
-/// Nota curta que acompanya el context del projecte: demana al model que
-/// s'hi basi i responga en català. S'usa només quan «Inclou el codi» és actiu.
-const CONTEXT_SYSTEM =
-  AGENT_CREATION_SYSTEM +
-  "T'hem passat els fitxers reals del projecte obert com a context. Respon " +
-  "en català i BASANT-TE EN AQUEST CODI (no inventes estructures ni fitxers " +
-  "que no hi apareixen). QUAN GENERIS O MODIFIQUIS CODI, emet cada fitxer en " +
-  "format «@file: ruta_relativa» amb la RUTA COMPLETA de les seves carpetes " +
-  "(p. ex. @file: src/components/Boto.tsx), perquè NoOrbit creï les carpetes " +
-  "i apliqui el fitxer AUTOMÀTICAMENT. Si cal una carpeta sense fitxer, " +
-  "afegeix una línia «@dir: <ruta>». Si no pots generar un fitxer sencer, " +
-  "marca-ho amb una línia «TODO: …».\n\n" +
-  "PER MODIFICAR UN FITXER QUE JA EXISTEIX: primer LOCALITZAL al context " +
-  "(rutes i contingut que t'hem donat), llegeix-ne el contingut actual i " +
-  "reemet el MATEIX camí amb «@file:» i el codi COMPLET ja amb els canvis " +
-  "aplicats (NoOrbit el sobreescriurà). No inventes un nom nou per a una " +
-  "versió modificada: usa la ruta exacta del fitxer existent.\n\n" +
-  "MÉS FÀCIL I MILLOR per a canvis PETITS: «@edit: ruta» + «<<<<<<< CERCA» " +
-  "+ el text EXACTE del fitxer a canviar + «=======» + el text NOU (buit = " +
-  "esborrar-lo) + «>>>>>>>». NoOrbit aplica el canvi al fitxer real.\n" +
-  "EMET CADA FITXER UNA SOLA VEGADA: no repeteixis el mateix «@file:» ni el " +
-  "mateix bloc de codi (són inútils i cremaven el context).\n" +
-  "PER ESBORRAR UN FITXER SENCER (o codi que falla): una línia «@delete: " +
-  "ruta». Ho esborra de veritat al projecte.\n\n" +
-  "SI ET DEMANEN FER CODI o PROVES (tests): no ho expliquis en prosa — emet " +
-  "els fitxers amb «@file:» i el codi COMPLET. Les proves són fitxers reals " +
-  "(p. ex. tests/test_*.py o la carpeta de proves del projecte), no una " +
-  "explicació, i si cal executar-les afegeix «RUN|<comanda>».\n\n" +
-  "MEMÒRIA DE LA CONVERSA: tens el historial de les consultes anteriors " +
-  "d'aquest xat. Si el missatge actual CONTINUA una tasca prèvia (p. ex. " +
-  "«ara afegeix…», «millora-ho», «nova versió»), usa'l com a base. Si en " +
-  "canvi és una consulta NOVA sense relació, respon NOMÉS a la nova consulta " +
-  "sense arrossegar el tema anterior.";
-
-/// Converteix una llista de rutes (del pla de reserva) en camins nets.
-function parseManifest(raw: string): string[] {
-  const out: string[] = [];
-  for (const line of raw.split(/\r?\n/)) {
-    let t = line
-      .trim()
-      .replace(/^[-*]\s+/, "")
-      .replace(/^\d+[.)]\s+/, "")
-      .replace(/^[`'"]+|[`'"]+$/g, "")
-      .trim();
-    if (!t) continue;
-    // Ha de semblar una ruta: conté «/» o acaba en extensió (.py, .md…).
-    if (t.includes("/") || /\.[A-Za-z0-9]{1,6}$/.test(t)) {
-      t = t.replace(/^\.?\//, "");
-      if (!t.split("/").includes("..")) out.push(t);
-    }
-  }
-  return Array.from(new Set(out));
-}
-
-/// Converteix la resposta en una llista de (ruta, contingut). Tolera tanques
-/// de codi (` ``` `) i l'optional `@`. Si no troba cap `@file:`, torna buit.
-/// HEURÍSTICA NOVA (important): si el bloc usa tanques ``` , el contingut és
-/// NOMÉS el que hi ha DINS DE LES TANQUES. Així la prosa posterior, les
-/// directrius «RUN|» i els altres anuncis NO s'arreneguen dins del fitxer
-/// (abans «python3 x.py» fallava amb SyntaxError per culpa d'eixa brossa).
-/// Neteja els ARTEFACTES DE LA INTERFÍCIE que el model pot copiar del xat:
-/// l'etiqueta del llenguatge («PHP», «Python»…) i el botó «Copia» que hi ha
-/// just damunt del codi. No són codi: al projecte hi quedaven al davant del
-/// fitxer i, sobretot, feien que cap «@edit:» coincidís mai amb el text real.
-function stripUiArtifacts(content: string): string {
-  const lines = content.split("\n");
-  const lang = /^(php|python|javascript|typescript|css|scss|html|json|bash|shell|sql|yaml|yml|toml|rust|go|java|c|cpp|csharp|cs|diff|markdown|text|plaintext|xml|ini|swift|kt|kotlin|ruby|rb|dart|lua|vue|svelte|astro|graphql|dockerfile|makefile|code)$/i;
-  let i = 0;
-  while (i < lines.length) {
-    const t = lines[i].trim();
-    if (!t) {
-      i++;
-      continue;
-    }
-    if (/^(copia|còpia|copy)$/i.test(t) || lang.test(t)) {
-      i++;
-      continue;
-    }
-    break;
-  }
-  return lines.slice(i).join("\n");
-}
-
-function parseFileBlocks(raw: string): { path: string; content: string }[] {
-  const lines = raw.split(/\r?\n/);
-  type Cur = { path: string; fenced: string[]; bare: string[]; inFence: boolean; hadFence: boolean };
-  const acc: Cur[] = [];
-  let cur: Cur | null = null;
-  const flush = () => {
-    if (cur) {
-      acc.push(cur);
-      cur = null;
-    }
-  };
-  for (const line of lines) {
-    const m = line.match(/^[ \t>#*-]*(?:\d+[.)]\s+)?@?file:\s*(.+?)\s*$/i);
-    if (m) {
-      flush();
-      cur = {
-        path: m[1].replace(/^[`'"*«]+|[`'"*»;:.,\s]+$/g, "").trim(),
-        fenced: [],
-        bare: [],
-        inFence: false,
-        hadFence: false,
-      };
-      continue;
-    }
-    if (!cur) continue;
-    if (/^\s*```/.test(line)) {
-      // Obri/tanca la tanca: el que passa DINS és codi real.
-      cur.inFence = !cur.inFence;
-      if (cur.inFence) cur.hadFence = true;
-      continue;
-    }
-    // Una directriu d'execució o d'estructura INTERROMP el bloc: tot el que
-    // ve després ja no és contingut d'aquest fitxer.
-    if (
-      /^[ \t>#*-]*(?:\d+[.)]\s+)?@?(dir|directori|carpeta|folder|delete|esborra|borra|elimina|remove|rm)\w*:/i.test(line) ||
-      /^[ \t>#*-]*(?:\d+[.)]\s+)?@?(edit|modifica|substitueix|reemplaça)\w*:/i.test(line) ||
-      /^[ \t>#*-]*(RUN|IMG|NB)\|/i.test(line)
-    ) {
-      flush();
-      continue;
-    }
-    if (cur.inFence) cur.fenced.push(line);
-    else cur.bare.push(line);
-  }
-  flush();
-  return acc
-    .filter((f) => f.path.length > 0)
-    .map((f) => {
-      // Amb tanques: només el codi de dins. Sense tanques: les línies nues
-      // (com abans), però tallades a la primera directriu.
-      const body = f.hadFence && f.fenced.length > 0 ? f.fenced : f.bare;
-      return {
-        path: f.path,
-        content:
-          stripUiArtifacts(body.join("\n").replace(/^\s*\n+/, "").replace(/\s+$/, "")) + "\n",
-      };
-    })
-    // Un bloc sense contingut útil s'ignora: FILE_NUDGE ja encarrega de
-    // recordar al model que el reemeta complet.
-    .filter((f) => f.content.trim().length > 0);
-}
-
-/// Extreu les directrius de CARPETA que la IA emet per crear estructura buida
-/// (carpetes sense fitxer). Formes tolerades: «@dir: ruta», «@carpeta: ruta»,
-/// «@folder: ruta», «@directori: ruta». S'usen quan la IA vol la gestió de
-/// carpetes minuciosa: crea la carpeta encara que no contingui cap fitxer.
-function parseDirDirectives(raw: string): string[] {
-  const out: string[] = [];
-  for (const line of raw.split(/\r?\n/)) {
-    const m = line.match(/^\s*@?\s*(?:dir|directori|carpeta|folder)\w*:\s*(.+?)\s*$/i);
-    if (!m) continue;
-    let d = m[1]
-      .replace(/^[`'"]+|[`'"]+$/g, "")
-      .trim()
-      .replace(/^\/+/, "")
-      .replace(/\\/g, "/");
-    if (!d) continue;
-    // Si té extensió de fitxer coneguda NO pot ser una carpeta (ni tan sols
-    // amb «/» al mig: «admin/index.php» és un FITXER, no un directori).
-    // Abans es creava com a carpeta i fallava («admin/» no existia).
-    const ext = (d.split("/").pop() ?? "").split(".").pop()?.toLowerCase() ?? "";
-    if (d.includes(".") && REC_EXT.has(ext)) continue;
-    if (!d.split("/").includes("..")) out.push(d);
-  }
-  return Array.from(new Set(out));
-}
-
-/// Rescata els blocs de codi (``` ...) d'una resposta en prosa i en dedueix
-/// el nom de fitxer. És el camí de RESCAT quan la IA no usa el format
-/// estricte @file: — i ha de ser TOLERANT perquè els models no responen tots
-/// igual: tanques CRLF, `~~~`, bloc sense tancar (resposta tallada), nom del
-/// fitxer escrit DESPRÉS del bloc o com a comentari a la primera línia…
-/// Així un tutorial explicat es pot convertir en fitxers reals amb codi.
-function extractFromProse(raw: string): { path: string; content: string }[] {
-  const LANG_EXT: Record<string, string> = {
-    python: "py", py: "py", javascript: "js", js: "js", typescript: "ts", ts: "ts",
-    json: "json", html: "html", css: "css", markdown: "md", md: "md",
-    bash: "sh", sh: "sh", shell: "sh", sql: "sql", yaml: "yaml", yml: "yml", toml: "toml",
-    rust: "rs", go: "go", java: "java", c: "c", cpp: "cpp",
-  };
-  const out: { path: string; content: string }[] = [];
-  const used = new Set<string>();
-  // Extensions vàlides: evita falsos positius com «e.g», «v2.0», «i.e».
-  const knownExts = new Set(
-    Object.values(LANG_EXT).concat(["md", "txt", "cfg", "ini", "toml", "yml", "yaml", "json", "lock", "env", "xml", "svg", "jsx", "tsx", "scss", "hpp", "h"])
-  );
-  // Normalitzem NOMÉS per a l'extracció: CRLF → LF i línies de tanca `~~~lang`
-  // → ```lang (els models mixten estils). La línia es manté sencera: només
-  // canvia el marcador, el salt de línia queda intacte.
-  const norm = raw
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .replace(/^([ \t]*)~~~[ \t]*([A-Za-z0-9]*)[ \t]*$/gm, "$1```$2");
-
-  const dedupe = (path: string, content: string) => {
-    let p = path.replace(/^\/+/, "").replace(/\\/g, "/");
-    if (p.split("/").some((s) => s === "..")) return;
-    // Rutes duplicades: afegeix un sufix numèric abans de l'extensió.
-    let uniq = p;
-    let k = 2;
-    while (used.has(uniq)) {
-      uniq = /\.[^.]+$/.test(p) ? p.replace(/(\.[^.]+)$/, `_${k}$1`) : `${p}_${k}`;
-      k++;
-    }
-    used.add(uniq);
-    out.push({ path: uniq, content });
-  };
-
-  /// Dedueix el nom del fitxer d'un bloc: 1) un comentari a la PRIMERA línia
-  /// del codi («// src/App.tsx», «# main.py», «<!-- index.html -->»); 2) el
-  /// text JUST ABANS del bloc; 3) el text JUST DESPRÉS; 4) nom automàtic
-  /// pel llenguatge. Els models barregen totes les maneres.
-  const inferPath = (lang: string, content: string, before: string, after: string, i: number): string => {
-    const first = content.split("\n", 1)[0] ?? "";
-    const cm = first.match(/^\s*(?:\/\/|#|--|<!--|\*|\/\*)\s*([\w][\w./\\-]*\.[A-Za-z0-9]{1,6})\s*(?:-->)?$/);
-    if (cm) {
-      const ext = cm[1].split(".").pop()!.toLowerCase();
-      if (knownExts.has(ext)) return cm[1];
-    }
-    for (const side of [before, after]) {
-      const named = side.match(/[A-Za-z0-9_./\\-]+\.[A-Za-z0-9]{1,6}/g);
-      if (!named) continue;
-      // Candidat amb extensió RECONEGUDA (evita «e.g», «3.4»), el més proper.
-      const cand = [...named].reverse().find((c) => {
-        const ext = c.includes(".") ? c.split(".").pop()!.toLowerCase() : "";
-        return knownExts.has(ext) && !/^[\d.]+$/.test(c);
-      });
-      if (cand) return cand;
-    }
-    return `bloc_${i}.${LANG_EXT[lang] || "txt"}`;
-  };
-
-  // Blocs TANCATS: obertura ```lang + contingut + tancament ``` (tolerant a
-  // espais/trailers a la línia de tancament).
-  const fenceRe = /```([A-Za-z0-9_-]*)\n([\s\S]*?)\n?[ \t]*```/g;
-  let m: RegExpExecArray | null;
-  let i = 0;
-  while ((m = fenceRe.exec(norm)) !== null) {
-    i++;
-    const lang = (m[1] || "").toLowerCase();
-    const content = stripUiArtifacts(m[2].replace(/\s+$/, "")) + "\n";
-    if (!content.trim()) continue;
-    const before = norm.slice(Math.max(0, m.index - 320), m.index);
-    const after = norm.slice(m.index + m[0].length, m.index + m[0].length + 320);
-    const path = inferPath(lang, content, before, after, i);
-    dedupe(path, content);
-  }
-  // ÚLTIM bloc SENSE TANCAR: respostes tallades a mitja generació. Sense
-  // aquest rescat, el codi més valuós (el que venia al final) es perdia.
-  // NOMÉS si hi ha un nombre IMPARELL de línies de tanca: aleshores la darrera
-  // és una obertura sense parella (bloc tallat). Si són parells, tot està
-  // tancat i no hi ha res a rescatar (així no engolim prosa per error).
-  const fences = [...norm.matchAll(/^```[A-Za-z0-9_-]*[ \t]*$/gm)];
-  if (fences.length % 2 === 1) {
-    const lastOp = fences[fences.length - 1];
-    const after = norm.slice((lastOp.index ?? 0) + lastOp[0].length).replace(/^\n/, "");
-    if (after.trim()) {
-      const lang = (lastOp[0].match(/```([A-Za-z0-9_-]*)/)?.[1] ?? "").toLowerCase();
-      const content = stripUiArtifacts(after.replace(/\s+$/, "")) + "\n";
-      const before = norm.slice(0, lastOp.index ?? 0).slice(-320);
-      dedupe(inferPath(lang, content, before, "", fences.length + 1), content);
-    }
-  }
-  return out;
-}
-
-/// Extensions considerades «de fitxer» a l'hora de reconèixer rutes en prosa.
-/// IMPORTANT: si una extensió NO hi és, la ruta es classifica com a CARPETA i
-/// es crea com a carpeta (i falla). Per això hi ha totes les habituals:
-/// WordPress/PHP, Twig/Blade, Laravel, Django, Rails, Go, Kotlin, Swift…
-const REC_EXT = new Set([
-  "py", "js", "jsx", "ts", "tsx", "json", "md", "txt", "css", "scss", "html",
-  "toml", "yaml", "yml", "ini", "cfg", "env", "lock", "rs", "go", "java",
-  "c", "h", "cpp", "hpp", "sh", "sql", "csv", "xml", "svg", "glb", "fbx",
-  // WordPress / PHP i el seu ecosistema
-  "php", "php3", "php4", "php5", "phtml", "twig", "blade", "po", "pot", "mo",
-  // Altres llenguatges i formats habituals
-  "kt", "kts", "swift", "m", "mm", "cs", "rb", "phpunit", "vue", "svelte",
-  "astro", "graphql", "gql", "proto", "dockerfile", "makefile", "conf",
-  "htaccess", "htpasswd", "webp", "jpg", "jpeg", "png", "gif", "ico", "pdf",
-  "woff", "woff2", "ttf", "eot", "mp4", "webm", "zip", "tar", "gz",
-]);
-
-/// Reconeix rutes que la IA RECOMANA en prosa (fora dels blocs de codi):
-/// «hauries de crear src/models/order.py», «afegeix una carpeta assets/», etc.
-/// També hi inclou els noms dels @file:/@dir: ja presentats en format estricte.
-/// S'usa per pre-emplenar el diàleg de creació manual: l'usuari només ha
-/// d'afegir/treure línies i prémer «Crear-les».
-export function extractRecommendedPaths(raw: string): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  const add = (p: string, asDir = false) => {
-    let t = p.trim().replace(/^[`'"«<(]+/, "").replace(/[`'"»>,)\].:;]+$/, "");
-    t = t.replace(/^\.?\/+/, "");
-    if (!t || /[\s$]/.test(t)) return;
-    if (t.split("/").includes("..")) return;
-    if (t.includes("://") || /^www\./i.test(t)) return; // descarta URLs
-    if (/(^|\/)(node_modules|target|\.git)(\/|$)/.test(t)) return;
-    if (!/[A-Za-z]/.test(t)) return; // sense lletres (p. ex. «10/5») no és ruta
-    if (!t.endsWith("/")) t += asDir ? "/" : "";
-    if (seen.has(t)) return;
-    seen.add(t);
-    out.push(t);
-  };
-  // 1) Directrius i fitxers ja en format estricte.
-  for (const d of parseDirDirectives(raw)) add(d, true);
-  for (const f of parseFileBlocks(raw)) add(f.path);
-  // 2) Prosa: ignores els blocs ``` (el seu contingut no són recomanacions).
-  const text = raw.replace(/```[\s\S]*?(```|$)/g, " ");
-  // Rutes amb almenys un «/» (carpeta o fitxer dins d'una carpeta).
-  for (const m of text.matchAll(/[A-Za-z0-9_.\-]+(?:\/[A-Za-z0-9_.\-]+)+\/?/g)) {
-    let tok = m[0];
-    if (tok.endsWith("/")) add(tok);
-    else {
-      const last = tok.split("/").pop() ?? "";
-      const ext = last.includes(".") ? last.split(".").pop()!.toLowerCase() : "";
-      add(tok, !REC_EXT.has(ext)); // sense extensió coneguda → carpeta
-    }
-  }
-  // Fitxers d'un sol nivell amb extensió coneguda (p. ex. «requirements.txt»).
-  for (const m of text.matchAll(/\b[A-Za-z0-9_.\-]+\.([A-Za-z0-9]{1,6})\b/g)) {
-    if (REC_EXT.has(m[1].toLowerCase())) add(m[0]);
-  }
-  return out.slice(0, 60);
-}
-
-/// Directrius d'ESBORRAT que la IA emet per treure fitxers o carpetes del
-/// projecte. Formes tolerades: «@delete: ruta», «@esborra: ruta»,
-/// «@borra: ruta», «@elimina: ruta», «@remove: ruta». Abans d'això, dir-li
-/// a la IA «esborra X» era impossible: un @file: buit CREAVA el fitxer buit
-/// en lloc d'esborrar-lo. Les rutes són sempre relatives al projecte.
-function parseDeleteDirectives(raw: string): string[] {
-  const out: string[] = [];
-  for (const line of raw.split(/\r?\n/)) {
-    const m = line.match(/^\s*@?\s*(?:delete|esborra|borra|elimina|remove|rm)\w*:\s*(.+?)\s*$/i);
-    if (!m) continue;
-    let d = m[1]
-      .replace(/^[`'"]+|[`'"]+$/g, "")
-      .trim()
-      .replace(/^\/+/, "")
-      .replace(/\\/g, "/");
-    if (!d || d.split("/").includes("..")) continue;
-    if (!out.includes(d)) out.push(d);
-  }
-  return out;
-}
-
-interface AgentResult {
-  text: string;
-  files: string[];
-  steps: { label: string; detail: string; ok: boolean }[];
-}
-
-// ── AGENTS ESPECIALISTES CREATS PER LA IA ───────────────────────────────────
-// Mateix mecanisme que «@file:» o «@delete:»: la IA emet una directriu en una
-// línia i NoOrbit l'executa de veritat. Ací la IA pot CREAR agents
-// especialitzats (com subagents de Qoder) quan la tasca ho demane. Els agents
-// es guarden com a «Especialistes» persistents (panell Especialistes), amb el
-// seu rol i les seues instruccions, i l'usuari ja els podrà triar o posar en
-// equip. Format tolerat (separador «|», també s'accepta «·»):
-//   @agent: Nom | Rol curt | Instruccions de sistema (què ha de fer i com)
-function parseAgentDirectives(raw: string): { name: string; role: string; systemPrompt: string }[] {
-  const out: { name: string; role: string; systemPrompt: string }[] = [];
-  const seen = new Set<string>();
-  for (const line of raw.split(/\r?\n/)) {
-    const m = line.match(
-      /^\s*@\s*(?:agent|subagent|expert|especialista)s?\s*:\s*(.+?)\s*$/i
-    );
-    if (!m) continue;
-    const v = m[1].replace(/^[`'"\s[]+/, "").trim();
-    if (!v) continue;
-    // Separadors tolerats: un o dos pipes, «·», o tabulador.
-    const parts = v
-      .split(/\s*(?:\|{1,2}|·|\t)\s*/)
-      .map((p) => p.trim())
-      .filter((p) => p.length > 0);
-    let name = "";
-    let role = "";
-    let systemPrompt = "";
-    if (parts.length >= 3) {
-      name = parts[0];
-      role = parts[1];
-      systemPrompt = parts.slice(2).join(" · ");
-    } else if (parts.length === 2) {
-      name = parts[0];
-      role = parts[1];
-      systemPrompt =
-        `Ets un agent especialitzat («${name}»: ${role}). Quan rebs una tasca, ` +
-        `treballa NOMÉS dins de la teva especialitat, resol-la amb codi real i ` +
-        `complete (format «@file:») i explica els passos en català.`;
-    } else {
-      name = v.slice(0, 48);
-      systemPrompt =
-        `Ets un agent especialitzat anomenat «${v}». Ajuda l'usuari en aquesta ` +
-        `tasca concreta amb codi real, verificable, i respostes en català.`;
-    }
-    name = name.slice(0, 60).trim();
-    if (!name || seen.has(name.toLowerCase())) continue;
-    seen.add(name.toLowerCase());
-    out.push({
-      name,
-      role: role.slice(0, 120),
-      systemPrompt: systemPrompt.trim() || `Agent especialitzat: ${name}.`,
-    });
-  }
-  return out;
-}
-
-/// L'acció «Materialitzar» del xat reenvia el text del missatge als parsers de
-/// directrius; si no treiem primer les línies «@agent:», prémer el botó tornaria
-/// a crear els mateixos agents (el nom els deduplica, però mostraria un avís
-/// «ja existien» innecessari). Aquest filtre els deixa fora sense tocar res més.
-function stripAgentDirectiveLines(raw: string): string {
-  return raw
-    .split(/\r?\n/)
-    .filter(
-      (l) =>
-        !/^\s*@\s*(?:agent|subagent|expert|especialista)s?\s*:/i.test(l) &&
-        !/^\s*@\s*(?:use|delega|delegate|todo|done|feta|pendient)\w*\s*:/i.test(l)
-    )
-    .join("\n");
 }
 
 /// Crea (o detecta com a existents) els agents que la IA ha demanat amb
@@ -958,34 +218,6 @@ async function applyAgentDirectives(raw: string, sid?: string): Promise<string |
 // (un model local) perresoldre la subtasca ARA MATEIX, recull la seua solució i la
 // torna a la IA principal (segona passada de consolidació) perquè l'integre en la
 // seua resposta. Tot dins del MATXEIX torn: cap esperà a un procés en segon pla.
-const CONSOLIDATION_SYSTEM =
-  "Ets la IA PRINCIPAL de NoOrbit. T'hem passat les solucions que els teus " +
-  "agents especialistes han produït per a les subtasques delegades. La teua " +
-  "feina és CONSOLIDAR-LES: integra-les en una única resposta final coherent, " +
-  "resol incoherències entre agents i completa el que els falti. No delegues " +
-  "de nou. Respon en català i, si generes codi, usa el format «@file: ruta».";
-
-function parseUseDirectives(
-  raw: string
-): { agent: string; task: string }[] {
-  const out: { agent: string; task: string }[] = [];
-  const seen = new Set<string>();
-  for (const line of raw.split(/\r?\n/)) {
-    const m = line.match(/^\s*@\s*(?:use|delega(?:te)?)\s*:\s*(.+?)\s*$/i);
-    if (!m) continue;
-    const v = m[1].replace(/^[`'"\s[]+/, "").trim();
-    if (!v) continue;
-    const parts = v.split(/\s*(?:\|{1,2}|·|\t)\s*/).map((p) => p.trim()).filter(Boolean);
-    const agent = parts[0] ?? "";
-    const task = parts.slice(1).join(" · ").trim();
-    if (!agent) continue;
-    const key = `${agent.toLowerCase()}::${task.toLowerCase()}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ agent, task });
-  }
-  return out;
-}
 
 /// Executa les delegacions «@use:» i torna un bloc llegible amb la solució de
 /// cada agent + la consolidació de la IA principal. Null si no n'hi havia cap.
@@ -1085,35 +317,6 @@ async function applyDelegateDirectives(raw: string, sid: string): Promise<string
     ? consolidated.trim()
     : solsBlock;
   return `${head}\n${status}\n\n${body}`;
-}
-
-// ── LLISTA DE TASQUES («@todo:» / «@done:») ──────────────────────────────────
-function parseTodoDirectives(raw: string): { add: string[]; done: string[]; doing: string[] } {
-  const add: string[] = [];
-  const done: string[] = [];
-  const doing: string[] = [];
-  for (const line of raw.split(/\r?\n/)) {
-    const a = line.match(/^\s*@\s*(?:todo|pendent|pendient|task)\s*:\s*(.+?)\s*$/i);
-    if (a) {
-      const t = a[1].replace(/^[`'"]+|[`'"]+$/g, "").trim();
-      if (t) add.push(t);
-      continue;
-    }
-    const d = line.match(/^\s*@\s*(?:done|feta|fet|completada)\s*:\s*(.+?)\s*$/i);
-    if (d) {
-      const t = d[1].replace(/^[`'"]+|[`'"]+$/g, "").trim();
-      if (t) done.push(t);
-      continue;
-    }
-    // «@doing:» (o «@fent:»/«@en curs:»): la tasca que la IA té ENTRE MANS
-    // ara mateix — es veu EN VIU a la llista fixada («~ En curs»).
-    const w = line.match(/^\s*@\s*(?:doing|fent|en\s+curs|in\s+progress)\s*:\s*(.+?)\s*$/i);
-    if (w) {
-      const t = w[1].replace(/^[`'"]+|[`'"]+$/g, "").trim();
-      if (t) doing.push(t);
-    }
-  }
-  return { add, done, doing };
 }
 
 /// Aplica les directrius de checklist als «taskListStore». Retorna un resum o null.
@@ -1218,69 +421,6 @@ async function attachReferencedFiles(
     }
   }
   return parts.length > 0 ? parts.join("\n\n") : null;
-}
-
-/// Extreu els blocs «@edit: ruta» amb seccions CERCA/NOU (edicions
-/// quirúrgiques). Tolerant amb marcadors >>> (guerra de conflict marks),
-/// talls de resposta i seccions sense tancar. NOU buit = esborrar codi.
-interface EditSection {
-  find: string;
-  replace: string;
-}
-interface EditBlock {
-  path: string;
-  edits: EditSection[];
-}
-function parseEditBlocks(raw: string): EditBlock[] {
-  const lines = raw.split(/\r?\n/);
-  const out: EditBlock[] = [];
-  let cur: EditBlock | null = null;
-  let sec: { find: string[]; rep: string[]; phase: 0 | 1 } | null = null;
-  const flushSec = () => {
-    if (cur && sec) {
-      const find = stripUiArtifacts(sec.find.join("\n").replace(/^\n+|\s+$/g, ""));
-      const replace = stripUiArtifacts(sec.rep.join("\n").replace(/^\n+|\s+$/g, ""));
-      if (find.trim()) cur.edits.push({ find, replace });
-    }
-    sec = null;
-  };
-  for (const line of lines) {
-    const m = line.match(/^[ \t>*-]*@?(?:edit|modifica|substitueix|reempla[çc]a)\w*:\s*(.+?)\s*$/i);
-    if (m) {
-      flushSec();
-      const newPath = m[1]
-        .replace(/^[`'"*«]+|[`'"*»;:.,\s]+$/g, "")
-        .trim();
-      // Rutes repetides (dos @edit: del mateix fitxer): s'accumulen al
-      // mateix bloc (una sola lectura/escriptura i un sol informe).
-      if (!(cur && newPath && cur.path === newPath)) {
-        if (cur) out.push(cur);
-        cur = { path: newPath, edits: [] };
-      }
-      continue;
-    }
-    const t = line.trim();
-    if (t.startsWith("<<<<<<<")) {
-      flushSec();
-      sec = { find: [], rep: [], phase: 0 };
-      continue;
-    }
-    if (t.startsWith("=======")) {
-      if (sec) sec.phase = 1;
-      continue;
-    }
-    if (t.startsWith(">>>>>>>")) {
-      flushSec();
-      continue;
-    }
-    if (!cur || !sec) continue;
-    // Les tanques de codi NO interrompen una secció (el codi pot contenir-les).
-    if (sec.phase === 0) sec.find.push(line);
-    else sec.rep.push(line);
-  }
-  flushSec();
-  if (cur) out.push(cur);
-  return out.filter((b) => b.path && b.edits.length > 0);
 }
 
 /// Aplica els blocs «@edit:» al fitxer REAL: cerca el text CERCA (exacte o
@@ -1575,13 +715,26 @@ const liveWritten = new Map<string, string>();
 let liveTimer: ReturnType<typeof setTimeout> | null = null;
 let liveBusy = false;
 let livePendingRaw: string | null = null;
+/// Generació del run «en viu». `resetLiveMaterialize` la incrementa: el run
+/// que ja hi ha en marxa veu que el seu torn ja no és el vigent i abandona
+/// (abans, en reset es posava `liveBusy = false` mentre hi havia una
+/// escriptura en vol → es podia engegar un SEGON run concurrent i les dues
+/// escriptures al mateix fitxer s'intercalaven, deixant-hi contingut vell).
+let liveEpoch = 0;
+
+/// Rutes que s'estan escrivint «en viu» ara mateix: dos xats diferents
+/// que generen el mateix fitxer alhora no s'han d'esclavar (el més lent
+/// guanyava i el fitxer quedava amb contingut vell).
+const liveWriting = new Set<string>();
 
 /// Restaura l'estat d'un torn NOU (cridat des de «beginTurn»).
 export function resetLiveMaterialize() {
+  liveEpoch += 1;
   liveWritten.clear();
   if (liveTimer) clearTimeout(liveTimer);
   liveTimer = null;
-  liveBusy = false;
+  // NO es posa `liveBusy = false` aquí: el run en curs encara escriu i ha de
+  // poder acabar (el seu `finally` el deixarà lliure).
   livePendingRaw = null;
   // Les revisions pendents del torn anterior NO es netegen: poden ser encara
   // dins dels 35 s de gràcia i s'han d'acabar d'acceptar/rebutjar normalment.
@@ -1602,6 +755,7 @@ async function runLiveMaterialize() {
   const raw = livePendingRaw;
   livePendingRaw = null;
   if (!raw) return;
+  const myEpoch = liveEpoch;
   const ws = useWorkspaceStore.getState();
   const root = ws.root;
   if (!root) return;
@@ -1617,19 +771,31 @@ async function runLiveMaterialize() {
       if (!rel || rel.split("/").some((s) => s === "..")) continue;
       if (liveWritten.get(rel) === f.content) continue; // sense canvis
       const abs = `${base}/${rel}`;
+      // Aquest fitxer ja l'està escrivint un altre run: no hi escrivim ara
+      // (dues escriptures al mateix fitxer es barreguen i la més lenta
+      // deixa el contingut vell).
+      if (liveWriting.has(abs)) continue;
+      liveWriting.add(abs);
       try {
+        // Si el torn s'ha reiniciat mentre escrivíem, aquesta escriptura ja
+        // no és del torn vigent: no la fem (evita que dos runs es barreguin).
+        if (myEpoch !== liveEpoch) return;
         // Primer contacte: guardem el contingut VELL abans d'escriure (si
         // ho féssim després, el disc ja tindria el nou i no tindríem amb
         // què comparar-lo) i escrivim el nou: disc + editor en directe.
         const first = !liveWritten.has(rel);
         const prev = await captureOriginal(abs);
+        if (myEpoch !== liveEpoch) return;
         await useWorkspaceStore.getState().writeLive(abs, f.content);
+        if (myEpoch !== liveEpoch) return;
         if (first) noteLiveWriteStart(abs, f.content, prev.original, prev.existed);
         else noteLiveWriteContent(abs, f.content);
         liveWritten.set(rel, f.content);
         anyNew = true;
       } catch {
         /* si un fitxer falla, continua amb la resta */
+      } finally {
+        liveWriting.delete(abs);
       }
     }
     if (anyNew) await useWorkspaceStore.getState().refreshTree();
@@ -1794,44 +960,48 @@ export const useAgentStore = create<AgentState>((set, get) => {
   // ocupat — la dada que fa falta per saber si una API de núvol val la pena.
   if (!(globalThis as Record<string, unknown>).__noorbitUsageListener) {
     (globalThis as Record<string, unknown>).__noorbitUsageListener = true;
-    void import("@tauri-apps/api/event").then(({ listen }) =>
-      listen<TokenUsage & { session: string }>("ai://usage", (evt) => {
-        const p = evt.payload;
-        if (!p?.session) return;
-        const usage: TokenUsage = {
-          provider: p.provider ?? "",
-          model: p.model ?? "",
-          input: p.input ?? 0,
-          output: p.output ?? 0,
-          total: p.total ?? (p.input ?? 0) + (p.output ?? 0),
-          contextWindow: p.contextWindow ?? 0,
-          contextUsedPct: p.contextUsedPct ?? 0,
-        };
-        set((st) => ({
-          usageBySession: { ...st.usageBySession, [p.session]: usage },
-        }));
-        // Si el xat ja té el missatge final, hi enganxem l'ús (el comptador
-        // ha de quedar SOTA la resposta corresponent).
-        const sess = get().sessions.find((s) => s.id === p.session);
-        if (sess && sess.messages.length > 0) {
-          const last = sess.messages[sess.messages.length - 1];
-          if (last.role === "assistant") {
-            set((st2) => ({
-              sessions: st2.sessions.map((s) =>
-                s.id === p.session
-                  ? {
-                      ...s,
-                      messages: s.messages.map((m, i) =>
-                        i === s.messages.length - 1 ? { ...m, usage } : m
-                      ),
-                    }
-                  : s
-              ),
-            }));
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen<TokenUsage & { session: string }>("ai://usage", (evt) => {
+          const p = evt.payload;
+          if (!p?.session) return;
+          const usage: TokenUsage = {
+            provider: p.provider ?? "",
+            model: p.model ?? "",
+            input: p.input ?? 0,
+            output: p.output ?? 0,
+            total: p.total ?? (p.input ?? 0) + (p.output ?? 0),
+            contextWindow: p.contextWindow ?? 0,
+            contextUsedPct: p.contextUsedPct ?? 0,
+          };
+          set((st) => ({
+            usageBySession: { ...st.usageBySession, [p.session]: usage },
+          }));
+          // Si el xat ja té el missatge final, hi enganxem l'ús (el comptador
+          // ha de quedar SOTA la resposta corresponent).
+          const sess = get().sessions.find((s) => s.id === p.session);
+          if (sess && sess.messages.length > 0) {
+            const last = sess.messages[sess.messages.length - 1];
+            if (last.role === "assistant") {
+              set((st2) => ({
+                sessions: st2.sessions.map((s) =>
+                  s.id === p.session
+                    ? {
+                        ...s,
+                        messages: s.messages.map((m, i) =>
+                          i === s.messages.length - 1 ? { ...m, usage } : m
+                        ),
+                      }
+                    : s
+                ),
+              }));
+            }
           }
-        }
-      })
-    );
+        })
+      )
+      // Sense catch, un registre fallat deixava un rebuig sense gestionar i
+      // el comptador d'ús de tokens es quedava congelat en silenci.
+      .catch(() => undefined);
   }
 
   const sessOf = (sid: string): ChatSession | undefined =>
@@ -3316,16 +2486,21 @@ export const useAgentStore = create<AgentState>((set, get) => {
             PLATFORM_IOS +
             "\n\n"
           : "";
+      // Models locals PETITS (≤3,5B): la finestra de context és petita (8k) i
+      // el prompt complet + tot el codi del projecte la consumeixen tota:
+      // el model es queda sense espai per respondre («ha anat justa de
+      // memòria» a cada torn). Per a ells: prompt COMPACT i menys codi.
+      const modelPetit = isSmallModel(sess.model ?? selectedModelLocal());
       if (sess.includeContext) {
         get().pushStep(sid, {
           label: "ia",
           detail: "Recol·lectant el codi del projecte per adjuntar-lo com a context…",
           ok: true,
         });
-        const ctx = await get().buildContext(sid, undefined, text);
+        const ctx = await get().buildContext(sid, modelPetit ? 3500 : undefined, text);
         if (ctx) {
           msg = `${ctx}\n\n---\nPREGUNTA / TASCA:\n${text}`;
-          sys = platformPreamble + CONTEXT_SYSTEM;
+          sys = platformPreamble + (modelPetit ? COMPACT_SYSTEM : CONTEXT_SYSTEM);
           get().pushStep(sid, {
             label: "ia",
             detail: sessOf(sid)?.contextInfo ?? "Context del projecte preparat.",

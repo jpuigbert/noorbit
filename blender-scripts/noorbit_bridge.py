@@ -28,6 +28,7 @@ bl_info = {
 
 import bpy
 import json
+import os
 import socket
 import threading
 import queue
@@ -37,7 +38,10 @@ from contextlib import redirect_stdout
 from bpy.props import IntProperty, StringProperty
 
 AUTH_KEY = "noorbit"
-DEFAULT_PORT = 9876
+# Port per defecte. NoOrbit l'injecta per la variable d'entorn
+# NOORBIT_BRIDGE_PORT (el port CONFIGURAT per l'usuari): això i el client
+# coincideixen sempre. La font d'aquest valor és src-tauri/src/ports.rs.
+DEFAULT_PORT = int(os.environ.get("NOORBIT_BRIDGE_PORT", "9876"))
 
 _state = {
     "server": None,
@@ -48,6 +52,7 @@ _state = {
 }
 _requests = queue.Queue()
 _results = {}
+_rid_seq = 0  # comptador global per a rid únics (mai id(code))
 
 
 # -----------------------------------------------------------------------------
@@ -60,22 +65,40 @@ def _run_code(code):
         with redirect_stdout(buf):
             exec(code, ns)
         return buf.getvalue()
-    except Exception as e:  # noqa: BLE001
-        return "Error: " + "".join(traceback.format_exception_only(type(e), e)).strip()
+    except BaseException as e:  # noqa: BLE001
+        # BaseException, no Exception: un `sys.exit()`/`SystemExit`/`quit()`
+        # del codi executat NO és un Exception, i si s'escapa mata el timer
+        # de Blender per sempre (servidor viu que accepta però no processa:
+        # tots els clients esperen el timeout sense cap senyal).
+        return "Error: " + "".join(
+            traceback.format_exception_only(type(e), e)
+        ).strip()
 
 
 def _worker_timer():
     # S'executa al fil principal: atén una petició pendent si n'hi ha.
-    if not _state["running"]:
-        _state["timer_on"] = False
-        return None
+    # Blindatge final: cap excepció (ni BaseException) no pot escapar d'ací,
+    # perquè un callback de bpy.app.timers que llença desregistra el timer i
+    # el bridge queda mort en silenci.
     try:
-        rid, code, ev = _requests.get_nowait()
-    except queue.Empty:
+        if not _state["running"]:
+            _state["timer_on"] = False
+            return None
+        try:
+            rid, code, ev = _requests.get_nowait()
+        except queue.Empty:
+            return 0.05
+        _results[rid] = _run_code(code)
+        ev.set()
+        # Neteja de resultats orfes (peticions amb client que ja ha expirat):
+        # sense això, cada timeout fuig memòria per sempre.
+        if len(_results) > 32:
+            for k in list(_results.keys())[: len(_results) - 32]:
+                _results.pop(k, None)
         return 0.05
-    _results[rid] = _run_code(code)
-    ev.set()
-    return 0.05
+    except BaseException as e:  # noqa: BLE001
+        print("NoOrbit Bridge: error al worker: %r" % (e,))
+        return 0.5
 
 
 def _ensure_timer():
@@ -97,6 +120,7 @@ def _send(fobj, obj):
 
 
 def _handle(conn):
+    global _rid_seq
     conn.settimeout(60)
     fobj = conn.makefile("rwb")
     try:
@@ -116,11 +140,15 @@ def _handle(conn):
             arg = msg.get("argument") or {}
             if command == "execute":
                 code = arg.get("code", "")
-                rid = "%s-%s" % (threading.get_ident(), id(code))
+                # id(code) és una adreça de memòria: dos peticions concurrents
+                # amb el mateix codi (o GC que recicla l'adreça) podrien
+                # col·lisionar i lliurar resultats CREUATS. Comptador únic.
+                _rid_seq += 1
+                rid = "%s-%d" % (threading.get_ident(), _rid_seq)
                 ev = threading.Event()
                 _requests.put((rid, code, ev))
                 ev.wait(timeout=55)
-                out = _results.pop(rid, "Error: sense resultat")
+                out = _results.pop(rid, "Error: sense resultat (Blender ocupat: operador modal o render en curs?)")
                 _send(fobj, {"exec": out, "final": True})
             else:
                 _send(fobj, {"exec": "Error: comanda desconeguda", "final": True})
@@ -137,11 +165,12 @@ def _handle(conn):
             pass
 
 
-def _serve(port):
+def _serve(port, bind_ok):
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         srv.bind(("127.0.0.1", port))
+        bind_ok.set()  # el port és nostre: el caller ja pot dir «escoltant»
     except OSError as e:
         print("NoOrbit Bridge: no s'ha pogut obrir el port %d: %s" % (port, e))
         _state["running"] = False
@@ -172,8 +201,18 @@ def start_server(port=DEFAULT_PORT):
     _state["port"] = port
     _state["running"] = True
     _ensure_timer()
-    _state["thread"] = threading.Thread(target=_serve, args=(port,), daemon=True)
+    # El fil comunica el resultat del bind amb un Event: abans, start_server
+    # retornava True (i la UI deia «escoltant») encara que el port ja
+    # estigués ocupat i el fil morís silenciosament.
+    bind_ok = threading.Event()
+    _state["thread"] = threading.Thread(target=_serve, args=(port, bind_ok), daemon=True)
     _state["thread"].start()
+    if not bind_ok.wait(timeout=2.0):
+        # El bind ha fallat (o el fil ha mort): desfem tot.
+        _state["running"] = False
+        stop_server()
+        print("NoOrbit Bridge: el port %d no s'ha pogut obrir" % port)
+        return False
     print("NoOrbit Bridge escoltant a 127.0.0.1:%d" % port)
     return True
 
@@ -187,6 +226,11 @@ def stop_server():
         except Exception:  # noqa: BLE001
             pass
     _state["server"] = None
+    # Esperem el fil vell (amb límit): un start immediat podria xocar amb el
+    # bucle accept del fil anterior encara viu.
+    th = _state.get("thread")
+    if th is not None and th.is_alive():
+        th.join(timeout=2.0)
     try:
         if _state["timer_on"]:
             bpy.app.timers.unregister(_worker_timer)

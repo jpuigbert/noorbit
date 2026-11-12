@@ -41,6 +41,9 @@
   font-size: 12px;
   text-align: left;
   cursor: pointer;
+  transition:
+    background var(--speed-fast) var(--ease-out),
+    color var(--speed-fast) var(--ease-out);
 }
 .git-row:hover {
   background: var(--bg-2);
@@ -167,6 +170,14 @@
   color: var(--text-0);
   font-size: 12px;
   padding: 6px;
+  outline: none;
+  transition:
+    border-color var(--speed-fast) var(--ease-out),
+    box-shadow var(--speed-fast) var(--ease-out);
+}
+.git-msg:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .git-feedback {
   padding: 6px 10px;
@@ -179,7 +190,7 @@
 /* ── Núvol d'equip: connectar el projecte i sincronitzar entre dispositius ── */
 .git-cloud {
   padding: 6px 12px;
-  border-bottom: 1px solid var(--border-1);
+  border-bottom: 1px solid var(--border);
   background: var(--bg-2);
 }
 .git-cloud-line {
@@ -215,8 +226,8 @@
   background: var(--accent-soft);
 }
 .git-cloud-badge.down {
-  color: var(--gold, #e8c465);
-  background: rgba(232, 196, 101, 0.12);
+  color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 12%, transparent);
 }
 .git-cloud-spacer {
   flex: 1;

@@ -57,6 +57,9 @@
   border-radius: var(--radius-sm);
   color: var(--text-1);
   font-size: 12.5px;
+  transition:
+    background var(--speed-fast) var(--ease-out),
+    color var(--speed-fast) var(--ease-out);
 }
 .menu-item:hover {
   background: var(--bg-3);
@@ -71,8 +74,19 @@
   border: 1px solid var(--border-2);
   border-radius: var(--radius);
   padding: 4px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-lg);
   z-index: 50;
+  animation: menu-in var(--speed-fast) var(--ease-out);
+}
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 .menu-row {
   display: flex;
@@ -161,6 +175,9 @@
   color: var(--text-1);
   cursor: pointer;
   white-space: nowrap;
+  transition:
+    background var(--speed-fast) var(--ease-out),
+    color var(--speed-fast) var(--ease-out);
 }
 .tree-node:hover {
   background: var(--bg-2);
@@ -304,6 +321,13 @@
   border-radius: var(--radius-sm);
   color: var(--text-1);
   font-size: 13px;
+  transition:
+    background var(--speed-fast) var(--ease-out),
+    color var(--speed-fast) var(--ease-out);
+}
+.cp-palette-row:hover:not(.selected) {
+  background: var(--bg-2);
+  color: var(--text-0);
 }
 .cp-palette-row.selected {
   background: var(--bg-3);
@@ -346,6 +370,10 @@
 .rp-tab {
   border-radius: 8px;
   transition: background 0.15s ease, color 0.15s ease;
+}
+.rp-tab:hover:not(.active) {
+  background: var(--bg-2);
+  color: var(--text-0);
 }
 .rp-tab.active {
   background: var(--accent-soft);

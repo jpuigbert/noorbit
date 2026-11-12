@@ -37,8 +37,12 @@ export default function WebAiPanel() {
     setRightTab("agent");
     // La finestra del navegador ja queda oberta a la IA (visible): si cal,
     // l'usuari iniciarà sessió amb el seu compte mentre s'hi và passant.
-    void openWebChat(ia.id);
-    setStarting(null);
+    // S'ESPERA l'obertura abans de deixar el flag: abans es feia alhora
+    // (React agrupava els dos estats i el botó mai no quedava «bloquejat»:
+    // un doble clic obria dues finestres del navegador).
+    void openWebChat(ia.id)
+      .catch(() => undefined)
+      .finally(() => setStarting(null));
   };
 
   return (

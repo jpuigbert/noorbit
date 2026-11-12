@@ -66,6 +66,12 @@ interface ExpertState {
   clearTeam: () => void;
 }
 
+/// Registre d'esdeveniments compartit: StrictMode munta l'efecte dues
+/// vegades i, sense una promesa única, dues crides concurrents passarien el
+/// guard `eventsReady` (que es posa DESPRÉS del await) i registrarien dos
+/// listeners → progrés duplicat. Si falla, es torna a null per reintenter.
+let eventsSetup: Promise<void> | null = null;
+
 export const useExpertStore = create<ExpertState>((set, get) => ({
   experts: [],
   busy: false,
@@ -89,11 +95,25 @@ export const useExpertStore = create<ExpertState>((set, get) => ({
 
   setupEvents: async () => {
     if (get().eventsReady) return;
-    const { listen } = await import("@tauri-apps/api/event");
-    listen<ProgressEvent>("experts://progress", (evt) => {
-      set((s) => ({ teamProgress: [...s.teamProgress, evt.payload] }));
-    });
-    set({ eventsReady: true });
+    if (!eventsSetup) {
+      eventsSetup = (async () => {
+        try {
+          const { listen } = await import("@tauri-apps/api/event");
+          // Espera el registre abans de marcar «llest»: si falla, es reintenta
+          // (abans el flag es posava a cegues i el progrés dels experts es
+          // quedava congelat en silenci, per sempre).
+          await listen<ProgressEvent>("experts://progress", (evt) => {
+            if (!evt.payload) return;
+            set((s) => ({ teamProgress: [...s.teamProgress, evt.payload] }));
+          });
+          set({ eventsReady: true, error: null });
+        } catch (e) {
+          eventsSetup = null;
+          set({ error: "No s'han pogut connectar els esdeveniments dels experts: " + String(e) });
+        }
+      })();
+    }
+    await eventsSetup;
   },
 
   create: async (input) => {

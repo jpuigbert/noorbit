@@ -7,8 +7,9 @@ import * as ed from "./editor/editorApi";
 import { saveCurrentFile, useWorkspaceStore } from "./stores/workspaceStore";
 import { useUIStore } from "./stores/uiStore";
 import { usePreviewStore } from "./stores/previewStore";
+import { toastError } from "./stores/toastStore";
 
-export const actions: Record<string, () => void | Promise<void>> = {
+const rawActions = {
   // Fitxer
   "file.new": () => useWorkspaceStore.getState().newFile(),
   "file.newProject": () => useUIStore.getState().setShowNewProject(true),
@@ -89,6 +90,10 @@ export const actions: Record<string, () => void | Promise<void>> = {
   // IA (pròpi de NoOrbit, com el xat de Qoder)
   "ai.models": () => useUIStore.getState().setShowModelManager(true),
   "ai.catalog": () => useUIStore.getState().setShowIaCatalog(true),
+  // Menú «Hugging Bay»: cercar i baixar models GGUF del mirror verificat.
+  "ai.huggingBay": () => useUIStore.getState().setShowHuggingBay(true),
+  // Menú «Pujar»: publicar temes WordPress al marketplace.
+  "ai.publishTheme": () => useUIStore.getState().setShowPublishTheme(true),
   "ai.remoteServer": () => useUIStore.getState().setShowRemoteServer(true),
   // Tornar a veure l'assistent de benvinguda (3 passos) en qualsevol moment:
   // apareix a Ajuda ▸ … i també es pot cercar amb ⌘P («benvinguda»).
@@ -126,7 +131,23 @@ export const actions: Record<string, () => void | Promise<void>> = {
   "help.manual": () => useUIStore.getState().setShowHelp(true),
 };
 
-export type ActionId = keyof typeof actions;
+/// Totes les accions passen per aquest embolcall: cap error pot quedar sense
+/// gestionar (abans, un rebuig en «desar» o «ves a la definició» es perdia
+/// i l'usuari veia que «res passava»).
+export const actions: Record<string, () => Promise<void>> = Object.fromEntries(
+  Object.entries(rawActions).map(([id, fn]) => [
+    id,
+    async () => {
+      try {
+        await fn();
+      } catch (e) {
+        toastError("L'acció «" + id + "» ha fallat", e);
+      }
+    },
+  ])
+) as Record<string, () => Promise<void>>;
+
+export type ActionId = keyof typeof rawActions;
 
 export interface CommandDef {
   id: ActionId;
@@ -177,6 +198,8 @@ export const commandList: CommandDef[] = [
   { id: "git.open", labelKey: "menu.gitPanel" },
   { id: "ai.models", labelKey: "ai.manager" },
   { id: "ai.catalog", labelKey: "ai.catalog" },
+  { id: "ai.huggingBay", labelKey: "menu.huggingBay" },
+  { id: "ai.publishTheme", labelKey: "menu.publishTheme" },
   { id: "ai.remoteServer", labelKey: "menu.remoteServer" },
   { id: "view.onboarding", labelKey: "menu.replayOnboarding" },
   { id: "ai.plugins", labelKey: "plugins.title" },

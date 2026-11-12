@@ -22,6 +22,10 @@ export interface ProcessEvent {
 /// un de nou i el raonament es perdia per sempre: ara el torn s'arxiva i es
 /// pot tornar a obrir des del panell.
 export interface ProcessTurn {
+  /// Identificador ESTABLE del torn: serveix de clau a React. Sense ell,
+  /// la llista invertida dels torns fa que tots els torns canviïn de clau
+  /// en cada torn nou (i l'estat obert/plegat es perdi).
+  id: number;
   provider: string | null;
   model: string | null;
   thinking: string;
@@ -63,6 +67,9 @@ const MAX_TURNS = 8;
 const LIVE_CHARS = 20000;
 const TURN_CHARS = 6000;
 const LS_KEY = "noorbit.process";
+
+/// Comptador d'identificadors de torn (clau estable a React).
+let turnSeq = 0;
 
 const EMPTY: ProcessSnapshot = {
   text: "",
@@ -164,6 +171,7 @@ export const useProcessStore = create<ProcessState>((set) => ({
         const turn: ProcessTurn | null =
           prev.thinking || prev.text || prev.error
             ? {
+                id: ++turnSeq,
                 provider: prev.provider,
                 model: prev.model,
                 thinking: prev.thinking,
@@ -242,7 +250,10 @@ let registered = false;
 export function registerProcessListener() {
   if (registered) return;
   registered = true;
+  // Amb catch: si el registre falla, el rebuig quedava sense gestionar (i el
+  // flag ja era cert → mai es reintentava).
   void listen<ProcessEvent>("ai://process", (evt) => {
+    if (!evt.payload) return;
     useProcessStore.getState().push(evt.payload);
-  });
+  }).catch(() => undefined);
 }

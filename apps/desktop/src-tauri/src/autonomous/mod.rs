@@ -95,7 +95,19 @@ impl AutonomousStore {
         if let Ok(raw) = serde_json::to_string_pretty(&FileData {
             jobs: list.to_vec(),
         }) {
-            let _ = fs::write(&self.path, raw);
+            // Escriptura ATÒMICA (fitxer temporal + rename): si l'app es tanca
+            // en ple escriptura, el JSON quedava a mitges i era invàlid → en
+            //-arrencar, `unwrap_or_default()` feia veure que no hi havia cap
+            // feina i el primer `save` les esborrava PER SEMPRE.
+            let tmp = self.path.with_extension("json.tmp");
+            if fs::write(&tmp, &raw).is_ok() {
+                let _ = fs::rename(&tmp, &self.path);
+            } else {
+                // Reserva: si el rename falla (Windows amb el fitxer obert),
+                // almenys no deixem el fitxer a mitges.
+                let _ = fs::write(&self.path, &raw);
+                let _ = fs::remove_file(&tmp);
+            }
         }
     }
 

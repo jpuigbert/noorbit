@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { OLLAMA_CLOUD_URL } from "./aiStore";
+import { toastError } from "./toastStore";
 
 export type AuthScheme = "bearer" | "header" | "none";
 /// Format d'API del proveïdor: compatible OpenAI o Anthropic (Claude).
@@ -98,38 +99,59 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   add: async (p) => {
-    await invoke("ai_provider_add", { provider: p });
-    await get().load();
+    // Sense aquests catch, un error del backend (permisos, disc ple, JSON
+    // invàlid) es convertia en un rebuig sense gestionar: el formulari es
+    // tanca net però el proveïdor NO s'ha desat, i l'usuari no veia res.
+    try {
+      await invoke("ai_provider_add", { provider: p });
+      await get().load();
+    } catch (e) {
+      toastError("No s'ha pogut afegir el proveïdor", e);
+      throw e;
+    }
   },
 
   update: async (patch) => {
-    await invoke("ai_provider_update", { patch });
-    await get().load();
+    try {
+      await invoke("ai_provider_update", { patch });
+      await get().load();
+    } catch (e) {
+      toastError("No s'ha pogut desar el proveïdor", e);
+      throw e;
+    }
   },
 
   setEnabled: async (id, enabled) => {
     const p = get().providers.find((x) => x.id === id);
     if (!p) return;
     // El backend conserva tot el que no enviem (el token sobretot).
-    await invoke("ai_provider_update", {
-      patch: {
-        id: p.id,
-        name: p.name,
-        baseUrl: p.base_url,
-        model: p.model,
-        kind: (p.kind === "anthropic" ? "anthropic" : "openai") as ProviderKind,
-        auth: p.auth,
-        headerName: p.header_name,
-        enabled,
-      },
-    });
-    await get().load();
+    try {
+      await invoke("ai_provider_update", {
+        patch: {
+          id: p.id,
+          name: p.name,
+          baseUrl: p.base_url,
+          model: p.model,
+          kind: (p.kind === "anthropic" ? "anthropic" : "openai") as ProviderKind,
+          auth: p.auth,
+          headerName: p.header_name,
+          enabled,
+        },
+      });
+      await get().load();
+    } catch (e) {
+      toastError("No s'ha pogut canviar l'estat del proveïdor", e);
+    }
   },
 
   remove: async (id) => {
-    await invoke("ai_provider_remove", { id });
-    if (get().active === id) await get().select("ollama");
-    await get().load();
+    try {
+      await invoke("ai_provider_remove", { id });
+      if (get().active === id) await get().select("ollama");
+      await get().load();
+    } catch (e) {
+      toastError("No s'ha pogut esborrar el proveïdor", e);
+    }
   },
 
   test: async (id) => {
@@ -146,8 +168,12 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
   },
 
   select: async (id) => {
-    await invoke("ai_select_provider", { id });
-    set({ active: id });
+    try {
+      await invoke("ai_select_provider", { id });
+      set({ active: id });
+    } catch (e) {
+      toastError("No s'ha pogut canviar el proveïdor actiu", e);
+    }
   },
 
   /// Diagnòstic de la connexió ABANS de desar el proveïdor: prova el

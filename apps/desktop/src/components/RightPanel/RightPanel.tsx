@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Eye, Bot, Play, Square, Globe, Users, Monitor, Boxes, Clapperboard,
-  Smartphone, Wrench, Workflow, Brain,
+  Smartphone, Wrench, Brain, Activity, GitBranch, AlertTriangle, Terminal,
 } from "lucide-react";
 import { useT } from "../../i18n";
 import { usePreviewStore, type AgentSub, type RightTab } from "../../stores/previewStore";
@@ -47,10 +47,10 @@ const SUB_ICONS: Record<SubKeyAgent, ReactNode> = {
   mobile: <Smartphone size={12} />,
 };
 const SUB_DEV_ICONS: Record<SubKeyDev, ReactNode> = {
-  process: <Workflow size={12} />,
-  git: <Globe size={12} />,
-  problems: <Workflow size={12} />,
-  console: <Wrench size={12} />,
+  process: <Activity size={12} />,
+  git: <GitBranch size={12} />,
+  problems: <AlertTriangle size={12} />,
+  console: <Terminal size={12} />,
 };
 
 export default function RightPanel() {
@@ -171,7 +171,11 @@ export default function RightPanel() {
           </div>
         )}
 
-        {rightTab === "web" && <WebAiPanel />}
+        {rightTab === "web" && (
+          <PanelErrorBoundary label="Error a la IA de web">
+            <WebAiPanel />
+          </PanelErrorBoundary>
+        )}
 
         {rightTab === "preview" && (
           <div className="preview-wrap">
@@ -214,10 +218,26 @@ export default function RightPanel() {
               ))}
             </div>
             <div className="rp-group-body">
-              {subDev === "process" && <AIProcessViewer />}
-              {subDev === "git" && <GitPanel />}
-              {subDev === "problems" && <ProblemsPanel />}
-              {subDev === "console" && <DebugConsole />}
+              {subDev === "process" && (
+                <PanelErrorBoundary label="Error a l'activitat IA">
+                  <AIProcessViewer />
+                </PanelErrorBoundary>
+              )}
+              {subDev === "git" && (
+                <PanelErrorBoundary label="Error al panell de Git">
+                  <GitPanel />
+                </PanelErrorBoundary>
+              )}
+              {subDev === "problems" && (
+                <PanelErrorBoundary label="Error al panell de problemes">
+                  <ProblemsPanel />
+                </PanelErrorBoundary>
+              )}
+              {subDev === "console" && (
+                <PanelErrorBoundary label="Error a la consola">
+                  <DebugConsole />
+                </PanelErrorBoundary>
+              )}
             </div>
           </div>
         )}

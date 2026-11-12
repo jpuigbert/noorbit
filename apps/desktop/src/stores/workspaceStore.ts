@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { lintOffline } from "../editor/diagnostics";
 import { dropMarkOnManualSave } from "./editReviewStore";
+import { toastError } from "./toastStore";
 
 export interface FileNode {
   name: string;
@@ -57,6 +58,10 @@ interface WorkspaceState {
 
 const LS_RECENTS = "noorbit.recents";
 const MAX_RECENTS = 8;
+
+/// Comptador de lectures en curs: descarta la resposta d'un `loadFile` que
+/// arriba després d'un altre (evita mostrar i desar el fitxer equivocat).
+let loadFileSeq = 0;
 
 /// Extensions que l'editor ha de mostrar com a imatge, no com a text.
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp|ico|tiff?|heic|avif)$/i;
@@ -150,9 +155,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   loadFile: async (path) => {
+    // Guard anti-cursa: si l'usuari clica dos fitxers ràpid (el primer gran o
+    // en disc lent), la resposta del PRIMER pot arribar DESPRÉS de la del
+    // segon i sobrescriure l'editor → si es desa, les edicions van al fitxer
+    // EQUIVOCAT al disc. El comptador descarta respostes tardanes.
+    const myCall = ++loadFileSeq;
     // Les imatges NO es llegeixen com a text: es marquen perquè l'editor en
     // faces una previsualització (Monaco mostraria bytes binaris sense sentit).
     if (isImagePath(path)) {
+      if (myCall !== loadFileSeq) return;
       set({
         openFile: {
           path,
@@ -166,6 +177,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
     try {
       const content = await invoke<string>("read_file", { path });
+      if (myCall !== loadFileSeq) return; // ha arribat tard: descarta
       set({
         openFile: { path, name: path.split(/[/\\]/).pop() ?? path, content, dirty: false },
       });
@@ -175,7 +187,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   saveFile: async (path, content) => {
-    await invoke("write_file", { path, content });
+    try {
+      await invoke("write_file", { path, content });
+    } catch (e) {
+      // Sense això, un desat fallit (disc ple, permisos, fitxer esborrat)
+      // era invisible: el flag `dirty` era l'únic.indici i l'usuari creia
+      // que ho tenia desat.
+      toastError("No s'ha pogut desar " + (path.split(/[/\\]/).pop() ?? path), e);
+      throw e;
+    }
     // Si la IA tenia un canvi pendent en este fitxer, el guardat manual de
     // l'usuari l'aixafa: la revisió es tanca (com fa VS Code).
     dropMarkOnManualSave(path);
@@ -195,7 +215,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   // no n'hi ha cap altre), el refresca perquè l'usuari VEUA créixer el codi
   // mentre la IA l'escriu. dirty=false: el disc i l'editor coincideixen.
   writeLive: async (path, content) => {
-    await invoke("write_file", { path, content });
+    try {
+      await invoke("write_file", { path, content });
+    } catch (e) {
+      // L'escriptura «en viu» pot fallar (fitxer bloquejat, permisos): sense
+      // tractar-ho, el rebuig pujava a la cadena de l'agent sense gestor i
+      // l'estat d'escriptura quedava inconsistent.
+      toastError("No s'ha pogut escriure " + (path.split(/[/\\]/).pop() ?? path), e);
+      throw e;
+    }
     const cur = get().openFile;
     if (!cur || cur.path === path || cur.path.startsWith("untitled:")) {
       set({

@@ -30,6 +30,7 @@ export default function PortablePanel() {
   const [report, setReport] = useState<MigrateReport | null>(null);
   const [err, setErr] = useState("");
   const [takeData, setTakeData] = useState(true);
+  const [msg, setMsg] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -67,6 +68,24 @@ export default function PortablePanel() {
       const rep = await invoke<MigrateReport>("portable_enable", { migrate: takeData });
       setReport(rep);
       await refresh();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /// Crea el PAQUET PORTÀTIL (app + llançador + marcador) en una carpeta,
+  /// per copiar-lo a un USB i executar-lo en macOS, Linux o Windows.
+  async function createBundle() {
+    setBusy(true);
+    setErr("");
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const dir = await open({ directory: true, title: "Tria on crear el paquet portàtil" });
+      if (typeof dir !== "string") return;
+      const msg = await invoke<string>("portable_create_bundle", { dest: dir });
+      setMsg(msg);
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -129,6 +148,21 @@ export default function PortablePanel() {
           <div className="lp-hint">{t("settings.portable.noVolumes")}</div>
         </div>
       )}
+
+      {/* CREAR EL PAQUET PER AL USB (funciona en macOS, Linux i Windows) */}
+      <div className="setting-row setting-row-col">
+        <span style={{ fontWeight: 600 }}>Paquet portàtil per a un USB</span>
+        <div className="lp-hint">
+          Crea una carpeta amb l'aplicació, un llançador i el marcador
+          «portàtil»: la copies al USB i la pots executar a qualsevol
+          ordinador (macOS, Linux o Windows) sense instal·lar res. Les dades
+          queden al costat, en «NoOrbitData».
+        </div>
+        <button className="btn sm" disabled={busy} onClick={() => void createBundle()}>
+          <Usb size={12} /> Crea el paquet portàtil…
+        </button>
+        {msg && <div className="lp-hint">{msg}</div>}
+      </div>
 
       {/* ACTIVAR AL MAC (rares) */}
       {st.activatable && !st.portable && (

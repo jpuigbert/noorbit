@@ -61,6 +61,10 @@ pub struct BayDetails {
     /// Estat de la descàrrega segons el mirror.
     pub status: Option<String>,
     pub downloadable: bool,
+    /// RAM estimada (GB) que diu el mirror.
+    pub ram_gb: Option<u64>,
+    /// Quantització que s'ha demanat (Q4_K_M…).
+    pub requested_quant: Option<String>,
 }
 
 /// Crida una eina de l'MCP de Hugging Bay i retorna el `structuredContent`.
@@ -104,22 +108,71 @@ async fn call_tool(
 
 /// Cerca models GGUF a Hugging Bay.
 pub async fn search(http: &reqwest::Client, query: &str, limit: usize) -> Result<Vec<BayModel>> {
+    Ok(search_page(http, query, "best", None, limit).await?.0)
+}
+
+/// Pàgina de resultats amb ORDENACIÓ i CURSOR (paginació):
+/// - `sort`: «best» (relevància), «downloads» (els més descarregats), «updated»…
+/// - `cursor`: el `nextCursor` de la pàgina anterior (per als 5 més
+///   descarregats de cada pàgina).
+///
+/// Retorna (models, cursor següent, total de resultats).
+pub async fn search_page(
+    http: &reqwest::Client,
+    query: &str,
+    sort: &str,
+    cursor: Option<&str>,
+    limit: usize,
+) -> Result<(Vec<BayModel>, Option<String>, u64)> {
     let q = query.trim();
-    if q.is_empty() {
-        return Ok(Vec::new());
+    let limit = limit.clamp(1, 40);
+    let mut args = serde_json::json!({
+        "format": "gguf",
+        "limit": limit,
+        "sort": sort,
+        "detail": "full"
+    });
+    // Sense text: es demana el catàleg complet ordenat (els més descarregats).
+    if !q.is_empty() {
+        args["q"] = serde_json::Value::String(q.to_string());
     }
-    let sc = call_tool(
-        http,
-        "search_artifacts",
-        serde_json::json!({
-            "q": q,
-            "format": "gguf",
-            "limit": limit.clamp(1, 40),
-            "detail": "full"
-        }),
-    )
-    .await?;
-    Ok(parse_rows(&sc))
+    let mut cur = cursor.filter(|c| !c.is_empty()).map(|c| c.to_string());
+    if let Some(c) = &cur {
+        args["cursor"] = serde_json::Value::String(c.clone());
+    }
+    let _ = cur.take();
+
+    // El mirror, en mode ordenat (sense text), retorna UN model per crida i un
+    // cursor numèric: per omplir la pàgina es fan diverses crides seguides.
+    let mut models: Vec<BayModel> = Vec::new();
+    let mut next: Option<String> = None;
+    let mut total = 0u64;
+    for _ in 0..12 {
+        let sc = call_tool(http, "search_artifacts", args.clone()).await?;
+        total = sc.get("total").and_then(|v| v.as_u64()).unwrap_or(total);
+        let rows = parse_rows(&sc);
+        let got = rows.len();
+        models.extend(rows);
+        next = sc
+            .get("nextCursor")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        if models.len() >= limit {
+            break;
+        }
+        match &next {
+            Some(c) => {
+                args["cursor"] = serde_json::Value::String(c.clone());
+            }
+            None => break,
+        }
+        if got == 0 {
+            break;
+        }
+    }
+    models.truncate(limit);
+    Ok((models, next, total))
 }
 
 /// Converteix la resposta de la cerca en models (funció PURA: es pot
@@ -190,8 +243,19 @@ fn parse_rows(sc: &Value) -> Vec<BayModel> {
 }
 
 /// Detalls d'un model: fitxer recomanat, quantitzacions i enllaç signat.
-pub async fn details(http: &reqwest::Client, id: &str) -> Result<BayDetails> {
-    let sc = call_tool(http, "get_model", serde_json::json!({ "id": id, "detail": "full" })).await?;
+/// `quant` permet demanar una quantització concreta (p. ex. «Q4_K_M»): si el
+/// mirror l'ofereix, el fitxer recomanat és el demanat (amb la seva mida i el
+/// seu SHA-256).
+pub async fn details(
+    http: &reqwest::Client,
+    id: &str,
+    quant: Option<&str>,
+) -> Result<BayDetails> {
+    let mut args = serde_json::json!({ "id": id, "detail": "full" });
+    if let Some(q) = quant.filter(|q| !q.trim().is_empty()) {
+        args["quant"] = serde_json::Value::String(q.trim().to_string());
+    }
+    let sc = call_tool(http, "get_model", args).await?;
 
     let repo = sc
         .get("name")
@@ -289,7 +353,41 @@ pub async fn details(http: &reqwest::Client, id: &str) -> Result<BayDetails> {
         files,
         status,
         downloadable,
+        ram_gb: sc.get("ramNeededGb").and_then(|v| v.as_u64()),
+        requested_quant: sc
+            .get("requestedQuant")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
     })
+}
+
+/// Descarrega el GGUF recomanat d'un model del mirror i retorna (detalls,
+/// ruta del fitxer).
+///
+/// El fitxer **es conserva** a la carpeta de models de NoOrbit: serveix per
+/// a l'ús NATIU (llama.cpp, sense Ollama) i també per registrar-lo a Ollama.
+pub async fn fetch_gguf(
+    http: &reqwest::Client,
+    app: Option<&tauri::AppHandle>,
+    id: &str,
+    quant: Option<&str>,
+) -> Result<(BayDetails, std::path::PathBuf)> {
+    let det = details(http, id, quant).await?;
+    let file = det
+        .recommended
+        .clone()
+        .ok_or_else(|| anyhow!("Aquest model no té cap fitxer descargable."))?;
+    let url = file
+        .download_url
+        .clone()
+        .ok_or_else(|| anyhow!("El mirror no dona enllaç de descàrrega per a aquest model."))?;
+    let dest_name = format!(
+        "{}-{}",
+        ollama_name(&det.model.repo),
+        file.path.rsplit('/').next().unwrap_or("model.gguf")
+    );
+    let path = download_file(http, app, id, &url, &dest_name, file.sha256.as_deref()).await?;
+    Ok((det, path))
 }
 
 /// Detecta la quantització d'un nom de fitxer GGUF (Q4_K_M, Q5_K_M…).
@@ -333,7 +431,17 @@ pub fn a_cloud_model(m: &BayModel) -> CloudModel {
 }
 
 /// Destí on es desen els GGUF baixats (carpeta de dades de NoOrbit).
+///
+/// Si l'usuari ha triat un DISC EXTERN (IA ▸ Models ▸ «Models GGUF»), els
+/// models hi van: es poden fer servir des d'allà i el disc es pot endur a
+/// una altra màquina.
 pub fn models_dir() -> std::path::PathBuf {
+    if let Ok(cfg) = crate::config::AppConfig::load() {
+        let d = cfg.ai.gguf_dir.trim();
+        if !d.is_empty() {
+            return std::path::PathBuf::from(d);
+        }
+    }
     crate::config::AppConfig::data_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("models")
@@ -341,6 +449,12 @@ pub fn models_dir() -> std::path::PathBuf {
 
 /// Descarrega un fitxer del mirror amb PROGRÉS (esdeveniment «ai://pull»,
 /// el mateix que usa la descàrrega d'Ollama) i el desa a la carpeta de models.
+///
+/// INTEGRITAT: es baixa a un fitxer «.part» i es verifica el SHA-256 que
+/// dona el mirror (si en dona). Només quan tot és correcte es renombra al
+/// nom final: una descàrrega interrompuda MAI deixa un fitxer parcial que
+/// després es donaria per bo (abans passava: el model quedava corrupte i
+/// no es tornava a baixar mai).
 ///
 /// L'enllaç signat caduca a 5 minuts: si arriba exhaurit, es torna a demanar
 /// el model (amb un enllaç nou) i es reintenta una vegada.
@@ -350,25 +464,36 @@ pub async fn download_file(
     id: &str,
     url: &str,
     dest_name: &str,
+    sha256: Option<&str>,
 ) -> Result<std::path::PathBuf> {
+    use sha2::{Digest, Sha256};
     use tauri::Emitter;
     let dir = models_dir();
     std::fs::create_dir_all(&dir)?;
     let dest = dir.join(dest_name);
 
-    // Si ja hi és (desada anterior), no tornem a baixar-la.
+    // Si ja hi és (desada anterior, verificada en baixar-la), no tornem a
+    // baixar-la.
     if let Ok(meta) = std::fs::metadata(&dest) {
         if meta.len() > 0 {
             return Ok(dest);
         }
     }
+    // Restes d'una descàrrega interrompuda: es comença de zero (el «.part»
+    // mai es dóna per bo).
+    let part = dir.join(format!("{}.part", dest_name));
+    let _ = std::fs::remove_file(&part);
 
     let mut attempts = 0;
     let mut last_err = String::new();
-    while attempts < 2 {
+    // L'enllaç signat CADUCA (5 min): si arriba exhaurit es demana un de nou
+    // i es REINTENTA amb ell (abans es demanava i es descartava: el bucle
+    // repetia la mateixa URL caducada i no passava mai).
+    let mut url = url.to_string();
+    while attempts < 3 {
         attempts += 1;
         let resp = http
-            .get(url)
+            .get(&url)
             .header("User-Agent", "NoOrbit")
             .timeout(std::time::Duration::from_secs(60 * 30))
             .send()
@@ -376,8 +501,8 @@ pub async fn download_file(
             .map_err(|e| anyhow!("No s'ha pogut descarregar: {}", e))?;
         if !resp.status().is_success() {
             last_err = format!("el mirror ha respost {}", resp.status());
-            // Enllaç caducat: en demanem un de nou.
-            let nou = match details(http, id).await {
+            // Enllaç caducat (403/404): en demanem un de nou.
+            let nou = match details(http, id, None).await {
                 Ok(d) => d.recommended.and_then(|f| f.download_url),
                 Err(e) => {
                     last_err = format!("{} (i no s'ha pogut demanar un enllaç nou: {})", last_err, e);
@@ -386,22 +511,28 @@ pub async fn download_file(
             };
             match nou {
                 Some(u) => {
-                    let _ = u;
+                    if u == url {
+                        // Mateix enllaç: no hi ha res a reintentar.
+                        break;
+                    }
+                    url = u;
                     continue;
                 }
                 None => break,
             }
         }
         let total = resp.content_length().unwrap_or(0);
-        let mut out = std::fs::File::create(&dest)?;
+        let mut out = std::fs::File::create(&part)?;
         let mut stream = resp.bytes_stream();
         use futures::StreamExt;
         let mut written: u64 = 0;
         let mut last_pct: i64 = -1;
+        let mut hasher = Sha256::new();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
             use std::io::Write;
             out.write_all(&chunk)?;
+            hasher.update(&chunk);
             written += chunk.len() as u64;
             if total > 0 {
                 let pct = (written * 100 / total) as i64;
@@ -420,16 +551,50 @@ pub async fn download_file(
             }
         }
         let _ = std::io::Write::flush(&mut out);
+        drop(out);
         if total > 0 && written != total {
             last_err = format!("descàrrega incompleta ({} de {} bytes)", written, total);
             continue;
         }
+        // Verificació SHA-256: el mirror el dona per a cada fitxer. Si no
+        // coincideix, la descàrrega està corrupta: es descarta (mai es dóna
+        // per bona) i es diu clarament a l'usuari.
+        if let Some(expected) = sha256.filter(|s| !s.trim().is_empty()) {
+            if let Some(app) = app {
+                let _ = app.emit(
+                    "ai://pull",
+                    serde_json::json!({
+                        "model": dest_name,
+                        "message": format!("verificant SHA-256 de {}…", dest_name)
+                    }),
+                );
+            }
+            let digest = hasher.finalize();
+            let actual = hex_digest(&digest);
+            if !actual.eq_ignore_ascii_case(expected.trim()) {
+                let _ = std::fs::remove_file(&part);
+                return Err(anyhow!(
+                    "El SHA-256 de «{}» no coincideix amb el del mirror: la descàrrega \
+                     està corrupta i s'ha descartat. Torna-ho a provar.",
+                    dest_name
+                ));
+            }
+        }
+        // Tot correcte: el nom final NOMÉS existeix quan el fitxer és bo
+        // (rename atòmic dins del mateix directori).
+        std::fs::rename(&part, &dest)?;
         return Ok(dest);
     }
+    let _ = std::fs::remove_file(&part);
     Err(anyhow!(
         "No s'ha pogut baixar el model de Hugging Bay: {}",
         if last_err.is_empty() { "error desconegut" } else { &last_err }
     ))
+}
+
+/// SHA-256 en hex minúscules (sense dependència «hex»).
+fn hex_digest(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 /// Registra un GGUF baixat a Ollama perquè aparegui al gestor de models i es
@@ -500,6 +665,42 @@ pub fn ollama_name(repo: &str) -> String {
 mod proves {
     use super::*;
 
+    /// Test de XARXA (s'omet per defecte): comprova que el mirror respon amb
+    /// la forma que esperem. Per executar-lo:
+    ///   cargo test hf_bay -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn xarxa_omple_la_pagina() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let http = reqwest::Client::builder()
+                .user_agent("NoOrbit")
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap();
+            let (models, next, total) =
+                search_page(&http, "", "downloads", None, 5).await.unwrap();
+            println!("models: {} next={:?} total={}", models.len(), next, total);
+            for m in &models {
+                println!(
+                    "  - {:40} ⬇{:>9} {:.1} GB",
+                    m.id,
+                    m.downloads.unwrap_or(0),
+                    m.size.unwrap_or(0) as f64 / 1e9
+                );
+            }
+            assert!(models.len() >= 1, "el mirror hauria de retornar almenys un model");
+            assert!(total > 0);
+            // Detalls amb quantització demanada.
+            let d = details(&http, &models[0].id, Some("Q4_K_M")).await.unwrap();
+            println!("detall: {:?} ram={:?}", d.model.name, d.ram_gb);
+            assert!(!d.model.name.is_empty());
+        });
+    }
+
     /// La cerca ha de llegir els camps que retorna el mirror (id, repo,
     /// owner, mida, descàrregues…) i el nom ha de ser el que Ollama accepta.
     #[test]
@@ -545,5 +746,16 @@ mod proves {
     fn normalitza_el_nom_a_ollama() {
         assert_eq!(ollama_name("unsloth/SmolLM2-135M-Instruct-GGUF"), "smollm2-135m-instruct-gguf");
         assert_eq!(ollama_name("Qwen/Qwen3 4B"), "qwen3-4b");
+    }
+
+    /// El SHA-256 es calcula en hex minúscules (vector conegut: cadena buida).
+    #[test]
+    fn sha256_hex_del_vector_conegut() {
+        use sha2::{Digest, Sha256};
+        let d = Sha256::digest(b"");
+        assert_eq!(
+            hex_digest(&d),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
     }
 }

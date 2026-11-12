@@ -91,6 +91,7 @@
   border-radius: var(--radius-sm);
   background: var(--bg-0);
   border: 1px solid var(--border-2);
+  transition: border-color var(--speed-fast) var(--ease-out);
 }
 .cp-step.run {
   border-left: 3px solid var(--accent);

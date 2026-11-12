@@ -558,7 +558,7 @@ export const useAIStore = create<AIState>((set, get) => ({
         ok: boolean;
         model: string | null;
         message: string;
-      }>("hf_bay_download", { id });
+      }>("hf_bay_download", { id, quant: null });
       if (!res.ok) {
         // Sense Ollama (o sense permís): el fitxer és baixat, però cal el
         // motor per usar-lo. S'ho expliquem a l'usuari.
@@ -598,6 +598,11 @@ export const useAIStore = create<AIState>((set, get) => ({
       await get().loadModels();
       // Un model acabat de baixar es tria automàticament per treballar-hi.
       await get().selectModel(name);
+    } catch (e) {
+      // Sense aquest catch, el rebuig pujava als callers (que no el gestionen
+      // enlloc) i la captura global de consola l'empassava: la descàrrega
+      // fallava EN SILENCI TOTAL (el diàleg es tancava, cap error visible).
+      set({ lastMessage: "Error descarregant " + name + ": " + String(e) });
     } finally {
       (await unlisten)();
       set((s) => {
@@ -609,7 +614,13 @@ export const useAIStore = create<AIState>((set, get) => ({
   },
 
   deleteModel: async (name) => {
-    await invoke("ollama_delete_model", { name });
-    await get().loadModels();
+    try {
+      await invoke("ollama_delete_model", { name });
+      await get().loadModels();
+      set({ lastMessage: "Model «" + name + "» esborrat" });
+    } catch (e) {
+      // Igual que pullModel: sense això, l'esborrat fallava en silenci.
+      set({ lastMessage: "Error esborrant " + name + ": " + String(e) });
+    }
   },
 }));

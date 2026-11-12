@@ -26,20 +26,21 @@ export default function ReviewPill() {
 
   // El compte enrere que es mostra és el del canvi més antic (el que abans
   // s'acceptarà sol), que és també el que l'usuari ha de poder revisar primer.
+  // Primitive estable: l'efecte només depèn del valor mínim, no de la llista.
+  const oldest = pending.length > 0 ? Math.min(...pending.map((m) => m.armedAt)) : null;
   useEffect(() => {
-    if (pending.length === 0) {
+    if (oldest === null) {
       setLeft(null);
       return;
     }
     const tick = () => {
-      const oldest = Math.min(...pending.map((m) => m.armedAt));
       const ms = AUTO_ACCEPT_MS - (Date.now() - oldest);
       setLeft(ms > 0 ? Math.ceil(ms / 1000) : 0);
     };
     tick();
     const id = setInterval(tick, 500);
     return () => clearInterval(id);
-  }, [pending.length, pending.map((m) => m.armedAt).join(",")]);
+  }, [oldest]);
 
   if (pending.length === 0) return null;
 

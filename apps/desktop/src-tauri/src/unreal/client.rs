@@ -12,7 +12,7 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_HOST: &str = "127.0.0.1";
-const DEFAULT_PORT: u16 = 30010;
+const DEFAULT_PORT: u16 = crate::ports::UNREAL_RC_PORT;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteObjectRequest {

@@ -8,8 +8,8 @@
 use super::client::UnrealClient;
 use anyhow::Result;
 
-pub const HTTP_PORT: u16 = 30010;
-pub const WS_PORT: u16 = 30020;
+pub const HTTP_PORT: u16 = crate::ports::UNREAL_RC_PORT;
+pub const WS_PORT: u16 = crate::ports::UNREAL_RC_WS_PORT;
 
 async fn call_server_cdo(
     client: &UnrealClient,

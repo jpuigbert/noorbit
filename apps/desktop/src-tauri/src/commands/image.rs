@@ -90,7 +90,13 @@ pub async fn image_import(
     data_base64: String,
     name: Option<String>,
 ) -> Result<String, String> {
-    imgen::import_base64(&data_base64, name.as_deref()).map_err(|e| e.to_string())
+    // Descodificar i escriure una imatge pot trigar (I/O + codec): en un
+    // fil a part perquè el runtime async no es bloquegi.
+    tauri::async_runtime::spawn_blocking(move || {
+        imgen::import_base64(&data_base64, name.as_deref()).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Desa un fitxer QUALSIVOL adjuntat al xat (codi, documents, dades…) a la
@@ -98,8 +104,12 @@ pub async fn image_import(
 /// que l'usuari enganxa o tria des del disc, que no arriba amb ruta real.
 #[command]
 pub async fn file_import(data_base64: String, name: Option<String>) -> Result<String, String> {
-    imgen::attach_base64(&data_base64, name.as_deref().unwrap_or("fitxer"))
-        .map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        imgen::attach_base64(&data_base64, name.as_deref().unwrap_or("fitxer"))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -211,14 +221,20 @@ pub async fn image_transform(
     y: Option<u32>,
     angle: Option<u32>,
 ) -> Result<GeneratedImage, String> {
-    imgen::transform(
-        std::path::Path::new(&path),
-        &op,
-        width.unwrap_or(0),
-        height.unwrap_or(0),
-        x.unwrap_or(0),
-        y.unwrap_or(0),
-        angle.unwrap_or(0),
-    )
-    .map_err(|e| e.to_string())
+    // Decodificació + codificació d'una imatge pot trigar (codec, imatges
+    // grans): en un fil a part perquè el runtime async no es bloquegi.
+    tauri::async_runtime::spawn_blocking(move || {
+        imgen::transform(
+            std::path::Path::new(&path),
+            &op,
+            width.unwrap_or(0),
+            height.unwrap_or(0),
+            x.unwrap_or(0),
+            y.unwrap_or(0),
+            angle.unwrap_or(0),
+        )
+        .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

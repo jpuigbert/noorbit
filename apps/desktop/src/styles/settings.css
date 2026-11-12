@@ -60,6 +60,10 @@
   background: var(--bg-2);
   color: var(--text-1);
   font-size: 12px;
+  transition:
+    border-color var(--speed-fast) var(--ease-out),
+    background var(--speed-fast) var(--ease-out),
+    color var(--speed-fast) var(--ease-out);
 }
 .theme-swatch:hover {
   border-color: var(--accent);
@@ -127,6 +131,7 @@
   padding: 6px 8px;
   border-radius: 6px;
   cursor: pointer;
+  transition: background var(--speed-fast) var(--ease-out);
 }
 
 .startup-open:hover {
@@ -242,7 +247,7 @@
 }
 .chat-bubble.user {
   background: var(--accent, #4c6ef5);
-  color: #fff;
+  color: var(--on-accent);
   border-bottom-right-radius: 3px;
 }
 .chat-bubble.assistant {
@@ -293,7 +298,7 @@
 }
 .ap-ctx.active {
   background: var(--accent, #4c6ef5);
-  color: #fff;
+  color: var(--on-accent);
   border-color: var(--accent, #4c6ef5);
 }
 .ap-ctx-info {
@@ -417,10 +422,10 @@
   font-size: 11px;
 }
 .settings-msg.ok {
-  color: #4ade80;
+  color: var(--success);
 }
 .settings-msg.err {
-  color: #f87171;
+  color: var(--error);
 }
 
 /* ── Imatges al xat: previsualització, còpia i adjunts ─────────────── */
@@ -506,7 +511,7 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: rgba(139, 92, 246, 0.14);
+  background: var(--accent-soft);
   color: var(--text-0, #e6e6ea);
   font-size: 12.5px;
   pointer-events: none;
@@ -581,7 +586,7 @@
   font-weight: 600;
 }
 .ic-table tbody tr:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-2);
 }
 .ic-yes {
   color: var(--success, #4ade80);
@@ -714,7 +719,7 @@
   gap: 4px;
   border: 0;
   background: transparent;
-  color: #e0b34c;
+  color: var(--warning);
   cursor: pointer;
   font-size: 12px;
   padding: 0 6px;
@@ -779,13 +784,13 @@
   color: var(--text-0, #e6e6ea);
 }
 .c-error .dc-text {
-  color: #ff6b6b;
+  color: var(--error);
 }
 .c-warn .dc-text {
-  color: #e6b450;
+  color: var(--warning);
 }
 .c-info .dc-text {
-  color: #7cc4ff;
+  color: var(--accent-2);
 }
 .c-system .dc-text {
   color: #b6b6c0;
@@ -889,6 +894,9 @@
   padding: 3px 9px;
   border-radius: 999px;
   cursor: pointer;
+  transition:
+    background var(--speed-fast) var(--ease-out),
+    color var(--speed-fast) var(--ease-out);
 }
 .rp-subtab:hover {
   background: var(--bg-3);

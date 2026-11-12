@@ -1,0 +1,257 @@
+/* Menú «Hugging Bay» — cerca i baixada de models GGUF des del mirror.
+   Tokens del tema: mateix llenguatge visual que la resta de l'aplicació. */
+
+.hb-modal {
+  max-width: 620px;
+}
+
+.hb-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ---- Cercador + ordenació ---- */
+.hb-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+}
+.hb-search > svg {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.hb-search input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text-0);
+  font-size: 12.5px;
+}
+.hb-sort {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* ---- Llista de resultats ---- */
+.hb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 210px;
+  overflow-y: auto;
+}
+.hb-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+  transition: border-color var(--speed-fast) var(--ease-out),
+    background var(--speed-fast) var(--ease-out);
+}
+.hb-item:hover {
+  border-color: var(--border-2);
+  background: var(--bg-3);
+}
+.hb-item.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.hb-item-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+.hb-item-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-2);
+  flex-wrap: wrap;
+}
+.hb-lic {
+  color: var(--accent-2);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.hb-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.hb-hint.err {
+  color: var(--error);
+}
+
+/* ---- Paginació ---- */
+.hb-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.hb-pager-info {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* ---- Detalls ---- */
+.hb-details {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hb-details-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+.hb-fields {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+}
+.hb-fields > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.hb-fields span {
+  color: var(--text-3);
+  font-size: 10.5px;
+}
+.hb-fields b {
+  color: var(--text-1);
+  font-weight: 500;
+}
+.hb-fields select {
+  background: var(--bg-3);
+  color: var(--text-0);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  font-size: 11.5px;
+}
+
+.hb-file {
+  font-size: 11.5px;
+  color: var(--text-1);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.hb-k {
+  color: var(--text-3);
+  font-size: 10.5px;
+  margin-right: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.hb-sha code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-2);
+  word-break: break-all;
+}
+
+.hb-download {
+  align-self: flex-start;
+}
+
+.hb-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.hb-progress {
+  font-size: 11px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  word-break: break-word;
+}
+
+.hb-msg {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--text-1);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.hb-msg svg {
+  color: var(--success);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* ---- Atribució ---- */
+.hb-credit {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-3);
+  text-align: center;
+}
+.hb-credit b {
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+/* ---- On es desa el model (disc extern o dades de NoOrbit) ---- */
+.hb-where {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--text-3);
+  flex-wrap: wrap;
+}
+.hb-where svg {
+  flex-shrink: 0;
+}
+.hb-where b {
+  color: var(--text-2);
+  font-weight: 500;
+  word-break: break-all;
+}
+/* Botons de destí (tria carpeta / disc extern, per defecte): discrets,
+   alineats amb la resta de la fila. */
+.hb-where-btn {
+  margin-left: 4px;
+  font-size: 10px;
+  padding: 2px 7px;
+  gap: 4px;
+}

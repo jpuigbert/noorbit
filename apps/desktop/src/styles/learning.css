@@ -193,6 +193,11 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  transition: border-color var(--speed-fast) var(--ease-out);
+}
+.learning-lesson:hover,
+.learning-exchange:hover {
+  border-color: var(--accent);
 }
 .learning-lesson-text {
   font-size: 12px;

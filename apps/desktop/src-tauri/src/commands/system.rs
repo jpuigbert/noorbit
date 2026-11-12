@@ -14,47 +14,55 @@ pub struct MemoryStatus {
 #[command]
 pub async fn system_memory_status() -> Result<MemoryStatus, String> {
     let total = system_total_memory().await?;
-    let used = if cfg!(target_os = "macos") {
-        // `vm_stat` dona el nombre de pàgines per categoria; la mida de la
-        // pàgina ve a la capçalera. Memòria «usada» (aprox. a l'Monitor
-        // d'Activitat) = actives + vinculades (wired) + comprimides.
-        let out = std::process::Command::new("vm_stat")
-            .output()
-            .map_err(|e| format!("vm_stat: {}", e))?;
-        let s = String::from_utf8_lossy(&out.stdout);
-        let page = s
-            .lines()
-            .find_map(|l| l.split("page size of ").nth(1))
-            .and_then(|r| {
-                r.split_whitespace()
-                    .next()
-                    .and_then(|n| n.trim_end_matches(|c: char| !c.is_ascii_digit()).parse::<u64>().ok())
-            })
-            .unwrap_or(4096);
-        let pages_of = |key: &str| -> u64 {
-            s.lines()
-                .find(|l| l.starts_with(key))
-                .and_then(|l| l.split(':').nth(1))
-                .and_then(|v| v.trim().trim_end_matches('.').parse::<u64>().ok())
-                .unwrap_or(0)
-        };
-        let used_pages =
-            pages_of("Pages active") + pages_of("Pages wired down") + pages_of("Pages occupied by compressor");
-        (used_pages * page).min(total)
-    } else if cfg!(target_os = "linux") {
-        // /proc/meminfo: MemTotal i MemAvailable → usada = total - disponible.
-        let f = std::fs::read_to_string("/proc/meminfo").map_err(|e| e.to_string())?;
-        let kb_of = |key: &str| -> Option<u64> {
-            f.lines()
-                .find(|l| l.starts_with(key))
-                .and_then(|l| l.split_whitespace().nth(1))
-                .and_then(|v| v.parse::<u64>().ok())
-        };
-        let avail = kb_of("MemAvailable:").unwrap_or(0) * 1024;
-        total.saturating_sub(avail)
-    } else {
-        0
-    };
+    // El càlcul de la memòria usada pot trigar (subprocessos): es fa en un
+    // fil a part perquè el runtime async no es bloquegi en cada refresc del
+    // visor (aquestes comandes s polleduen cada pocs segons).
+    let used = tauri::async_runtime::spawn_blocking(move || -> Result<u64, String> {
+        if cfg!(target_os = "macos") {
+            // `vm_stat` dona el nombre de pàgines per categoria; la mida de la
+            // pàgina ve a la capçalera. Memòria «usada» (aprox. a l'Monitor
+            // d'Activitat) = actives + vinculades (wired) + comprimides.
+            let out = std::process::Command::new("vm_stat")
+                .output()
+                .map_err(|e| format!("vm_stat: {}", e))?;
+            let s = String::from_utf8_lossy(&out.stdout);
+            let page = s
+                .lines()
+                .find_map(|l| l.split("page size of ").nth(1))
+                .and_then(|r| {
+                    r.split_whitespace()
+                        .next()
+                        .and_then(|n| n.trim_end_matches(|c: char| !c.is_ascii_digit()).parse::<u64>().ok())
+                })
+                .unwrap_or(4096);
+            let pages_of = |key: &str| -> u64 {
+                s.lines()
+                    .find(|l| l.starts_with(key))
+                    .and_then(|l| l.split(':').nth(1))
+                    .and_then(|v| v.trim().trim_end_matches('.').parse::<u64>().ok())
+                    .unwrap_or(0)
+            };
+            let used_pages = pages_of("Pages active")
+                + pages_of("Pages wired down")
+                + pages_of("Pages occupied by compressor");
+            Ok((used_pages * page).min(total))
+        } else if cfg!(target_os = "linux") {
+            // /proc/meminfo: MemTotal i MemAvailable → usada = total - disponible.
+            let f = std::fs::read_to_string("/proc/meminfo").map_err(|e| e.to_string())?;
+            let kb_of = |key: &str| -> Option<u64> {
+                f.lines()
+                    .find(|l| l.starts_with(key))
+                    .and_then(|l| l.split_whitespace().nth(1))
+                    .and_then(|v| v.parse::<u64>().ok())
+            };
+            let avail = kb_of("MemAvailable:").unwrap_or(0) * 1024;
+            Ok(total.saturating_sub(avail))
+        } else {
+            Ok(0)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     Ok(MemoryStatus { total, used })
 }
 
@@ -88,6 +96,14 @@ pub async fn system_total_memory() -> Result<u64, String> {
     Err("Sistema no suportat".into())
 }
 
+/// Escapa una cadena perquè es pugui posar DINS d'un literal AppleScript
+/// entre cometes dobles: escapa la barra invertida i les cometes dobles.
+/// (Abans només s'escapaven les cometes simples del `do shell script`: una
+/// ruta amb `"` permetia injectar ordres a l'AppleScript.)
+fn applescript_quote(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 /// Obre una finestra de Terminal situant-la a la carpeta indicada
 /// (o a $HOME si no n'hi ha cap).
 #[command]
@@ -101,7 +117,7 @@ pub async fn open_terminal(path: Option<String>) -> Result<(), String> {
             .arg("-e")
             .arg(format!(
                 "tell application \"Terminal\" to do script \"cd '{}'\"",
-                dir.replace('\'', "'\\''")
+                applescript_quote(&dir).replace('\'', "'\\''")
             ))
             .spawn()
     } else if cfg!(target_os = "windows") {

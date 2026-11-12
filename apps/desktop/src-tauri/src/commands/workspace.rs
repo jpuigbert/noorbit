@@ -28,7 +28,12 @@ pub async fn open_workspace(app: AppHandle, path: String) -> Result<String, Stri
     if !p.is_dir() {
         return Err(format!("La carpeta {} no existeix", path));
     }
-    *WORKSPACE_ROOT.write().unwrap() = Some(p.clone());
+    // unwrap_or_else: si el lock està ENVERINAT (un panic en un altre fil), no
+    // caldruïa tota l'app: es recupera el valor i es continua.
+    match WORKSPACE_ROOT.write() {
+        Ok(mut w) => *w = Some(p.clone()),
+        Err(e) => *e.into_inner() = Some(p.clone()),
+    }
 
     let title = format!("NoOrbit — {}", p.file_name().unwrap_or_default().to_string_lossy());
     if let Some(w) = app.get_webview_window("main") {

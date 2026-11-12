@@ -17,10 +17,18 @@
   background: var(--bg-2);
   border: 1px solid var(--border-2);
   color: var(--text-1);
+  transition:
+    background var(--speed-fast) var(--ease-out),
+    border-color var(--speed-fast) var(--ease-out),
+    color var(--speed-fast) var(--ease-out);
+}
+.si-tab:hover:not(.active) {
+  border-color: var(--accent);
+  color: var(--text-0);
 }
 .si-tab.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border-color: transparent;
 }
 .si-pick {
@@ -64,6 +72,10 @@
   gap: 10px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
+  transition: background var(--speed-fast) var(--ease-out);
+}
+.si-row:hover {
+  background: var(--bg-2);
 }
 .si-row:last-child {
   border-bottom: none;

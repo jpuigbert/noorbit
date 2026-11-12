@@ -11,6 +11,7 @@ import {
   Trash2,
   Pencil,
   X,
+  FolderTree,
 } from "lucide-react";
 import { useT } from "../i18n";
 import { useWorkspaceStore, type FileNode } from "../stores/workspaceStore";
@@ -175,7 +176,9 @@ export default function Sidebar() {
   return (
     <div className="sidebar">
       <div className="panel-header">
-        <span>{t("sidebar.title")}</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <FolderTree size={13} /> {t("sidebar.title")}
+        </span>
         {root && (
           <>
             <button

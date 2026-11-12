@@ -38,19 +38,23 @@ export function registerTaskListeners() {
   void listen<{ task_id: string; state: TaskInfo["state"]; elapsed_ms: number }>(
     "task://state",
     (e) => {
-      const { task_id, state, elapsed_ms } = e.payload;
+      const p = e.payload;
+      if (!p?.task_id) return;
+      const { task_id, state, elapsed_ms } = p;
       useTaskStore.getState().setTask({ taskId: task_id, state, elapsedMs: elapsed_ms });
       // Les tasques acabades o fallides deixen d'aparindre a l'indicador.
       if (state === "done" || state === "error") {
         setTimeout(() => useTaskStore.getState().remove(task_id), 4000);
       }
     }
-  );
+  ).catch(() => undefined);
   void listen<{ task_id: string; elapsed_ms: number }>("task://progress", (e) => {
-    const { task_id, elapsed_ms } = e.payload;
+    const p = e.payload;
+    if (!p?.task_id) return;
+    const { task_id, elapsed_ms } = p;
     const cur = useTaskStore.getState().tasks[task_id];
     if (cur && cur.state === "background") {
       useTaskStore.getState().setTask({ ...cur, elapsedMs: elapsed_ms });
     }
-  });
+  }).catch(() => undefined);
 }

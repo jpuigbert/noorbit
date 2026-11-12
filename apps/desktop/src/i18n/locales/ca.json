@@ -96,7 +96,9 @@
     "manual": "Manual d'ús…",
     "about": "Quant a NoOrbit",
     "remoteServer": "Servidor d'IA remot…",
-    "replayOnboarding": "Assistent de benvinguda (repeteix)"
+    "replayOnboarding": "Assistent de benvinguda (repeteix)",
+    "huggingBay": "Hugging Bay…",
+    "publishTheme": "Pujar tema…"
   },
   "startup": {
     "title": "Benvingut a NoOrbit",
@@ -215,6 +217,7 @@
     "hint": "Escriu una comanda (ls, python main.py, git status…) i prem Intro. S'executa a la carpeta del projecte obert.",
     "running": "s'executant…",
     "clear": "Neteja la pantalla",
+    "stop": "Atura la comanda",
     "close": "Tanca el terminal"
   },
   "git": {

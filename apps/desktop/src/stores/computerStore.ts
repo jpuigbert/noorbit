@@ -57,6 +57,13 @@ interface ComputerState {
   runAgent: (goal: string) => Promise<void>;
 }
 
+/// Registre d'esdeveniments compartit: StrictMode munta l'efecte dues
+/// vegades i, sense una promesa única, dues crides concurrents passarien el
+/// guard `eventsReady` (que es posa DESPRÉS del await) i registrarien dos
+/// listeners → passos i confirmacions duplicats. Si falla, es torna a null
+/// per reintenter.
+let eventsSetup: Promise<void> | null = null;
+
 export const useComputerStore = create<ComputerState>((set, get) => ({
   perms: { enabled: false, confirmEach: true, allowlist: [] },
   history: [],
@@ -80,20 +87,39 @@ export const useComputerStore = create<ComputerState>((set, get) => ({
 
   setupEvents: async () => {
     if (get().eventsReady) return;
-    const { listen } = await import("@tauri-apps/api/event");
-    // Sol·licitud de confirmació (per una comanda directa o de l'agent).
-    listen<{ id: string; command: string }>("computer://confirm", (evt) => {
-      set({ pending: { id: evt.payload.id, command: evt.payload.command } });
-    });
-    // Passos del bucle de l'agent.
-    listen<AgentStep>("computer://agent", (evt) => {
-      set((s) => ({ agentSteps: [...s.agentSteps, evt.payload] }));
-    });
-    // La comanda ja s'ha executat: refresca l'historial.
-    listen("computer://executed", () => {
-      get().load();
-    });
-    set({ eventsReady: true });
+    if (!eventsSetup) {
+      eventsSetup = (async () => {
+        try {
+          const { listen } = await import("@tauri-apps/api/event");
+          // S'esperen TOTS els registres abans de marcar «llest»: si un falla,
+          // el flag no es posa (es reintenta) i l'usuari veu l'error. Abans,
+          // el flag es posava a cegues: un registre fallat feia que el modal de
+          // confirmació NO aparegués mai i les execucions caducessin en silenci.
+          await Promise.all([
+            // Sol·licitud de confirmació (per una comanda directa o de l'agent).
+            listen<{ id: string; command: string }>("computer://confirm", (evt) => {
+              const p = evt.payload;
+              if (!p?.id) return;
+              set({ pending: { id: p.id, command: p.command ?? "" } });
+            }),
+            // Passos del bucle de l'agent.
+            listen<AgentStep>("computer://agent", (evt) => {
+              if (!evt.payload) return;
+              set((s) => ({ agentSteps: [...s.agentSteps, evt.payload] }));
+            }),
+            // La comanda ja s'ha executat: refresca l'historial.
+            listen("computer://executed", () => {
+              void get().load();
+            }),
+          ]);
+          set({ eventsReady: true, error: null });
+        } catch (e) {
+          eventsSetup = null;
+          set({ error: "No s'han pogut connectar els esdeveniments del control de l'ordinador: " + String(e) });
+        }
+      })();
+    }
+    await eventsSetup;
   },
 
   setPerms: async (enabled, confirmEach) => {

@@ -5,6 +5,7 @@
 /// Així, quan alguna cosa va malament, l'usuari té un registre on mirar-ho, com
 /// la consola de desenvolupador d'un navegador o la de Sublime/VS Code.
 import { create } from "zustand";
+import { toastError } from "./toastStore";
 
 export type LogLevel = "log" | "info" | "warn" | "error" | "system";
 
@@ -86,9 +87,13 @@ export function installConsoleCapture() {
   window.addEventListener("error", (e) => {
     if (HARMLESS.some((m) => (e.message ?? "").includes(m))) return;
     push("error", "sistema", `${e.message} (${e.filename ?? "?"}:${e.lineno ?? 0})`);
+    // També a l'avís VISIBLE: un error no capturat que només viu a la consola
+    // de depuració és, per a l'usuari, un error que no existeix.
+    toastError("Error inesperat", e.error ?? e.message);
   });
   window.addEventListener("unhandledrejection", (e) => {
     push("error", "sistema", "Promesa rebutjada: " + fmt(e.reason));
+    toastError("Operació fallida (sense gestionar)", e.reason);
   });
 
   push("system", "sistema", "Consola de depuració activa.");

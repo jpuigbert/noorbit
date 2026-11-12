@@ -1,0 +1,220 @@
+/* Menú «Pujar» — publicació de temes WordPress al marketplace. */
+
+.pb-modal {
+  max-width: 640px;
+}
+
+.pb-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pb-step {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pb-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-0);
+  flex-wrap: wrap;
+}
+
+.pb-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.pb-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+
+.pb-theme {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11.5px;
+}
+.pb-theme-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-0);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.pb-ver {
+  color: var(--text-3);
+  font-weight: 400;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.pb-theme-desc {
+  color: var(--text-2);
+}
+
+.pb-checks {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.pb-checks span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+.pb-checks .ok {
+  color: var(--success);
+}
+.pb-checks .warn {
+  color: var(--warning);
+}
+.pb-checks .ko {
+  color: var(--error);
+}
+.pb-checks .info {
+  color: var(--text-3);
+}
+
+.pb-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.pb-line.ok {
+  color: var(--success);
+}
+.pb-line.warn {
+  color: var(--warning);
+}
+.pb-line.ko {
+  color: var(--error);
+}
+
+/* ---- Autenticació amb el compte de NoOrbit ---- */
+.pb-auth {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+.pb-auth-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.pb-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--success);
+  font-weight: 500;
+  font-size: 11.5px;
+}
+
+.pb-input {
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  padding: 4px 8px;
+  font-size: 11.5px;
+  min-width: 130px;
+  outline: none;
+}
+.pb-input:focus {
+  border-color: var(--accent);
+}
+.pb-input.wide {
+  flex: 1;
+  min-width: 220px;
+}
+
+.pb-site {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pb-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--text-3);
+  line-height: 1.45;
+}
+.pb-note svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.pb-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pb-msg {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.pb-msg svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.pb-msg.ok {
+  color: var(--text-1);
+}
+.pb-msg.ok svg {
+  color: var(--success);
+}
+.pb-msg.err {
+  color: var(--error);
+}
+
+.pb-credit {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-3);
+  text-align: center;
+}
+.pb-credit b {
+  color: var(--text-2);
+  font-weight: 600;
+}

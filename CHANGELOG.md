@@ -3,6 +3,28 @@
 Totes les releases amb els seus binaris: <https://github.com/jpuigbert/noorbit/releases>.
 Les notes completes de cada release són a la pàgina del release corresponent.
 
+## 0.71.8-alpha (2026-11-12)
+
+**Estabilitat, integritat i qualitat — auditoria de codi + importació de codi web fiable**
+
+- **Hugging Bay, destí a triar**: el destí de la descàrrega es pot triar **directament des del modal** («Tria carpeta / disc extern…»): els models GGUF es baixen a un disc extern (USB/HDD) sense passar per IA ▸ Models, amb botó per tornar al destí per defecte.
+- **Importar codi del web, fiable**: l'extracció ja no depèn del títol del document — amb `eval_with_callback` de Tauri 2 el valor torna DIRECTAMENT a Rust (sense curses, sense límit de temps i la pàgina no es queda amb el títol esborrat); xarxa de seguretat per a pàgines sense `<pre><code>` (molts xats web renderitzen el codi en `<div class=language-…>` o en text entre clausilles), reintents (4 intents en 12 s) per a les pàgines que tarden a pintar, errors de l'script com a JSON (a Windows les exceptions no arriben al callback) i, quan no hi ha cap bloc, missatge útil (esperar que la IA acabi d'escriure, obrir «Veure codi» o prémer-ho de nou).
+
+*Correccions de les auditories de codi:*
+- *fitxers: cursa en cadena a `loadFile` (dues lectures ràpides podien fer que l'editor mostrés i **desés** el fitxer equivocat); avisos visibles (toasts) per a desats, proveïdors i descàrregues de models que fallaven en silenci.*
+- *seguretat: el servidor de preview ja no serveix fitxers **fora del workspace** (`/../../../etc/passwd`); les skills ja no poden esborrar la carpeta de dades de NoOrbit; el record de permisos «per sempre» no s'autoamplia amb encadenaments (`npm … && curl …`); el preview demana un token (cookie) i rebutja `Origin`/`Host` aliens (CSRF i DNS-rebinding).*
+- *estabilitat: el terminal ja es pot aturar (mata el grup de processos) i les comandes tenen temps límit; es fixen els bucles infinits amb enllaços simbòlics; la interfície no es congela en arrencar Ollama, clonar skills, escanejar el disc o calcular la memòria; detecció de repeticions O(n²) → O(n); el pont de Blender no mor en silenci si el codi executat fa `sys.exit()`.*
+- *interfície: proveïdors de autocompletat de Monaco ja no es dupliquen (cada pulsació llançava N inferències); l'autocompletat **es cancel·la de veritat** quan l'usuari segueix escrivint (la inferència vella ja no consumeix CPU/GPU); la cua de configuració de IA, la cerca a Hugging Bay i els esdeveniments globals ja no queden penjats si el registre falla.*
+- *ports: font única (`ports.rs`) per als ports de Blender i Unreal; el port **configurat** per l'usuari ara s'injecta al script Python (abans el Python sempre obria el per defecte i la configuració era ignorada).*
+- *terminal: `run_command` rebia el `call_id` en camelCase — abans el terminal enviava `call_id` i Tauri 2 l'esperava com `callId`: la comanda fallava i **el terminal no executava res**.*
+- *estabilitat (2a auditoria de codi): el panell d'Especialistes ja no es penja amb «Maximum update depth exceeded» (selector zustand inestable → estat cru + `useMemo`); els esdeveniments d'experts i de control de l'ordinador ja no es dupliquen amb StrictMode (registre d'esdeveniments amb promesa única compartida); el servidor de preview ja no fa panic amb URLs amb caràcters invàlids per a capçaleres HTTP (es codifiquen i, si cal, es respon 400); els zips de skills tenen límit de mida (20 MB comprimits / 50 MB descomprimits) i fora de localhost només s'accepten URLs HTTPS.*
+- *integritat de les descàrregues (Hugging Bay): els GGUF es baixen a un fitxer «.part» i es verifiquen amb el **SHA-256** del mirror abans de renombrar-los al nom final — una descàrrega interrompuda ja no deixa mai un model parcial que es donava per bo (corrupte i impossible de rebaixar), i una descàrrega corrupta es descarta amb un missatge clar.*
+- *estabilitat de la interfície: cada zona gran (editor, panell lateral, terminal, IA de web, activitat IA, Git, problemes, consola) va amb la seva pròpia `PanelErrorBoundary`: si un panell peta, només mor aquell panell i la resta de NoOrbit continua funcionant.*
+- *qualitat: workflow nou de **CI** (`.github/workflows/ci.yml`) a cada push/PR — typecheck, lint (ESLint react-hooks), tests (Vitest), `cargo check` + `cargo test` i detector de selectors zustand inestables (React #185) — perquè un commit que no compila o que trenca els tests no pugui arribar a un release.*
+- *qualitat interna: **55 tests Vitest** de lògica pura (i18n `t()`, directrius `@file:`/`@agent:`/`@use:`/`@todo:`, utilitats del xat; `quant_de`/`safe_name` ja es proven amb `cargo test`), **ESLint** amb react-hooks (dependències inestables als hooks corregides a l'editor i a la revisió d'edicions), i l'`agentStore` (3.843 línies) s'ha partit en **mòduls purs** (`stores/agent/`: types, chatUtils, prompts, fileBlocks, directives) amb l'API pública intacta — la mateixa lògica, ara testeable i mantenible.*
+
+---
+
 ## 0.71.7-alpha (2026-11-12)
 
 **IA local sense Ollama (llama.cpp) + Hugging Bay + context compactat**

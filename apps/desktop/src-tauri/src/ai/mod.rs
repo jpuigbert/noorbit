@@ -58,7 +58,75 @@ pub fn runaway_repetition(full: &str) -> bool {
         }
         len = len.saturating_sub(1);
     }
+
+    // Repetició en QUALSEVOL punt del text (no només al final): un model
+    // petit pot reemetre el mateix fitxer 14 vegades enmig de la resposta i
+    // seguir escrivint (es va veure amb temes WordPress). Comptem quantes
+    // vegades apareix la mateixa finestra de 100 caràcters.
+    //
+    // IMPORTANT (rendiment): això s'executa a CADA tros de streaming, amb el
+    // text ACUMULAT. Recalcular el hash de cada finestra des de zero fa que
+    // el cost sigui O(n²) (centenars de milions d'operacions en respostes
+    // llargues → CPU cremada i streaming congelat). Ara el hash és RODANT
+    // (O(1) per posició) i, quan un hash coincideix TIMES vegades, es
+    // VERIFIQUEN els bytes de debò (evita falsos positius per col·lisió).
+    const WIN: usize = 100;
+    const TIMES: usize = 5;
+    if b.len() < WIN * TIMES {
+        return false;
+    }
+    const P: u64 = 0x0000_0100_0000_01b3;
+    let mut pow = 1u64;
+    for _ in 0..WIN - 1 {
+        pow = pow.wrapping_mul(P);
+    }
+    let mut h: u64 = 0;
+    for &byte in &b[..WIN] {
+        h = h.wrapping_mul(P).wrapping_add(byte as u64);
+    }
+    // hash -> posicions on l'hem vista (fins a TIMES).
+    let mut counts: std::collections::HashMap<u64, Vec<usize>> =
+        std::collections::HashMap::new();
+    let mut i = 0usize;
+    while i + WIN <= b.len() {
+        let e = counts.entry(h).or_insert_with(Vec::new);
+        if e.len() < TIMES {
+            e.push(i);
+        }
+        if e.len() == TIMES {
+            // Verificació real dels bytes: només és bucle si TOTES les
+            // finestres són idèntiques.
+            let first = e[0];
+            let same = e[1..]
+                .iter()
+                .all(|&p| b[p..p + WIN] == b[first..first + WIN]);
+            if same {
+                return true;
+            }
+            // Col·lisió de hash: es descarta l'entrada i es continua.
+            counts.remove(&h);
+        }
+        // Avança la finestra una posició (hash rodant).
+        if i + WIN < b.len() {
+            let out = b[i] as u64;
+            let inn = b[i + WIN] as u64;
+            h = h.wrapping_sub(out.wrapping_mul(pow));
+            h = h.wrapping_mul(P).wrapping_add(inn);
+        }
+        i += 1;
+    }
     false
+}
+
+/// resum FNV-1a de 64 bits (per comparar finestres de text ràpidament).
+#[allow(dead_code)]
+fn fnv1a(data: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for &byte in data {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 /// Xat per defecte: el que fan servir l'agent, les tasques autònomes i
@@ -279,7 +347,12 @@ pub struct SessionCtl {
     /// Certifica que AQUEST xat ja ha llançat un «error» explicat al visor. Així
     /// la comanda de xat no repeteix el mateix faliment com un segon bàner.
     err_shown: Arc<AtomicBool>,
+    /// Última vegada que s'ha fet servir (per poder esborrar els xats vells).
+    last_used: Arc<std::sync::Mutex<std::time::Instant>>,
 }
+
+/// Nombre màxim de xats que es conserven en memòria (els més recents).
+const MAX_SESSIONS: usize = 64;
 
 impl SessionCtl {
     fn new(id: &str) -> Self {
@@ -291,7 +364,17 @@ impl SessionCtl {
             provider: Arc::new(RwLock::new(None)),
             model: Arc::new(RwLock::new(None)),
             err_shown: Arc::new(AtomicBool::new(false)),
+            last_used: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
         }
+    }
+
+    /// Marca el xat com a acabat de fer-se servir i retorna l'instant.
+    pub fn last_used(&self) -> std::time::Instant {
+        if let Ok(mut g) = self.last_used.lock() {
+            *g = std::time::Instant::now();
+            return *g;
+        }
+        std::time::Instant::now()
     }
 
     /// Comença un torn nou: sense bandera d'aturada i sense raonament anterior.
@@ -615,11 +698,29 @@ const REASON_TAGS: [(&str, &str); 2] = [
 const REASON_OPEN_WORDS: [&str; 5] = ["reason:", "thinking:", "think:", "pensament:", "pensa:"];
 const REASON_CLOSE_WORDS: [&str; 3] = ["answer:", "respon:", "respuesta:"];
 
+/// Cerca `needle` (ASCII) dins de `haystack` ignorant majúscules i sense
+/// alterar els índexs. `to_lowercase()` NO serveix aquí: pot canviar la
+/// longitud en bytes (p. ex. «İ» → «i̇»), i els índexs trobats a la versió
+/// en minúscules no serien vàlids per tallar l'original (pànic de char
+/// boundary o tall al lloc equivocat).
+fn find_ignore_ascii_case(haystack: &str, needle: &str) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    let h = haystack.as_bytes();
+    let n = needle.as_bytes();
+    if n.len() > h.len() {
+        return None;
+    }
+    // Els bytes ASCII no poden ser part d'un caràcter UTF-8 multi-byte: la
+    // cerca a nivell de byte mai talla un caràcter pel mig.
+    (0..=(h.len() - n.len())).find(|&i| h[i..i + n.len()].eq_ignore_ascii_case(n))
+}
+
 /// Separa el raonament que un model escriu MESCLAT amb la seua resposta.
 /// Retorna (pensament, resposta); si no hi ha cap senyal, el text sencer és la
 /// resposta i el pensament queda buit.
 fn split_inline_reasoning(text: &str) -> (String, String) {
-    let lower = text.to_lowercase();
     // 1) hi ha una ETIQUETA DE TANCAMENT? tot el que precedeix és pensament.
     let closes: Vec<&str> = REASON_TAGS
         .iter()
@@ -628,7 +729,7 @@ fn split_inline_reasoning(text: &str) -> (String, String) {
         .collect();
     let mut best: Option<(usize, usize)> = None; // (índex, longitud de l'etiqueta)
     for c in closes {
-        if let Some(i) = lower.find(c) {
+        if let Some(i) = find_ignore_ascii_case(text, c) {
             if best.map(|(bi, _)| i < bi).unwrap_or(true) {
                 best = Some((i, c.len()));
             }
@@ -644,7 +745,7 @@ fn split_inline_reasoning(text: &str) -> (String, String) {
             .collect();
         let mut thought = head.to_string();
         for o in opens {
-            if let Some(s) = head.to_lowercase().find(o) {
+            if let Some(s) = find_ignore_ascii_case(head, o) {
                 thought = head[s + o.len()..].to_string();
                 break;
             }
@@ -655,14 +756,13 @@ fn split_inline_reasoning(text: &str) -> (String, String) {
     // 2) encara no hi ha tancament: si el fragment COMENÇA per una obertura, tot
     //    el que porta fins ara és raonament i el model no ha contestat.
     let t = text.trim_start();
-    let low = t.to_lowercase();
     for (o, _) in REASON_TAGS {
-        if low.starts_with(o) {
+        if find_ignore_ascii_case(t, o) == Some(0) {
             return (t[o.len()..].to_string(), String::new());
         }
     }
     for p in REASON_OPEN_WORDS {
-        if low.starts_with(p) {
+        if find_ignore_ascii_case(t, p) == Some(0) {
             return (t[p.len()..].trim_start().to_string(), String::new());
         }
     }
@@ -684,16 +784,18 @@ fn take(s: &str, a: usize, b: usize) -> String {
     s[i..j].to_string()
 }
 
-/// Cerca la TANCAMENT del pensament dins d'un text ja baixat a minúscules.
-/// Retorna (índex, longitud de l'etiqueta).
-fn reasoning_close_at(low: &str) -> Option<(usize, usize)> {
+/// Cerca la TANCAMENT del pensament dins d'un text (ignora majúscules).
+/// Retorna (índex, longitud de l'etiqueta) — índexs VÀLIDS sobre el text
+/// original (no sobre una còpia en minúscules, que podria tenir una longitud
+/// diferent en bytes).
+fn reasoning_close_at(text: &str) -> Option<(usize, usize)> {
     let mut best: Option<(usize, usize)> = None;
     for c in REASON_TAGS
         .iter()
         .map(|(_, c)| *c)
         .chain(REASON_CLOSE_WORDS.iter().copied())
     {
-        if let Some(i) = low.find(c) {
+        if let Some(i) = find_ignore_ascii_case(text, c) {
             if best.map(|(bi, _)| i < bi).unwrap_or(true) {
                 best = Some((i, c.len()));
             }
@@ -733,16 +835,15 @@ impl ThoughtSplitter {
             if self.mode.is_none() {
                 let skip = self.raw.len() - self.raw.trim_start().len();
                 let head = take(&self.raw, skip, self.raw.len());
-                let low = head.to_lowercase();
                 // Quina etiqueta d'obertura (si n'hi ha) comença el text?
                 let open_len = REASON_TAGS
                     .iter()
                     .map(|(o, _)| *o)
                     .chain(REASON_OPEN_WORDS)
-                    .find(|tag| low.starts_with(tag))
+                    .find(|tag| find_ignore_ascii_case(&head, tag) == Some(0))
                     .map(|t| t.len())
                     .unwrap_or(0);
-                if let Some((i, len)) = reasoning_close_at(&low) {
+                if let Some((i, len)) = reasoning_close_at(&head) {
                     // Pensament tancat abans de decidir-ne res: tot el que hi
                     // ha abans de l'etiqueta de tancament ho és.
                     let thought = take(&head, open_len, i).trim().to_string();
@@ -770,7 +871,7 @@ impl ThoughtSplitter {
                 // Dins del pensament: tot és raonament fins que aparega el
                 // tancament (que pot haver arribat retallat en dues parts).
                 let rest = take(&self.raw, self.sent, self.raw.len());
-                if let Some((i, len)) = reasoning_close_at(&rest.to_lowercase()) {
+                if let Some((i, len)) = reasoning_close_at(&rest) {
                     let thought = take(&self.raw, self.sent, self.sent + i);
                     self.sent += i + len;
                     self.mode = Some(false);
@@ -948,7 +1049,7 @@ fn url_host_port(url: &str) -> (String, u16) {
 /// 3. Connexió refusada/tallada amb el port viu: Ollama saturat.
 /// S'emprà des de `send_chat`; el text tècnic original s'adjunta al final per
 /// no perdre informació (i perquè `is_body_cut` segueixis reconeixent-lo).
-fn explain_send_failure(e: &reqwest::Error, url: &str, auto_install: bool) -> String {
+async fn explain_send_failure(e: &reqwest::Error, url: &str, auto_install: bool) -> String {
     use std::error::Error as _;
     use std::net::ToSocketAddrs;
     let (host, port) = url_host_port(url);
@@ -983,8 +1084,13 @@ fn explain_send_failure(e: &reqwest::Error, url: &str, auto_install: bool) -> St
         //   uria d'haver caigut a ell; aquí l'error és del remot.
         //  - Si no en té cap, l'instal·lació d'Ollama en segon pla és la via
         //    per tenir IA local (gratis, sense comptes).
+        // Arrencar Ollama és LENT (fins a ~40 s: espera del port + espera
+        // del model). Ho fem en un fil a part perquè el runtime async
+        // (streaming, altres peticions) no quedi congelat mentre esperem.
         let tried = if ollama_installed() {
-            start_ollama_server().is_ok()
+            tokio::task::spawn_blocking(|| start_ollama_server().is_ok())
+                .await
+                .unwrap_or(false)
         } else if auto_install {
             std::thread::spawn(|| {
                 let _ = ensure_ollama_installed();
@@ -2573,7 +2679,24 @@ impl AiManager {
         let mut map = self.sessions.lock().unwrap();
         let entry = map
             .entry(session.to_string())
-            .or_insert_with(|| Arc::new(SessionCtl::new(session)));
+            .or_insert_with(|| Arc::new(SessionCtl::new(session)))
+            .clone();
+        // EVICCIÓ: el mapa de sessions creixia per sempre (cada xat nou
+        // quedava per sempre al mapa). Netejem els xats vells que no estan
+        // generant: en mantenim els N més recents.
+        if map.len() > MAX_SESSIONS {
+            let mut ids: Vec<(std::time::Instant, String)> = map
+                .iter()
+                .map(|(k, v)| (v.last_used(), k.clone()))
+                .collect();
+            ids.sort_by(|a, b| a.0.cmp(&b.0));
+            let surplus = map.len() - MAX_SESSIONS;
+            for (_, id) in ids.into_iter().take(surplus) {
+                if id != session {
+                    map.remove(&id);
+                }
+            }
+        }
         entry.clone()
     }
 
@@ -3245,6 +3368,11 @@ impl AiManager {
         let mut stream = resp.bytes_stream();
         let mut buf: Vec<u8> = Vec::new();
         let mut full = String::new();
+        // Comptador de comprovació del bucle de repetició: l'escombrada
+        // Carter ja és O(n) per crida, però cridarla a CADA tros feia que el
+        // cost total creiés amb el quadrat de la resposta. Ara es comprova
+        // quan ha crescut prou text (8 KB) o quan el tros és gran.
+        let mut last_repeat_check: usize = 0;
         let mut thinking_acc = String::new();
         // Comptabilització de tokens del torn (Ollama la publica al final).
         let mut usage_input: u64 = 0;
@@ -3393,16 +3521,20 @@ impl AiManager {
                         ctl.chunk(app, &answer);
                         ctl.process(app, "ollama", &model_label, "streaming", &answer, ms);
                         // Bucle desbocat (model petit repetint la mateixa frase).
-                        if runaway_repetition(&full) {
-                            ctl.process(
-                                app,
-                                "ollama",
-                                &model_label,
-                                "thinking",
-                                "\nS'ha detectat un bucle de repetició: la generació s'atura per a no bloquejar-se.\n",
-                                ms,
-                            );
-                            break 'stream;
+                        let grown = full.len() - last_repeat_check;
+                        if grown >= 8 * 1024 || answer.len() >= 8 * 1024 {
+                            last_repeat_check = full.len();
+                            if runaway_repetition(&full) {
+                                ctl.process(
+                                    app,
+                                    "ollama",
+                                    &model_label,
+                                    "thinking",
+                                    "\nS'ha detectat un bucle de repetició: la generació s'atura per a no bloquejar-se.\n",
+                                    ms,
+                                );
+                                break 'stream;
+                            }
                         }
                     }
                 }
@@ -3606,17 +3738,19 @@ impl AiManager {
         req: &ChatRequest,
         auto_install: bool,
     ) -> Result<reqwest::Response> {
-        http.post(url)
-            .json(req)
-            .send()
-            .await
-            // No propaguem l'error opac de reqwest: expliquem la CAUSA real
-            // (temps exhaurit, Ollama aturat, port satur…) amb què fer.
-            .map_err(|e| {
-                // Només instal·lem Ollama en segon pla si l'usuari NO té cap
-                // IA en línia configurada (respectem la seva elecció).
-                anyhow!("Ollama no respon — {}", explain_send_failure(&e, url, auto_install))
-            })
+        match http.post(url).json(req).send().await {
+            Ok(resp) => Ok(resp),
+            Err(e) => {
+                // No propaguem l'error opac de reqwest: expliquem la CAUSA real
+                // (temps exhaurit, Ollama aturat, port satur…) amb què fer.
+                // L'explicació pot ARENCAR Ollama: això es fa en un fil a
+                // part (spawn_blocking) perquè el runtime async no quedi
+                // congelat fins a ~40 s.
+                let url_owned = url.to_string();
+                let explained = explain_send_failure(&e, &url_owned, auto_install).await;
+                Err(anyhow!("Ollama no respon — {}", explained))
+            }
+        }
     }
 
     /// Demana aturar la generació d'un xat (botó «Atura» de la interfície).
@@ -3893,5 +4027,60 @@ impl AiManager {
             .filter(|m| m.size > 0 && m.size <= budget)
             .max_by_key(|m| m.size)
             .map(|m| m.name)
+    }
+}
+
+#[cfg(test)]
+mod proves {
+    use super::runaway_repetition;
+
+    /// Un model que repeteix el mateix bloc 14 vegades (cas real amb un
+    /// model d'1,5B) HA de detectar-se com a bucle, encara que la repetició
+    /// no sigui a la cua del text.
+    #[test]
+    fn detecta_repeticio_al_mig_del_text() {
+        let bloc = "```python\nimport unittest\nfrom my_module import MyModule\n\nclass TestMyModule(unittest.TestCase):\n    def test_x(self):\n        pass\n```\n";
+        let text = format!(
+            "Introducció del model.\n{}{}\nI aquí continua el text final que no es repeteix.",
+            bloc.repeat(14),
+            "Fi de la resposta amb una frase llarga i diferent del bloc repetit."
+        );
+        assert!(
+            runaway_repetition(&text),
+            "la repetició al mig del text hauria de detectar-se"
+        );
+    }
+
+    /// Un text normal NO ha de ser considerat bucle.
+    #[test]
+    fn no_talla_un_text_normal() {
+        let text = "Aquí tens el fitxer style.css:\n\
+body { color: red; }\n\
+I el fitxer functions.php:\n\
+<?php\nfunction add_action() { return true; }\n\
+Final del text.";
+        assert!(!runaway_repetition(text));
+    }
+}
+
+#[cfg(test)]
+mod proves_cerca {
+    use super::find_ignore_ascii_case;
+
+    /// La cerca ha de conservar els índexs del text ORIGINAL: amb `to_lowercase`
+    /// un caràcter com «İ» canvia la longitud en bytes i els índexs trobats
+    /// no tallaven correctament (pànic de char boundary).
+    #[test]
+    fn la_cerca_conserva_els_indexos() {
+        let text = "<think>Hola, món!</think>Resposta";
+        let i = find_ignore_ascii_case(text, "</think>").expect("ha de trobar la etiqueta");
+        assert_eq!(&text[i..i + "</think>".len()], "</think>");
+        // Majúscules/minúscules indifferents.
+        let i2 = find_ignore_ascii_case("<think>", "<think>").expect("ha de trobar-ho");
+        assert_eq!(i2, 0);
+        // Caràcter multibyte abans de l'etiqueta: l'índex ha de ser vàlid.
+        let text2 = "İstanbul <think>fi</think>";
+        let i3 = find_ignore_ascii_case(text2, "</think>").expect("ha de trobar-ho");
+        assert!(text2.is_char_boundary(i3));
     }
 }

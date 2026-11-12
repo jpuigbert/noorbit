@@ -888,7 +888,11 @@ export default function AgentPanel() {
           projecte. Fila pròpia perquè no tapen l'acció principal. */}
       {!running && (
         <div className="ap-secondary-actions">
-          <button className="btn sm" disabled={disabled} onClick={() => plan(prompt, "text")}>
+          <button
+            className="btn sm"
+            disabled={disabled || !prompt.trim()}
+            onClick={() => void plan(prompt.trim(), "text")}
+          >
             <ListChecks size={13} /> {t("agent.plan")}
           </button>
           <button className="btn sm" disabled={disabled} onClick={handleQuick}>
@@ -952,16 +956,16 @@ export default function AgentPanel() {
         <span className="ap-apply-label">{t("agent.applyTo")}</span>
         <button
           className="btn sm"
-          disabled={disabled || running}
-          onClick={() => void apply("blender", prompt)}
+          disabled={disabled || running || !prompt.trim()}
+          onClick={() => void apply("blender", prompt.trim())}
           title={t("agent.applyBlenderHint")}
         >
           {t("agent.applyBlender")}
         </button>
         <button
           className="btn sm"
-          disabled={disabled || running}
-          onClick={() => void apply("unreal", prompt)}
+          disabled={disabled || running || !prompt.trim()}
+          onClick={() => void apply("unreal", prompt.trim())}
           title={t("agent.applyUnrealHint")}
         >
           {t("agent.applyUnreal")}
@@ -1309,8 +1313,22 @@ export default function AgentPanel() {
 }
 
 /** Cau de data-URLs de les imatges ja carregades: evita rellegir-les del
-    disc cada vegada que es repinta el xat. */
+    disc cada vegada que es repinta el xat.
+    ÉS LIMITADA (LRU): sense límit, una sessió llarga amb moltes imatges
+    (captures, diagrames) feia que el webview creixés centenars de MB sense
+    poder recollir mai res. En sortir, la imatge es torna a llegir del disc. */
 const imgCache = new Map<string, string>();
+const IMG_CACHE_MAX = 30;
+
+function imgCacheSet(path: string, data: string): void {
+  imgCache.set(path, data);
+  while (imgCache.size > IMG_CACHE_MAX) {
+    // Map conserva l'ordre d'inserció: la primera clau és la més antiga.
+    const oldest = imgCache.keys().next();
+    if (oldest.done) break;
+    imgCache.delete(oldest.value);
+  }
+}
 
 /** Llegeix una imatge local (Rust: «image_preview_base64») com a data-URL. */
 function useImageDataUrl(path: string): string | null {
@@ -1324,7 +1342,7 @@ function useImageDataUrl(path: string): string | null {
     let alive = true;
     invoke<string>("image_preview_base64", { path })
       .then((d) => {
-        imgCache.set(path, d);
+        imgCacheSet(path, d);
         if (alive) setUrl(d);
       })
       .catch(() => {

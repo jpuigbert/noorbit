@@ -29,6 +29,16 @@ pub struct AiConfig {
     /// valor per defecte d'Ollama. Menys temps = menys RAM en repòs.
     #[serde(default)]
     pub keep_alive: String,
+    /// Carpeta on es desen els models GGUF (Hugging Bay) i el motor local
+    /// (llama.cpp). Buida = les dades de NoOrbit. Si hi posem un DISC
+    /// EXTERN (un USB, un HDD), els models hi queden i es poden fer servir
+    /// des d'allà: unplugant el disc, el model desapareix de la llista.
+    #[serde(default)]
+    pub gguf_dir: String,
+    /// Carpeta on s'instal·la el motor local (llama-server). Buida = les dades
+    /// de NoOrbit. Si es posa en un disc extern, tot el motor local hi viu.
+    #[serde(default)]
+    pub llamacpp_dir: String,
 }
 
 impl Default for AiConfig {
@@ -46,6 +56,8 @@ impl Default for AiConfig {
             models_dir: String::new(),
             models_dir_applied: String::new(),
             keep_alive: String::new(),
+            gguf_dir: String::new(),
+            llamacpp_dir: String::new(),
         }
     }
 }
@@ -77,7 +89,11 @@ pub struct BlenderConfig {
 
 impl Default for BlenderConfig {
     fn default() -> Self {
-        Self { socket_port: 9876, binary: String::new(), auto_connect: true }
+        Self {
+            socket_port: crate::ports::BLENDER_BRIDGE_PORT,
+            binary: String::new(),
+            auto_connect: true,
+        }
     }
 }
 
@@ -123,7 +139,10 @@ pub struct UnrealConfigFile {
 
 impl Default for UnrealConfigFile {
     fn default() -> Self {
-        Self { rc_port: 30010, capture_dir: String::new() }
+        Self {
+            rc_port: crate::ports::UNREAL_RC_PORT,
+            capture_dir: String::new(),
+        }
     }
 }
 
@@ -200,15 +219,35 @@ impl AppConfig {
     /// Cert si l'executable s'ha d'executar en mode portàtil (les dades es
     /// desen al costat de l'app). Detecta el marcador `.noorbit-portable` o
     /// que s'execute des d'un volum muntat (p. ex. `/Volumes/…` en macOS).
+    ///
+    /// El marcador es mira a TOTES les carpetes on pot ser: al costat de
+    /// l'executable, dins del paquet `.app`, i a l'arrel del disc (que és on
+    /// el posa l'instal·lador portàtil). Així funciona igual en macOS
+    /// (`.app`), Linux (binari) i Windows (`no-orbit.exe`), i en un USB
+    /// connectat a qualsevol sistema.
     fn is_portable(exe: &std::path::Path, app_root: Option<&std::path::Path>) -> bool {
-        // Marcador explícit al costat de l'executable o de l'app.
-        if exe.parent().map(|d| d.join(".noorbit-portable").exists()).unwrap_or(false) {
+        // Marcador explícit: al costat de l'executable, dins del paquet de
+        // l'app i a l'arrel del disc on viu l'app.
+        let mut cerca: Vec<std::path::PathBuf> = Vec::new();
+        if let Some(p) = exe.parent() {
+            cerca.push(p.to_path_buf());
+            if let Some(g) = p.parent() {
+                cerca.push(g.to_path_buf());
+            }
+        }
+        if let Some(r) = app_root {
+            cerca.push(r.to_path_buf());
+            if let Some(g) = r.parent() {
+                cerca.push(g.to_path_buf());
+            }
+        }
+        if cerca
+            .iter()
+            .any(|d| d.join(".noorbit-portable").exists())
+        {
             return true;
         }
-        if app_root.map(|d| d.join(".noorbit-portable").exists()).unwrap_or(false) {
-            return true;
-        }
-        // Execució des d'un volum/USB extern.
+        // Execució des d'un volum/USB extern (macOS i Linux).
         let s = exe.to_string_lossy();
         s.starts_with("/Volumes/") || s.contains("/media/")
     }

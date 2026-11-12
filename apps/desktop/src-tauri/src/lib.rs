@@ -16,7 +16,9 @@ pub mod learning;
 pub mod lsp;
 pub mod mobile;
 pub mod plugins;
+pub mod ports;
 pub mod skills;
+pub mod themes;
 pub mod unreal;
 
 use std::sync::{Arc, Mutex};
@@ -135,6 +137,10 @@ pub fn run() {
             // autònomes actives (amb espera per deixar pujar Ollama).
             let handle = app.handle().clone();
             autonomous::commands::resume_all(&handle);
+            // Registres de servidors locals orfes (l'app anterior va morir
+            // de cop): es netejen abans d'arrencar res, sinó el port del
+            // motor local apareix ocupat per un servei que no existeix.
+            crate::ai::llamacpp::cleanup_stale();
 
             // Connexió automàtica a Blender (Objectiu 1): si és habilitada a
             // configuració, arrenca el vigilant que connecta sol quan detecta
@@ -182,6 +188,15 @@ pub fn run() {
             });
             Ok(())
         })
+        .on_window_event(|window, event| {
+            // En sortir de l'app, els servidors locals que NoOrbit ha engegat
+            // (llama.cpp) es tanquen: si no, quedaven com a processos orfes
+            // ocupant el port.
+            if let tauri::WindowEvent::Destroyed = event {
+                crate::ai::llamacpp::stop_all();
+            }
+            let _ = window;
+        })
         .invoke_handler(tauri::generate_handler![
             // Fitxers
             commands::fs::read_file,
@@ -208,6 +223,7 @@ pub fn run() {
             commands::git::git_stash_pop,
             commands::git::git_log,
             commands::term::run_command,
+            commands::term::kill_command,
             commands::workspace::open_workspace,
             commands::workspace::create_project,
             // Sistema operatiu
@@ -220,6 +236,7 @@ pub fn run() {
             // Mode portàtil (USB / disc extern)
             commands::portable::portable_status,
             commands::portable::portable_enable,
+            commands::portable::portable_create_bundle,
             commands::portable::portable_copy_app_to,
             commands::portable::portable_disable,
             // Actualitzacions (GitHub Releases)
@@ -244,12 +261,15 @@ pub fn run() {
             commands::ai::ollama_search_cloud,
             commands::ai::ollama_search_huggingface,
             commands::ai::hf_bay_search,
+            commands::ai::hf_bay_page,
             commands::ai::llamacpp_status,
+            commands::ai::llamacpp_set_dirs,
             commands::ai::llamacpp_install,
             commands::ai::llamacpp_start,
             commands::ai::llamacpp_stop,
             commands::ai::hf_bay_details,
             commands::ai::hf_bay_download,
+            commands::ai::hf_bay_install_native,
             commands::ai::ollama_installed,
             commands::ai::start_ollama,
             commands::ai::install_ollama,
@@ -305,6 +325,13 @@ pub fn run() {
             commands::browser::web_ia_status,
             commands::browser::web_ia_ask,
             commands::browser::web_ia_grab_code,
+            // Menú «Pujar»: temes WordPress al marketplace
+            commands::themes::theme_inspect,
+            commands::themes::theme_build_zip,
+            commands::themes::theme_upload,
+            commands::themes::theme_open_login,
+            commands::themes::theme_upload_session,
+            commands::themes::theme_open_sales_page,
             // Proveïdors d'IA en línia (tokens)
             commands::api::ai_provider_list,
             commands::api::ai_provider_add,
@@ -312,6 +339,7 @@ pub fn run() {
             commands::api::ai_provider_remove,
             commands::api::ai_provider_test,
             commands::api::ai_inline_complete,
+            commands::api::ai_inline_complete_cancel,
             commands::api::ai_endpoint_check,
             commands::api::ai_remote_deploy,
             commands::api::ai_remote_verify,

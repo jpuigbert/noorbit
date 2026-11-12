@@ -88,6 +88,10 @@ export default function ModelManagerModal() {
     binary: string | null;
     models: [string, number][];
     running: { port: number; model: string; path: string; pid: number }[];
+    /// Carpeta dels models GGUF (pot ser un disc extern).
+    modelsDir: string;
+    /// Carpeta del motor local (pot ser un disc extern).
+    engineDir: string;
   } | null>(null);
   const [llamaMsg, setLlamaMsg] = useState("");
 
@@ -97,8 +101,34 @@ export default function ModelManagerModal() {
       binary: string | null;
       models: [string, number][];
       running: { port: number; model: string; path: string; pid: number }[];
+      modelsDir: string;
+      engineDir: string;
     }>("llamacpp_status").catch(() => null);
     if (st) setLlama(st);
+  };
+
+  /// Tria on es desen els models GGUF i on viu el motor local: pot ser un
+  /// DISC EXTERN (USB/HDD) i així el model s'hi queda i s'hi pot treballar
+  /// des d'allà (fins i tot endurant-lo a una altra màquina).
+  const setLlamaDirs = async (modelsDir?: string, engineDir?: string) => {
+    try {
+      const msg = await invoke<string>("llamacpp_set_dirs", {
+        modelsDir: modelsDir ?? null,
+        engineDir: engineDir ?? null,
+      });
+      setLlamaMsg(msg);
+      await loadLlama();
+    } catch (e) {
+      setLlamaMsg(String(e));
+    }
+  };
+  const pickLlamaModelsDir = async () => {
+    const sel = await open({ directory: true });
+    if (typeof sel === "string") await setLlamaDirs(sel, undefined);
+  };
+  const pickLlamaEngineDir = async () => {
+    const sel = await open({ directory: true });
+    if (typeof sel === "string") await setLlamaDirs(undefined, sel);
   };
   // El catàleg del núvol és molt més llarg que la llista base: qualsevol nom
   // allotjat a ollama.com es pot usar sense baixar-lo res al disc.
@@ -811,6 +841,75 @@ export default function ModelManagerModal() {
                 {llamaMsg && <p className="lp-hint">{llamaMsg}</p>}
               </>
             )}
+
+            {/* DISC EXTERN: on es desen els models GGUF i on viu el motor
+                local. Si els posem en un USB/HDD, el model hi queda i
+                NoOrbit hi treballa des d'allà. */}
+            <div className="mm-llama-dirs">
+              <div className="mm-custom">
+                <span className="lp-hint" style={{ minWidth: 190 }}>
+                  Models GGUF:
+                </span>
+                <input
+                  readOnly
+                  value={llama?.modelsDir || "Dades de NoOrbit"}
+                  title={llama?.modelsDir || undefined}
+                />
+                <button className="btn sm" onClick={() => void pickLlamaModelsDir()}>
+                  <Search size={12} /> {t("ai.chooseFolder")}
+                </button>
+                {volumes.map((v) => (
+                  <button
+                    key={`m${v}`}
+                    className={
+                      "btn sm" + ((llama?.modelsDir ?? "").startsWith(v) ? " primary" : "")
+                    }
+                    onClick={() => void setLlamaDirs(v + "/noorbit-models", undefined)}
+                  >
+                    <HardDrive size={11} />{" "}
+                    {v.replace("/Volumes/", "").replace("/media/", "")}
+                  </button>
+                ))}
+                {llama?.modelsDir && (
+                  <button
+                    className="btn sm ghost"
+                    onClick={() => void setLlamaDirs("", undefined)}
+                  >
+                    {t("ai.modelsDirDefault")}
+                  </button>
+                )}
+              </div>
+              <div className="mm-custom">
+                <span className="lp-hint" style={{ minWidth: 190 }}>
+                  Motor local:
+                </span>
+                <input
+                  readOnly
+                  value={llama?.engineDir || "Dades de NoOrbit"}
+                  title={llama?.engineDir || undefined}
+                />
+                <button className="btn sm" onClick={() => void pickLlamaEngineDir()}>
+                  <Search size={12} /> {t("ai.chooseFolder")}
+                </button>
+                {volumes.map((v) => (
+                  <button
+                    key={`e${v}`}
+                    className={
+                      "btn sm" + ((llama?.engineDir ?? "").startsWith(v) ? " primary" : "")
+                    }
+                    onClick={() => void setLlamaDirs(undefined, v + "/noorbit-engine")}
+                  >
+                    <HardDrive size={11} />{" "}
+                    {v.replace("/Volumes/", "").replace("/media/", "")}
+                  </button>
+                ))}
+              </div>
+              <p className="lp-hint">
+                Amb el model en un disc extern, arrenca'l des d'aquí i NoOrbit
+                hi treballa igual: si el disc no hi és muntat, el model
+                simplement no apareix (no es per cap dada).
+              </p>
+            </div>
           </div>
 
           {/* Models del NÚVOL d'Ollama: cerca a ollama.com i baixa'n qualsevol.

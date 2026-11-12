@@ -18,6 +18,15 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  transition:
+    border-color var(--speed-fast) var(--ease-out),
+    box-shadow var(--speed-fast) var(--ease-out),
+    transform var(--speed-fast) var(--ease-out);
+}
+.webai-card:hover {
+  border-color: var(--border-2);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
 }
 .webai-card-head {
   display: flex;

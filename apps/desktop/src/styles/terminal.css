@@ -35,7 +35,7 @@
   flex: 1;
   overflow-y: auto;
   padding: 6px 10px;
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.45;
   white-space: pre-wrap;
@@ -52,7 +52,7 @@
   color: var(--accent-2);
 }
 .term-err {
-  color: #f07178;
+  color: var(--error);
 }
 .term-exit {
   color: var(--text-2);
@@ -69,7 +69,7 @@
 }
 .terminal-prompt {
   color: var(--accent-2);
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 .terminal-input {
@@ -78,6 +78,6 @@
   border: none;
   outline: none;
   color: var(--text-0);
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }

@@ -7,6 +7,7 @@
 //! ja resol això; ací exposem l'estat a la UI i la manera de migrar/activar.
 
 use serde::Serialize;
+use std::path::PathBuf;
 use tauri::command;
 
 /// Marcador de mode portàtil.
@@ -176,6 +177,124 @@ pub async fn portable_disable() -> Result<(), String> {
         std::fs::remove_file(&marker).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// CREA el PAQUET PORTÀTIL per a un USB, en el sistema on s'executa ara:
+/// una carpeta amb l'aplicació, el marcador `.noorbit-portable`, un llançador
+/// propi (`.command` / `.sh` / `.cmd`) i un «Llegeix-me».
+///
+/// El resultat es pot copiar a un USB i executar en macOS, Linux o Windows:
+/// l'app hi treballa en mode portàtil (totes les dades al costat).
+#[command]
+pub async fn portable_create_bundle(dest: String) -> Result<String, String> {
+    let dest = PathBuf::from(&dest);
+    std::fs::create_dir_all(&dest).map_err(|e| format!("No puc crear la carpeta: {e}"))?;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let app_root = exe
+        .ancestors()
+        .find(|a| a.extension().map(|e| e == "app").unwrap_or(false))
+        .map(|p| p.to_path_buf());
+
+    // 1) L'aplicació: a macOS, el paquet .app sencer; a Linux/Windows, el
+    //    mateix executable.
+    if let Some(root) = &app_root {
+        let target = dest.join(
+            root.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "NoOrbit.app".into()),
+        );
+        copy_dir(root, &target)?;
+    } else {
+        let name = exe.file_name().unwrap_or_default();
+        let target = dest.join(name);
+        std::fs::copy(&exe, &target).map_err(|e| format!("No puc copiar l'aplicació: {e}"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    // 2) El marcador: a l'arrel del paquet i (a macOS) dins del .app, perquè
+    //    l'app es detecti portàtil encara que es mogui de lloc.
+    std::fs::write(dest.join(MARKER), b"portable").map_err(|e| e.to_string())?;
+    if let Some(root) = &app_root {
+        let _ = std::fs::write(root.join(MARKER), b"portable");
+    }
+
+    // 3) El llançador del sistema.
+    #[cfg(target_os = "macos")]
+    {
+        let p = dest.join("NoOrbit.command");
+        std::fs::write(
+            &p,
+            "#!/bin/bash\n# NoOrbit portàtil: obre l'app des d'aquest USB.\n\
+             cd \"$(dirname \"$0\")\" || exit 1\n\
+             [ -f .noorbit-portable ] || echo portable > .noorbit-portable\n\
+             xattr -dr com.apple.quarantine \"./NoOrbit.app\" 2>/dev/null\n\
+             open \"./NoOrbit.app\"\n",
+        )
+        .map_err(|e| e.to_string())?;
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let p = dest.join("NoOrbit.sh");
+        std::fs::write(
+            &p,
+            "#!/bin/bash\n# NoOrbit portàtil: executa l'app des d'aquest USB.\n\
+             cd \"$(dirname \"$0\")\" || exit 1\n\
+             [ -f .noorbit-portable ] || echo portable > .noorbit-portable\n\
+             if [ -x ./no-orbit ]; then chmod +x ./no-orbit; exec ./no-orbit \"$@\"; fi\n\
+             for app in *.AppImage; do [ -e \"$app\" ] || continue; chmod +x \"$app\"; exec \"./$app\" \"$@\"; done\n\
+             echo \"No trobo el binari de NoOrbit en aquesta carpeta.\"; exit 1\n",
+        )
+        .map_err(|e| e.to_string())?;
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::fs::write(
+            dest.join("NoOrbit.cmd"),
+            "@echo off\nrem NoOrbit portàtil: arrenca l'app des d'aquest USB.\n\
+             cd /d \"%~dp0\"\n\
+             if not exist \".noorbit-portable\" echo portable> .noorbit-portable\n\
+             start \"\" \"%~dp0no-orbit.exe\" %*\n",
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    // 4) Les instruccions.
+    let sistema = if cfg!(target_os = "macos") {
+        "macOS (doble clic a «NoOrbit.command»)"
+    } else if cfg!(target_os = "windows") {
+        "Windows (doble clic a «NoOrbit.cmd»; cal el runtime WebView2, que ja ve instal·lat a Windows 10/11)"
+    } else {
+        "Linux (executa «NoOrbit.sh» o l'AppImage)"
+    };
+    std::fs::write(
+        dest.join("Llegeix-me.txt"),
+        format!(
+            "NoOrbit — versió PORTÀTIL\n\
+             ========================\n\n\
+             Aquesta carpeta es pot copiar a un USB i executar en qualsevol\n\
+             sistema operatiu: {}.\n\
+             No cal instal·lar res: les dades (configuració, models, especialistes,\n\
+             historial de xats i imatges) es desen a «NoOrbitData» al costat.\n\n\
+             MODELS: al menú «IA ▸ Models» els pots posar en aquest mateix USB\n\
+             (i descarregar-los des de «Hugging Bay» directament al disc).\n\n\
+             Fet per Joan Puigbert Carreras · Projecte de Thepuigberts.com\n",
+            sistema
+        ),
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(format!(
+        "Paquet portàtil creat a «{}». Copia'l al USB i obre'l allà (doble clic al llançador).",
+        dest.to_string_lossy()
+    ))
 }
 
 /// Migra el contingut estàndard del Mac (`Application Support/no-orbit/`)

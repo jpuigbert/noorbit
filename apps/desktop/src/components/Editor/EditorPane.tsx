@@ -57,19 +57,23 @@ function langFor(name: string): string {
 /// armada o ja ha expirat). S'actualitza cada mig segon mentre hi ha revisió.
 function useAutoAcceptCountdown(mark: EditMark | undefined): number | null {
   const [left, setLeft] = useState<number | null>(null);
+  // Primitives estables: l'efecte només es rearma quan canvia el compte
+  // enrere (armedAt) o l'estat de streaming, no amb cada actualització del mark.
+  const armedAt = mark?.armedAt;
+  const streaming = mark?.streaming;
   useEffect(() => {
-    if (!mark || mark.streaming) {
+    if (armedAt === undefined || streaming) {
       setLeft(null);
       return;
     }
     const tick = () => {
-      const ms = AUTO_ACCEPT_MS - (Date.now() - mark.armedAt);
+      const ms = AUTO_ACCEPT_MS - (Date.now() - armedAt);
       setLeft(ms > 0 ? Math.ceil(ms / 1000) : 0);
     };
     tick();
     const id = setInterval(tick, 500);
     return () => clearInterval(id);
-  }, [mark?.armedAt, mark?.streaming]);
+  }, [armedAt, streaming]);
   return left;
 }
 
@@ -181,7 +185,7 @@ export default function EditorPane() {
     setAiSelBusy(false);
     // Pel flux de revisió: aprofegim el vell i armem el Verd/Verment.
     updateContent(newFull);
-    void saveFile(openFile.path, newFull);
+    void saveFile(openFile.path, newFull).catch(() => undefined);
     noteFileEdited(openFile.path, newFull, original, true);
   };
   // Edició de la IA pendent de revisar en aquest fitxer (verd = nou /
@@ -284,7 +288,11 @@ export default function EditorPane() {
         <button
           className="btn sm"
           disabled={!openFile.dirty}
-          onClick={() => saveFile(openFile.path, openFile.content)}
+          onClick={() => {
+            // El store ja avisa amb un toast si el desat falla; aquí només
+            // evitem el rebuig sense gestionar.
+            void saveFile(openFile.path, openFile.content).catch(() => undefined);
+          }}
         >
           {t("common.save")}
         </button>

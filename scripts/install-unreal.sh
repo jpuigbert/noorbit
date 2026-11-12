@@ -65,6 +65,10 @@ EOF
   if command -v open >/dev/null 2>&1; then
     say "Obrint la pàgina de descàrrega…"
     open "https://www.unrealengine.com/download" || true
+  elif command -v xdg-open >/dev/null 2>&1; then
+    # A Linux, «open» no és l'obridor d'URL (pot ser un altre programa).
+    say "Obrint la pàgina de descàrrega…"
+    xdg-open "https://www.unrealengine.com/download" || true
   fi
 fi
 
@@ -88,7 +92,8 @@ fi
 # ------------------------------------------------------------------------------
 # 3. Estat del servidor Remote Control
 # ------------------------------------------------------------------------------
-if command -v nc >/dev/null 2>&1 && nc -z 127.0.0.1 "$RC_PORT" 2>/dev/null; then
+if command -v nc >/dev/null 2>&1 && nc -z -w 2 127.0.0.1 "$RC_PORT" 2>/dev/null; then
+  # -w 2: sense timeout, un port filtrat feia l'script esperar ~75 s.
   ok "Remote Control API escoltant al port $RC_PORT (Unreal obert i connectat)."
 else
   warn "El port $RC_PORT no respon. Quan obres l'editor des de NoOrbit, s'habilita sol;"

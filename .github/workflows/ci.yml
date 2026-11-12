@@ -1,0 +1,106 @@
+name: CI
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Portes de qualitat a cada push/PR.
+#
+# El workflow de release (release.yml) NOMÉS compila al publicar un tag:
+# un commit que no compila o que trenca els tests podia arribar a un
+# release sense que ningú ho detectés. Ací es talla això d'arrel:
+#
+#   • frontend: typecheck (tsc) + lint (ESLint react-hooks) + tests de
+#     lògica pura (Vitest) + detector de selectors zustand inestables
+#     (el patró que ja ha causat DOS cops la pantalla en blanc, React #185).
+#   • backend: cargo check + cargo test (Linux, mateixes deps que release).
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (tsc --noEmit)
+        run: pnpm typecheck
+
+      # ESLint amb react-hooks: caça hooks condicionals i dependències
+      # inestables als useEffect/useMemo (la resta del que el grep no veu).
+      - name: Lint (ESLint react-hooks)
+        run: pnpm lint
+
+      # Tests de lògica pura: i18n (t()), parsers de directrius (@file:,
+      # @agent:, @use:, @todo:), utilitats del xat. quant_de/safe_name es
+      # proven al backend (cargo test).
+      - name: Tests (Vitest)
+        run: pnpm test
+
+      # Cap selector de zustand v5 pot construir llistats/objectes nous:
+      # useSyncExternalStore compara per referència i React entraria en un
+      # bucle infinit de re-render («Maximum update depth exceeded», #185).
+      # Cal seleccionar l'estat cru i derivar amb useMemo / useShallow.
+      - name: Selectors zustand estables (React #185)
+        run: |
+          if grep -rnE 'use[A-Za-z]+Store\(\(s\) =>.*(\.filter\(|\.map\(|\.sort\(|Object\.(values|entries|keys)|\[\.\.\.)' \
+            apps/desktop/src --include='*.tsx' --include='*.ts'; then
+            echo "::error::Selector zustand inestable: retorna una referència nova a cada lectura → React #185. Selecciona l'estat cru i deriva amb useMemo/useShallow."
+            exit 1
+          fi
+          if grep -rnE 'use[A-Za-z]+Store\(\s*\(s\) =>\s*\(\{' \
+            apps/desktop/src --include='*.tsx' --include='*.ts'; then
+            echo "::error::Selector zustand que construeix un objecte nou → React #185."
+            exit 1
+          fi
+          echo "Selectors zustand OK"
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Mateixes dependències de sistema que el build de release (Tauri).
+      - name: Install Linux system deps
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: cargo check
+        working-directory: apps/desktop/src-tauri
+        run: cargo check
+
+      - name: cargo test (lògica pura)
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --lib

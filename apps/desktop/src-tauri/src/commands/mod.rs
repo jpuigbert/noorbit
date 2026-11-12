@@ -16,5 +16,6 @@ pub mod skills;
 pub mod skills_store;
 pub mod system;
 pub mod term;
+pub mod themes;
 pub mod update;
 pub mod workspace;

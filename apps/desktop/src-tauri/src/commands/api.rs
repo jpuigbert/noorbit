@@ -3,8 +3,30 @@
 use crate::api::{self, AiProvider, AiProviderPublic, AuthScheme};
 use crate::AppState;
 use serde::Deserialize;
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{command, State};
+
+/// Peticions d'AUTOCOMPLETAT EN VOL: permet cancel·lar-les des de la
+/// interfície. Sense això, quan l'usuari seguia escrivint (o es cancel·lava el
+/// suggeriment), la inferència vella continuava al servidor consumint CPU/GPU
+/// i RAM fins que expirava el temps límit.
+static INLINE_PENDING: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+
+fn inline_pending() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
+    INLINE_PENDING.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Espera que es cancel·li la petició (es comprova cada 80 ms).
+async fn wait_cancelled(flag: Arc<AtomicBool>) {
+    loop {
+        if flag.load(Ordering::Relaxed) {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -893,6 +915,7 @@ pub async fn ai_inline_complete(
     prefix: String,
     suffix: String,
     language: Option<String>,
+    request_id: Option<String>,
 ) -> Result<String, String> {
     use std::time::Duration;
 
@@ -919,9 +942,56 @@ pub async fn ai_inline_complete(
     // Petició amb temps límit curt: s'anula sola si el model pesa massa.
     let dur = Duration::from_secs(8);
     let turns = [("user".to_string(), prompt)];
-    let fut = api::chat(&client, &provider, &turns, Some(system));
-    match tokio::time::timeout(dur, fut).await {
-        Ok(Ok((content, _))) => {
+
+    // Senyal de cancel·lació (opcional): la interfície pot dir «ja no el vull»
+    // quan l'usuari segueix escrivint o cancel·la el suggeriment.
+    let cancel = request_id
+        .as_ref()
+        .map(|rid| rid.trim())
+        .filter(|rid| !rid.is_empty())
+        .map(|rid| {
+            let flag = Arc::new(AtomicBool::new(false));
+            if let Ok(mut m) = inline_pending().lock() {
+                // Es netegen les entrades velles (el registre no ha de créixer).
+                if m.len() > 64 {
+                    let old: Vec<String> = m.keys().take(m.len() - 64).cloned().collect();
+                    for k in old {
+                        m.remove(&k);
+                    }
+                }
+                m.insert(rid.to_string(), flag.clone());
+            }
+            (rid.to_string(), flag)
+        });
+
+    let chat_fut = api::chat(&client, &provider, &turns, Some(system));
+    tokio::pin!(chat_fut);
+
+    let outcome: Result<(String, Option<String>), String> = match cancel {
+        Some((rid, flag)) => {
+            let res = tokio::select! {
+                r = tokio::time::timeout(dur, &mut chat_fut) => match r {
+                    Ok(Ok(v)) => Ok(v),
+                    Ok(Err(e)) => Err(e.to_string()),
+                    Err(_) => Err("timeout".to_string()),
+                },
+                _ = wait_cancelled(flag) => Err("cancelled".to_string()),
+            };
+            // La petició ja no és «en vol»: es treu del registre.
+            if let Ok(mut m) = inline_pending().lock() {
+                m.remove(&rid);
+            }
+            res
+        }
+        None => match tokio::time::timeout(dur, chat_fut).await {
+            Ok(Ok(v)) => Ok(v),
+            Ok(Err(e)) => Err(e.to_string()),
+            Err(_) => Err("timeout".to_string()),
+        },
+    };
+
+    match outcome {
+        Ok((content, _)) => {
             let mut out = content.trim_start().to_string();
             // Retall: sense blocs ```…``` ni capçaleres de conversa.
             if let Some(fence) = out.find("```") {
@@ -931,9 +1001,24 @@ pub async fn ai_inline_complete(
             let out = out.trim().to_string();
             Ok(out)
         }
-        Ok(Err(e)) => Err(e.to_string()),
-        Err(_) => Err("timeout".to_string()),
+        Err(e) => Err(e),
     }
+}
+
+/// Cancel·la una petició d'autocompletat EN VOL: la inferència s'atura al
+/// servidor (no consumeix CPU/GPU ni RAM fins a expirar).
+#[command]
+pub async fn ai_inline_complete_cancel(request_id: String) -> Result<(), String> {
+    let rid = request_id.trim().to_string();
+    if rid.is_empty() {
+        return Ok(());
+    }
+    if let Ok(m) = inline_pending().lock() {
+        if let Some(flag) = m.get(&rid) {
+            flag.store(true, Ordering::Relaxed);
+        }
+    }
+    Ok(())
 }
 
 #[command]

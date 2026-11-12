@@ -80,13 +80,20 @@ writeFileSync(join(outDir, "128x128@2x.png"), pngs[256]);
 writeFileSync(join(outDir, "icon.png"), pngs[512]);
 
 // .icns contenedor
-const icnsTypes = { 16: "icp4", 32: "icp5", 64: "icp9", 128: "ic07", 256: "ic08", 512: "ic09", 1024: "ic10" };
+// Tipus ICNS amb PNG: només els estàndard «ic07»…«ic14» (128 px i
+// superiors). Les representacions petites (16/32/64) tenen els seus propis
+// tipus (`icp4`/`icp5`/`ic09`), que NO admeten PNG: hi posaven dades PNG
+// que alguns lectors d'icns ignoraven (icona petita borrosa o absent).
+// Emetem només els tipus vàlids i macOS escala des de 128 px.
+const icnsTypes = { 128: "ic07", 256: "ic08", 512: "ic09", 1024: "ic10" };
 const entries = [];
 let total = 8;
 for (const s of sizes) {
+  const type = icnsTypes[s];
+  if (!type) continue;
   const data = pngs[s];
   const h = Buffer.alloc(8);
-  h.write(icnsTypes[s], 0, 4, "latin1");
+  h.write(type, 0, 4, "latin1");
   h.writeUInt32BE(8 + data.length);
   entries.push(h, data);
   total += 8 + data.length;

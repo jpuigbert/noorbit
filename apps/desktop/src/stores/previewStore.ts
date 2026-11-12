@@ -15,8 +15,10 @@ export type AgentSub =
   | "blender"
   | "mobile";
 
-interface PreviewState {
-  rightTab: RightTab;
+/// Els esdeveniments del preview es registren UNA sola vegada.
+let previewEventsReady = false;
+
+interface PreviewState {  rightTab: RightTab;
   agentSub: AgentSub;
   previewUrl: string | null;
   previewActive: boolean;
@@ -38,10 +40,18 @@ export const usePreviewStore = create<PreviewState>((set) => ({
   setAgentSub: (sub) => set({ agentSub: sub }),
 
   init: async () => {
-    const { listen } = await import("@tauri-apps/api/event");
-    listen("preview://stopped", () => {
-      set({ previewActive: false, previewUrl: null });
-    });
+    // Guard: el registre es fa UNA vegada (RightPanel crida init() en cada
+    // muntatge) i amb catch (un registre fallat quedava sense gestionar).
+    if (previewEventsReady) return;
+    try {
+      const { listen } = await import("@tauri-apps/api/event");
+      await listen("preview://stopped", () => {
+        set({ previewActive: false, previewUrl: null });
+      });
+      previewEventsReady = true;
+    } catch (e) {
+      console.error("Preview: no s'han pogut connectar els esdeveniments", e);
+    }
   },
 
   startPreview: async (root) => {

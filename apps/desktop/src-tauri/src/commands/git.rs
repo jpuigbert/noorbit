@@ -99,12 +99,16 @@ pub async fn git_status() -> Result<GitStatus, String> {
         let changes = porcelain
             .lines()
             .filter_map(|line| {
+                // Format porcelain: XY + espai + ruta. Es robust davant de
+                // línies mal formades (o versions de git que canvien el
+                // format): no es fa slicing que pugui trencar en un byte no
+                // UTF-8.
                 if line.len() < 4 {
                     return None;
                 }
-                let xy = &line[..2];
+                let xy = line.get(..2)?;
                 // Per files reanomenats (R old -> new) prenem el destí.
-                let mut p = line[3..].trim().trim_matches('"').to_string();
+                let mut p = line.get(3..)?.trim().trim_matches('"').to_string();
                 if let Some((_, to)) = p.split_once(" -> ") {
                     p = to.trim_matches('"').to_string();
                 }

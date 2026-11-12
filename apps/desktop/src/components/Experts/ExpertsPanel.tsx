@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Loader2, Plus, Trash2, Pencil, Users, X, Square, MessagesSquare } from "lucide-react";
 import { useT } from "../../i18n";
 import { useExpertStore, type Expert, type ExpertInput } from "../../stores/expertStore";
@@ -15,7 +15,15 @@ function ExpertLiveCard({ expert }: { expert: Expert }) {
   const { t } = useT();
   const sid = `team:${expert.id}`;
   const sess = useAgentStore((s) => s.sessions.find((x) => x.id === sid));
-  const steps = useExpertStore((s) => s.teamProgress.filter((p) => p.expert === expert.name));
+  // El selector ha de tornar SEMPRE la mateixa referència: filtrar dins del
+  // selector creava un llistat nou a cada lectura i React es repiava sense fi
+  // («Maximum update depth exceeded»). Es selecciona l'estat cru i es filtra
+  // amb useMemo (mateix patró que BackgroundTaskBadge).
+  const allProgress = useExpertStore((s) => s.teamProgress);
+  const steps = useMemo(
+    () => allProgress.filter((p) => p.expert === expert.name),
+    [allProgress, expert.name]
+  );
   const lastStep = steps[steps.length - 1];
   const teamRunning = useExpertStore((s) => s.teamRunning);
 

@@ -1513,15 +1513,32 @@ fn adjust_priority(background: bool) {
 
 /// Endollat per bateria (mode eco addicional): redueix encara més els polls
 /// quan el portàtil no és al corrent, per estalviar energia.
+///
+/// `pmset` és un subprocesse: es llista en un fil a part i el resultat es
+/// cacheja 30 s (abans, cada poll del bucle d'agent el llançava).
 fn on_battery() -> bool {
     #[cfg(target_os = "macos")]
     {
-        return std::process::Command::new("pmset")
+        use std::sync::Mutex;
+        use std::time::{Duration, Instant};
+        static CACHE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+        if let Ok(guard) = CACHE.lock() {
+            if let Some((at, val)) = *guard {
+                if at.elapsed() < Duration::from_secs(30) {
+                    return val;
+                }
+            }
+        }
+        let val = std::process::Command::new("pmset")
             .args(["-g", "batt"])
             .output()
             .ok()
             .map(|o| String::from_utf8_lossy(&o.stdout).contains("Battery Power"))
             .unwrap_or(false);
+        if let Ok(mut guard) = CACHE.lock() {
+            *guard = Some((Instant::now(), val));
+        }
+        return val;
     }
     #[cfg(target_os = "linux")]
     {

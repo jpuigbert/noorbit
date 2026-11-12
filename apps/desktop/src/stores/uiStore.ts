@@ -30,6 +30,10 @@ interface UIState {
   rightPanelOpen: boolean;
   chatOpen: boolean;
   showModelManager: boolean;
+  /** Menú «Hugging Bay»: cerca i baixada de models GGUF al mirror. */
+  showHuggingBay: boolean;
+  /** Menú «Pujar»: publicació de temes WordPress al marketplace. */
+  showPublishTheme: boolean;
   showIaCatalog: boolean;
   showRemoteServer: boolean;
   showSettings: boolean;
@@ -64,6 +68,8 @@ interface UIState {
   toggleChat: () => void;
   setChatOpen: (open: boolean) => void;
   setShowModelManager: (v: boolean) => void;
+  setShowHuggingBay: (v: boolean) => void;
+  setShowPublishTheme: (v: boolean) => void;
   setShowIaCatalog: (v: boolean) => void;
   setShowRemoteServer: (v: boolean) => void;
   setShowSettings: (v: boolean) => void;
@@ -111,6 +117,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   rightPanelOpen: true,
   chatOpen: true,
   showModelManager: false,
+  showHuggingBay: false,
+  showPublishTheme: false,
   showIaCatalog: false,
   showRemoteServer: false,
   showSettings: false,
@@ -138,6 +146,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   toggleChat: () => set({ chatOpen: !get().chatOpen }),
   setChatOpen: (open) => set({ chatOpen: open }),
   setShowModelManager: (v) => set({ showModelManager: v }),
+  setShowHuggingBay: (v) => set({ showHuggingBay: v }),
+  setShowPublishTheme: (v) => set({ showPublishTheme: v }),
   setShowIaCatalog: (v) => set({ showIaCatalog: v }),
   setShowRemoteServer: (v) => set({ showRemoteServer: v }),
   setShowSettings: (v) => set({ showSettings: v }),

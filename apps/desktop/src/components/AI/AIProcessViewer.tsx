@@ -161,7 +161,11 @@ export default function AIProcessViewer() {
             </summary>
             <div className="proc-turns">
               {[...turns].reverse().map((t, i) => (
-                <Turn key={i} turn={t} label={`Torn ${turns.length - i}`} />
+                // La clau NO pot ser l'índex: en invertir la llista, un torn
+                // nou entra a l'índex 0 i TOTS els anteriors canvien
+                // d'índex → React els desmunta i es per l'estat obert/plegat
+                // que l'usuari havia deixat.
+                <Turn key={t.id ?? `t-${turns.length - i}`} turn={t} label={`Torn ${turns.length - i}`} />
               ))}
             </div>
           </details>
@@ -173,10 +177,13 @@ export default function AIProcessViewer() {
 
 /// Un torn ja acabat: es pot obrir per rellegir el pensament i la resposta.
 function Turn({ turn, label }: { turn: ProcessTurn; label: string }) {
-  const when = new Date(turn.endedAt).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  // Un torn interromput pot no tenir `endedAt`: «Invalid Date» no serveix.
+  const when = turn.endedAt
+    ? new Date(turn.endedAt).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "—";
   return (
     <details className="proc-turn">
       <summary>
