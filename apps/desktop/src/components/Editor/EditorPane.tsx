@@ -1,5 +1,6 @@
 import Editor, { DiffEditor } from "@monaco-editor/react";
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { invoke } from "@tauri-apps/api/core";
 import { X, ExternalLink, FolderOpen, ImageOff, Check, Undo2, Sparkles } from "lucide-react";
 import { useT } from "../../i18n";
@@ -143,7 +144,14 @@ function ImageViewer({ path, name }: { path: string; name: string }) {
 
 export default function EditorPane() {
   const { t } = useT();
-  const { openFile, updateContent, saveFile, closeFile } = useWorkspaceStore();
+  const { openFile, updateContent, saveFile, closeFile } = useWorkspaceStore(
+    useShallow((st) => ({
+      openFile: st.openFile,
+      updateContent: st.updateContent,
+      saveFile: st.saveFile,
+      closeFile: st.closeFile,
+    }))
+  );
   const theme = useUIStore((s) => s.theme);
   // Autocomplete IA ( sugeriments durant l'escriptura): flag persistent.
   const [acOn, setAcOn] = useState(autocompleteEnabled());
@@ -217,17 +225,17 @@ export default function EditorPane() {
           <div style={{ flex: 1 }} />
           <button
             className="btn sm"
-            title="Obri amb l'aplicació per defecte del sistema"
+            title={t("common.openExternHint")}
             onClick={() => void invoke("open_externally", { path: openFile.imagePath }).catch(() => undefined)}
           >
-            <ExternalLink size={12} /> Obri
+            <ExternalLink size={12} /> {t("common.openExtern")}
           </button>
           <button
             className="btn sm"
-            title="Mostra al Finder / explorador"
+            title={t("common.revealHint")}
             onClick={() => void invoke("reveal_in_finder", { path: openFile.imagePath }).catch(() => undefined)}
           >
-            <FolderOpen size={12} /> Mostra
+            <FolderOpen size={12} /> {t("common.reveal")}
           </button>
           <button className="icon-btn" style={{ width: 16, height: 16 }} onClick={() => closeFile()}>
             <X size={12} />

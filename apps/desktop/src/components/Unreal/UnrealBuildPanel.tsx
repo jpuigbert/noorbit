@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Package, Trash2, FolderSearch, Loader2 } from "lucide-react";
 import { useT } from "../../i18n";
@@ -14,7 +15,17 @@ export default function UnrealBuildPanel() {
     lastBuildResult,
     packageGame,
     clearBuildOutput,
-  } = useUnrealStore();
+  } = useUnrealStore(
+    useShallow((st) => ({
+      installations: st.installations,
+      projectPath: st.projectPath,
+      building: st.building,
+      buildOutput: st.buildOutput,
+      lastBuildResult: st.lastBuildResult,
+      packageGame: st.packageGame,
+      clearBuildOutput: st.clearBuildOutput,
+    }))
+  );
 
   const [engineRoot, setEngineRoot] = useState("");
   const [platform, setPlatform] = useState("Mac");

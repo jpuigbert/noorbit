@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { X, Download, Trash2, RefreshCw, Check, Search, Cloud, Play, HardDrive, Zap, Globe, MemoryStick, Cpu, Film } from "lucide-react";
@@ -68,7 +69,59 @@ export default function ModelManagerModal() {
     loadLoaded,
     unloadModels,
     setKeepAlive,
-  } = useAIStore();
+  } = useAIStore(
+    useShallow((st) => ({
+      models: st.models,
+      cloud: st.cloud,
+      suggested: st.suggested,
+      cloudLoading: st.cloudLoading,
+      cloudError: st.cloudError,
+      internet: st.internet,
+      internetLoading: st.internetLoading,
+      internetError: st.internetError,
+      ollamaRunning: st.ollamaRunning,
+      ollamaInstalled: st.ollamaInstalled,
+      comfyRunning: st.comfyRunning,
+      comfyInstalled: st.comfyInstalled,
+      imageCpu: st.imageCpu,
+      imageCpuProgress: st.imageCpuProgress,
+      loadImageCpu: st.loadImageCpu,
+      installImageCpu: st.installImageCpu,
+      downloadCpuModel: st.downloadCpuModel,
+      selectedModel: st.selectedModel,
+      pulling: st.pulling,
+      lastMessage: st.lastMessage,
+      loadModels: st.loadModels,
+      refreshProviders: st.refreshProviders,
+      checkOllama: st.checkOllama,
+      checkInstalled: st.checkInstalled,
+      checkComfy: st.checkComfy,
+      searchCloud: st.searchCloud,
+      searchInternet: st.searchInternet,
+      installOllama: st.installOllama,
+      startOllama: st.startOllama,
+      installComfy: st.installComfy,
+      startComfy: st.startComfy,
+      pullModel: st.pullModel,
+      pullBayModel: st.pullBayModel,
+      deleteModel: st.deleteModel,
+      selectModel: st.selectModel,
+      modelsDir: st.modelsDir,
+      volumes: st.volumes,
+      migrating: st.migrating,
+      loaded: st.loaded,
+      keepAlive: st.keepAlive,
+      loadModelsDir: st.loadModelsDir,
+      setModelsDir: st.setModelsDir,
+      migrateModels: st.migrateModels,
+      internetSource: st.internetSource,
+      setInternetSource: st.setInternetSource,
+      installLocalAi: st.installLocalAi,
+      loadLoaded: st.loadLoaded,
+      unloadModels: st.unloadModels,
+      setKeepAlive: st.setKeepAlive,
+    }))
+  );
 
   const [custom, setCustom] = useState("");
   const [ramMsg, setRamMsg] = useState("");

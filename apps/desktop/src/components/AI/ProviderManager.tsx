@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { Plus, Trash2, Zap, Star, Pencil, Loader2, Power } from "lucide-react";
 import { useT } from "../../i18n";
 import HarnessSection from "./HarnessSection";
@@ -102,7 +103,24 @@ export default function ProviderManager() {
     checking,
     lastCheck,
     setEnabled,
-  } = useProviderStore();
+  } = useProviderStore(
+    useShallow((st) => ({
+      providers: st.providers,
+      active: st.active,
+      testingId: st.testingId,
+      lastTest: st.lastTest,
+      load: st.load,
+      add: st.add,
+      update: st.update,
+      remove: st.remove,
+      test: st.test,
+      select: st.select,
+      checkEndpoint: st.checkEndpoint,
+      checking: st.checking,
+      lastCheck: st.lastCheck,
+      setEnabled: st.setEnabled,
+    }))
+  );
 
   const [form, setForm] = useState<ProviderInput>(emptyForm());
   const [editingId, setEditingId] = useState<string | null>(null);

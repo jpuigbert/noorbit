@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import { Copy } from "lucide-react";
+import { useT } from "../../i18n";
 
 /// Renderitzador Markdown lleuger (ínteg del projecte, sense dependències):
 /// - Blocs de codi ``` amb CAPÇALERA de llenguatge + botó de còpia
@@ -50,16 +51,17 @@ function InlineMD({ text }: { text: string }): ReactNode {
 }
 
 function CodeBlock({ lang, code }: { lang: string; code: string }): ReactNode {
+  const { t } = useT();
   return (
     <div className="cmd-code">
       <div className="cmd-code-head">
-        <span className="cmd-code-lang">{lang || "codi"}</span>
+        <span className="cmd-code-lang">{lang || t("common.code")}</span>
         <button
           className="cmd-code-copy"
-          title="Copia el codi"
+          title={t("common.copyCode")}
           onClick={() => void navigator.clipboard.writeText(code)}
         >
-          <Copy size={11} /> Copia
+          <Copy size={11} /> {t("common.copy")}
         </button>
       </div>
       <pre>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { X, Globe, Info, SlidersHorizontal, Plug, RefreshCw, Download, HardDrive } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
@@ -18,34 +19,42 @@ const DELAYS = [500, 1000, 2000, 5000];
 /// descàrrega directa de l'instal·ador per al nostre sistema. NoOrbit NO
 /// s'autoinsta·la mai: descarrega/obri i l'usuari decidix.
 function UpdateSection() {
-  const { info, checking, error, check } = useUpdateStore();
+  const { info, checking, error, check } = useUpdateStore(
+    useShallow((st) => ({
+      info: st.info,
+      checking: st.checking,
+      error: st.error,
+      check: st.check,
+    }))
+  );
+  const { t } = useT();
   return (
     <div className="setting-row setting-row-col update-section">
-      <span>Actualitzacions</span>
+      <span>{t("settings.update.title")}</span>
       <div className="lp-hint">
         {checking
-          ? "Comprovant GitHub…"
+          ? t("settings.update.checking")
           : error
           ? error
           : info
           ? info.available
-            ? `Hi ha una versió nova: ${info.latest} (tu tens la ${info.current}).`
-            : `Ja tens l'última versió publicada (${info.current}).`
-          : "Compara la teua versió amb l'últim release publicat a GitHub."}
+            ? t("settings.update.available", { latest: info.latest, current: info.current })
+            : t("settings.update.upToDate", { current: info.current })
+          : t("settings.update.hint")}
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <button className="btn sm" disabled={checking} onClick={() => void check(true)}>
-          <RefreshCw size={12} className={checking ? "spin" : undefined} /> Comprova ara
+          <RefreshCw size={12} className={checking ? "spin" : undefined} /> {t("settings.update.checkNow")}
         </button>
         {info?.available && (
           <button
             className="btn sm primary"
-            title="Obri la descàrrega de la versió nova"
+            title={t("settings.update.downloadHint")}
             onClick={() =>
               void invoke("open_externally", { path: info.asset ?? info.url }).catch(() => undefined)
             }
           >
-            <Download size={12} /> Descarregar {info.latest}
+            <Download size={12} /> {t("settings.update.download", { latest: info.latest })}
           </button>
         )}
       </div>

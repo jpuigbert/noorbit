@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import {
   Smartphone,
   Apple,
@@ -45,7 +46,29 @@ export default function MobilePanel() {
     openIos,
     startLive,
     stopLive,
-  } = useMobileStore();
+  } = useMobileStore(
+    useShallow((st) => ({
+      status: st.status,
+      avds: st.avds,
+      iosGroups: st.iosGroups,
+      loading: st.loading,
+      error: st.error,
+      liveShot: st.liveShot,
+      livePlatform: st.livePlatform,
+      liveTarget: st.liveTarget,
+      liveError: st.liveError,
+      refreshStatus: st.refreshStatus,
+      refreshAndroid: st.refreshAndroid,
+      refreshIos: st.refreshIos,
+      startAvd: st.startAvd,
+      stopAvd: st.stopAvd,
+      bootIos: st.bootIos,
+      shutdownIos: st.shutdownIos,
+      openIos: st.openIos,
+      startLive: st.startLive,
+      stopLive: st.stopLive,
+    }))
+  );
 
   // En muntar: detectem SDKs. Si un panell ja està actiu, carregem la seva
   // llista (que és més lenta que la detecció).

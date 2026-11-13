@@ -1155,7 +1155,7 @@ pub async fn hf_bay_install_native(
     let avisa = |m: &str| {
         let _ = app.emit(
             "ai://pull",
-            serde_json::json!({ "model": id.clone(), "message": m }),
+            serde_json::json!({ "model": format!("huggingbay:{}", id), "message": m }),
         );
     };
     avisa("descarregant el model de Hugging Bay…");
@@ -1242,7 +1242,7 @@ pub async fn hf_bay_download(
     let _ = app.emit(
         "ai://pull",
         serde_json::json!({
-            "model": det.model.name.clone(),
+            "model": format!("huggingbay:{}", id),
             "message": format!("descarregant {} des de Hugging Bay…", det.model.name)
         }),
     );
@@ -1267,7 +1267,7 @@ pub async fn hf_bay_download(
     let _ = app.emit(
         "ai://pull",
         serde_json::json!({
-            "model": nom.clone(),
+            "model": format!("huggingbay:{}", id),
             "message": format!("registrant «{}» a Ollama…", nom)
         }),
     );
@@ -1278,7 +1278,7 @@ pub async fn hf_bay_download(
         let _ = app.emit(
             "ai://pull",
             serde_json::json!({
-                "model": nom.clone(),
+                "model": format!("huggingbay:{}", id),
                 "message": format!("«{}» baixat (el motor local el pot fer servir)", nom)
             }),
         );
@@ -1306,7 +1306,7 @@ pub async fn hf_bay_download(
     let _ = app.emit(
         "ai://pull",
         serde_json::json!({
-            "model": nom.clone(),
+            "model": format!("huggingbay:{}", id),
             "message": format!("«{}» a punt!", nom)
         }),
     );
@@ -1314,6 +1314,33 @@ pub async fn hf_bay_download(
         ok: true,
         model: Some(nom.clone()),
         message: format!("«{}» instal·lat i a punt!", nom),
+    })
+}
+
+/// CANCEL·LA la descàrrega en curs d'un model de Hugging Bay (per id). El
+/// bucle de descàrrega consulta el flag en cada fragment: atura, esborra el
+/// «.part» i retorna un error clar. Els models pendents d'una cua es
+/// cancel·len des del frontend (encara no han començat).
+#[command]
+pub async fn hf_bay_cancel(id: String) -> Result<(), String> {
+    crate::ai::hf_bay::request_cancel(&id);
+    Ok(())
+}
+
+/// Espai lliure al disc destí dels models GGUF (per avisar ABANS de baixar un
+/// model que no hi cap). `free_bytes` és null si el sistema no el pot donar.
+#[derive(Debug, Clone, Serialize)]
+pub struct BayDiskSpace {
+    pub dir: String,
+    pub free_bytes: Option<u64>,
+}
+
+#[command]
+pub async fn hf_bay_disk_space() -> Result<BayDiskSpace, String> {
+    let dir = crate::ai::hf_bay::models_dir();
+    Ok(BayDiskSpace {
+        dir: dir.to_string_lossy().to_string(),
+        free_bytes: crate::ai::hf_bay::free_space(),
     })
 }
 

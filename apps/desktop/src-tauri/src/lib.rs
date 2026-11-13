@@ -142,6 +142,11 @@ pub fn run() {
             // motor local apareix ocupat per un servei que no existeix.
             crate::ai::llamacpp::cleanup_stale();
 
+            // Descàrregues de models tallades (l'app es va tancar mentre una
+            // IA baixava un model): el «.part» a mitges s'esborra en arrencar
+            // perquè no ocupe disc ni es done per bo. Només toca «*.part».
+            crate::ai::hf_bay::cleanup_partial_downloads();
+
             // Connexió automàtica a Blender (Objectiu 1): si és habilitada a
             // configuració, arrenca el vigilant que connecta sol quan detecta
             // el port 9876 obert (l'usuari només ha d'obrir Blender).
@@ -270,6 +275,8 @@ pub fn run() {
             commands::ai::hf_bay_details,
             commands::ai::hf_bay_download,
             commands::ai::hf_bay_install_native,
+            commands::ai::hf_bay_cancel,
+            commands::ai::hf_bay_disk_space,
             commands::ai::ollama_installed,
             commands::ai::start_ollama,
             commands::ai::install_ollama,
@@ -355,6 +362,7 @@ pub fn run() {
             commands::skills_store::skills_install_url,
             commands::skills_store::skills_install_zip,
             commands::skills_store::skills_install_local,
+            commands::skills_store::skills_preview,
             commands::skills_store::skills_uninstall,
             commands::skills_store::skills_restore_builtin,
             commands::skills_store::skills_export_external,

@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Ban, Check, Eraser, Terminal } from "lucide-react";
 import { useConsoleStore, type LogLevel } from "../../stores/consoleStore";
+import { useT } from "../../i18n";
 
 const LEVEL_CLASS: Record<LogLevel, string> = {
   log: "c-log",
@@ -17,6 +18,7 @@ const LEVEL_CLASS: Record<LogLevel, string> = {
 type Filter = "all" | LogLevel;
 
 export default function DebugConsole() {
+  const { t } = useT();
   const entries = useConsoleStore((s) => s.entries);
   const paused = useConsoleStore((s) => s.paused);
   const clear = useConsoleStore((s) => s.clear);
@@ -30,44 +32,40 @@ export default function DebugConsole() {
   }, [entries, filter]);
 
   const shown = filter === "all" ? entries : entries.filter((e) => e.level === filter);
-  const hhmmss = (t: number) =>
-    new Date(t).toLocaleTimeString("ca", { hour12: false });
+  const hhmmss = (ms: number) =>
+    new Date(ms).toLocaleTimeString("ca", { hour12: false });
 
   return (
     <div className="debug-console">
       <div className="dc-head">
         <Terminal size={13} />
-        <span>Consola de depuració</span>
+        <span>{t("console.title")}</span>
         <select
           className="ap-model-select dc-filter"
           value={filter}
           onChange={(e) => setFilter(e.target.value as Filter)}
         >
-          <option value="all">Tot ({entries.length})</option>
-          <option value="error">Errors</option>
-          <option value="warn">Avisos</option>
-          <option value="info">Info</option>
-          <option value="log">Registre</option>
-          <option value="system">Sistema</option>
+          <option value="all">{t("console.all", { n: entries.length })}</option>
+          <option value="error">{t("console.errors")}</option>
+          <option value="warn">{t("console.warnings")}</option>
+          <option value="info">{t("console.info")}</option>
+          <option value="log">{t("console.log")}</option>
+          <option value="system">{t("console.system")}</option>
         </select>
         <button
           className={"btn sm ghost" + (paused ? " active" : "")}
           onClick={() => setPaused(!paused)}
-          title={paused ? "Reprén la captura" : "Pausa la captura (excepte errors)"}
+          title={paused ? t("console.resumeHint") : t("console.pauseHint")}
         >
-          {paused ? <Check size={12} /> : <Ban size={12} />} {paused ? "Reprén" : "Pausa"}
+          {paused ? <Check size={12} /> : <Ban size={12} />} {paused ? t("console.resume") : t("console.pause")}
         </button>
-        <button className="icon-btn" onClick={() => clear()} title="Buida la consola">
+        <button className="icon-btn" onClick={() => clear()} title={t("console.clear")}>
           <Eraser size={13} />
         </button>
       </div>
       <div className="dc-body" ref={bodyRef}>
         {shown.length === 0 ? (
-          <div className="dc-empty">
-            Encara no hi ha res. Els missatges de la interfície, els errors del
-            programa i els esdeveniments del backend (IA, terminal, previsualització)
-            apareixeran ací.
-          </div>
+          <div className="dc-empty">{t("console.empty")}</div>
         ) : (
           shown.map((e, i) => (
             <div key={i} className={"dc-line " + LEVEL_CLASS[e.level]}>

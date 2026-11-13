@@ -41,13 +41,13 @@ export default function ProblemsPanel() {
         <ListChecks size={14} />
         <span>
           {total === 0
-            ? "Cap problema detectat"
-            : `${total} problema${total === 1 ? "" : "s"} · ${errors} error${
-                errors === 1 ? "" : "s"
+            ? t("problems.none")
+            : `${total} ${total === 1 ? t("problems.problem") : t("problems.problems")} · ${errors} ${
+                errors === 1 ? t("problems.error") : t("problems.errors")
               }`}
         </span>
         {total > 0 && (
-          <button className="icon-btn" title="Buida la llista" onClick={() => clearAll()}>
+          <button className="icon-btn" title={t("problems.clear")} onClick={() => clearAll()}>
             <Trash2 size={13} />
           </button>
         )}
@@ -55,14 +55,9 @@ export default function ProblemsPanel() {
 
       {total === 0 ? (
         <div className="problems-empty">
-          <p>
-            NoOrbit revisa en viu tant el codi que escrius a mà com el que genera
-            la IA (encara que no obres el fitxer): claus sense tancar, cadenes
-            obertes i errors de sintaxi (TypeScript/JS/JSON) apareixeran ací i
-            ressalts a l'editor. Prem ⌘+1 / Ctrl+1 per a aplicare les correccions.
-          </p>
+          <p>{t("problems.empty")}</p>
           <p className="problems-empty-hint">
-            {t("rightPanel.problems")}: {files.length} fitxers amb diagnòstics.
+            {t("rightPanel.problems")}: {t("problems.filesWith", { n: files.length })}
           </p>
         </div>
       ) : (
@@ -77,12 +72,12 @@ export default function ProblemsPanel() {
                   key={i}
                   className="problems-item"
                   onClick={() => void jump(p)}
-                  title={`${f}:${p.line}:${p.column} — fes clic per anar-hi`}
+                  title={t("problems.jumpHint", { loc: `${f}:${p.line}:${p.column}` })}
                 >
                   {sevIcon(p.severity)}
                   <span className="problems-msg">{p.message}</span>
                   <span className="problems-loc">
-                    línia {p.line}, col {p.column}
+                    {t("problems.loc", { line: p.line, col: p.column })}
                   </span>
                   <span className="problems-src">{p.source}</span>
                 </button>
@@ -97,6 +92,7 @@ export default function ProblemsPanel() {
 
 /// Botó compacte per a la barra d'estat: total d'errors + salta al panell.
 export function ProblemsBadge() {
+  const { t } = useT();
   const byFile = useProblemsStore((s) => s.byFile);
   const setTab = usePreviewStore((s) => s.setRightTab);
   let errors = 0;
@@ -112,7 +108,7 @@ export function ProblemsBadge() {
     <button
       className="status-problems"
       onClick={() => setTab("dev")}
-      title="Severitat dels diagnòstics del projecte"
+      title={t("problems.badgeHint")}
     >
       <AlertCircle size={12} color="var(--error)" /> {errors}
       <AlertTriangle size={12} color="var(--warning)" /> {warnings}

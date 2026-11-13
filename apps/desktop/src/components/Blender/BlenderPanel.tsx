@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { Play, Download, Video, RefreshCw, Boxes, Link } from "lucide-react";
 import { useT } from "../../i18n";
 import { useBlenderLiveStore } from "../../stores/blenderLiveStore";
@@ -22,7 +23,25 @@ export default function BlenderPanel() {
     setAutoConnect,
     refreshStatus,
     execute,
-  } = useBlenderLiveStore();
+  } = useBlenderLiveStore(
+    useShallow((st) => ({
+      connected: st.connected,
+      installed: st.installed,
+      live: st.live,
+      autoConnect: st.autoConnect,
+      busy: st.busy,
+      info: st.info,
+      frame: st.frame,
+      lastError: st.lastError,
+      lastMessage: st.lastMessage,
+      launch: st.launch,
+      installAddon: st.installAddon,
+      toggleLive: st.toggleLive,
+      setAutoConnect: st.setAutoConnect,
+      refreshStatus: st.refreshStatus,
+      execute: st.execute,
+    }))
+  );
 
   const [code, setCode] = useState(
     "import bpy, json\nprint(json.dumps({'objects': len(bpy.context.scene.objects)}))"
@@ -70,9 +89,9 @@ export default function BlenderPanel() {
         <button
           className={"btn sm" + (autoConnect ? " active" : "")}
           onClick={() => void setAutoConnect(!autoConnect)}
-          title="Connecta automàticament quan Blender obri el port"
+          title={t("blender.autoConnectHint")}
         >
-          <Link size={12} /> Auto
+          <Link size={12} /> {t("blender.auto")}
         </button>
       </div>
 

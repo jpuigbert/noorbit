@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Clock,
   Cpu,
   Download,
   FileCode2,
@@ -19,6 +20,7 @@ import {
 } from "lucide-react";
 import { useAIStore } from "../../stores/aiStore";
 import { useUIStore } from "../../stores/uiStore";
+import { useT } from "../../i18n";
 import "./HuggingBayModal.css";
 
 /**
@@ -68,6 +70,29 @@ interface BayPage {
   total: number;
 }
 
+/// Element de la cua de descàrregues. `key` és únic (el mateix model es pot
+/// encuar amb quantitzacions/modes diferents); `id` és el del mirror (la
+/// cancel·lació i el progrés del backend van per id).
+interface QueueItem {
+  key: string;
+  id: string;
+  name: string;
+  quant: string;
+  mode: "ollama" | "native";
+  size: number | null;
+  status: "pending" | "active" | "done" | "error" | "cancelled";
+  message?: string;
+}
+
+/// Claus i18n de l'estat de cada element de la cua.
+const QSTATUS: Record<QueueItem["status"], string> = {
+  pending: "hfBay.qPending",
+  active: "hfBay.qActive",
+  done: "hfBay.qDone",
+  error: "hfBay.qError",
+  cancelled: "hfBay.qCancelled",
+};
+
 const PAGE_SIZE = 5;
 
 function bytes(n: number | null | undefined): string {
@@ -88,6 +113,7 @@ function num(n: number | null | undefined): string {
 }
 
 export default function HuggingBayModal() {
+  const { t } = useT();
   const [visible, setVisible] = useState(false);
   const showMenu = useUIStore((s) => s.showHuggingBay);
   const setShowMenu = useUIStore((s) => s.setShowHuggingBay);
@@ -103,18 +129,26 @@ export default function HuggingBayModal() {
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [quant, setQuant] = useState<string>("Q4_K_M");
   const [msg, setMsg] = useState<string | null>(null);
-  const [native, setNative] = useState(false);
   const pulling = useAIStore((s) => s.pulling);
   const loadModels = useAIStore((s) => s.loadModels);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // On es desen els models GGUF (pot ser un disc extern triat pel usuari).
   const [ggufDir, setGgufDir] = useState("");
+  // Espai lliure al disc destí: per avisar ABANS de baixar un model enorme.
+  const [freeBytes, setFreeBytes] = useState<number | null>(null);
   /// Comptadors de generació: eviten que una resposta VELLA (pàgina
   /// anterior, model anterior) sobreEscrigui la nova (cursa clàssica en
   /// cerques ràpides: es canvia de pàgina/filtre i el llistat mostra el
   /// resultat que no correspon).
   const loadSeq = useRef(0);
   const detailsSeq = useRef(0);
+  // CUA de descàrregues (seqüencial): el ref és autoritatiu i l'estat només
+  // serveix per renderitzar. Viu mentre el component és muntat (sempre ho
+  // està), de manera que la cua sobreviu al tancament del diàleg.
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const queueRef = useRef<QueueItem[]>([]);
+  const runningRef = useRef(false);
+  const queueSeq = useRef(0);
 
   const load = useCallback(
     async (q: string, s: "best" | "downloads", c: string | null) => {
@@ -153,6 +187,10 @@ export default function HuggingBayModal() {
     void invoke<{ modelsDir: string }>("llamacpp_status")
       .then((st) => setGgufDir(st?.modelsDir ?? ""))
       .catch(() => undefined);
+    // Espai lliure al disc destí (per avisar si el model no hi cap).
+    void invoke<{ dir: string; free_bytes: number | null }>("hf_bay_disk_space")
+      .then((r) => setFreeBytes(r?.free_bytes ?? null))
+      .catch(() => setFreeBytes(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showMenu]);
 
@@ -199,54 +237,137 @@ export default function HuggingBayModal() {
       });
   }, [sel, quant]);
 
-  // Progrés de la descàrrega (event del backend).
-  const progress = useMemo(() => {
-    const e = Object.entries(pulling).find(([k]) => k.startsWith("huggingbay:"));
-    return e ? e[1] : null;
-  }, [pulling]);
+  // Espai lliure al disc destí: es refresca en obrir, en canviar de carpeta
+  // i en acabar cada descàrrega (el disc es va omplint).
+  const refreshSpace = useCallback(() => {
+    void invoke<{ dir: string; free_bytes: number | null }>("hf_bay_disk_space")
+      .then((r) => setFreeBytes(r?.free_bytes ?? null))
+      .catch(() => setFreeBytes(null));
+  }, []);
 
-  const download = async () => {
-    if (!sel) return;
-    setMsg(null);
-    try {
-      const res = await invoke<{ ok: boolean; model: string | null; message: string }>(
-        "hf_bay_download",
-        { id: sel, quant }
-      );
-      setMsg(res.message);
-      await loadModels();
-    } catch (e) {
-      setMsg(String(e));
-    }
-  };
+  /// Mutació autoritària de la cua: actualitza el ref I l'estat (render).
+  const mutateQueue = useCallback((fn: (q: QueueItem[]) => QueueItem[]) => {
+    queueRef.current = fn(queueRef.current);
+    setQueue(queueRef.current);
+  }, []);
 
-  /// Instal·lació NATIVA (sense Ollama): el GGUF es guarda i s'engega amb el
-  /// motor local (llama.cpp). El model queda registrat com a proveïdor, així
-  /// que es pot triar al xat com qualsevol altra IA.
-  const installNative = async () => {
-    if (!sel) return;
-    setMsg(null);
-    setNative(true);
+  /// Bomba la cua: processa els elements «pending» d'un en un. Una descàrrega
+  /// en curs no bloqueja la resta: s'encuen i s'executen quan toca.
+  const pump = useCallback(async () => {
+    if (runningRef.current) return;
+    runningRef.current = true;
     try {
-      const res = await invoke<{ ok: boolean; model: string | null; message: string }>(
-        "hf_bay_install_native",
-        { id: sel, quant }
-      );
-      setMsg(res.message);
-      await loadModels();
-      // El proveïdor nou ha d'aparèixer al selector del xat.
-      try {
-        const { useProviderStore } = await import("../../stores/providerStore");
-        await useProviderStore.getState().load();
-      } catch {
-        /* si no es pot refrescar, l'usuari pot tancar i obrir el xat */
+      for (;;) {
+        const next = queueRef.current.find((it) => it.status === "pending");
+        if (!next) break;
+        mutateQueue((q) =>
+          q.map((it) => (it.key === next.key ? { ...it, status: "active" } : it))
+        );
+        const cmd =
+          next.mode === "native" ? "hf_bay_install_native" : "hf_bay_download";
+        try {
+          const res = await invoke<{
+            ok: boolean;
+            model: string | null;
+            message: string;
+          }>(cmd, { id: next.id, quant: next.quant });
+          mutateQueue((q) =>
+            q.map((it) =>
+              it.key === next.key
+                ? { ...it, status: res.ok ? "done" : "error", message: res.message }
+                : it
+            )
+          );
+          if (next.mode === "native") {
+            // El proveïdor nou ha d'aparèixer al selector del xat.
+            try {
+              const { useProviderStore } = await import("../../stores/providerStore");
+              await useProviderStore.getState().load();
+            } catch {
+              /* si no es pot refrescar, l'usuari pot tancar i obrir el xat */
+            }
+          }
+          await loadModels();
+        } catch (e) {
+          const m = String(e);
+          const cancelled = /cancel/i.test(m);
+          mutateQueue((q) =>
+            q.map((it) =>
+              it.key === next.key
+                ? { ...it, status: cancelled ? "cancelled" : "error", message: m }
+                : it
+            )
+          );
+        } finally {
+          // El progrés d'aquest model ja no s'ha de mostrar.
+          useAIStore.setState((s) => {
+            const p = { ...s.pulling };
+            delete p[`huggingbay:${next.id}`];
+            return { pulling: p };
+          });
+          refreshSpace();
+        }
       }
-    } catch (e) {
-      setMsg(String(e));
     } finally {
-      setNative(false);
+      runningRef.current = false;
     }
-  };
+  }, [mutateQueue, loadModels, refreshSpace]);
+
+  /// Afegeix el model triat a la cua (mode Ollama o natiu) i arrenca la bomba.
+  const enqueue = useCallback(
+    (mode: "ollama" | "native") => {
+      if (!sel || !details) return;
+      const dup = queueRef.current.some(
+        (it) =>
+          it.id === sel &&
+          it.quant === quant &&
+          it.mode === mode &&
+          (it.status === "pending" || it.status === "active")
+      );
+      if (dup) return;
+      const key = `${sel}:${mode}:${quant}:${++queueSeq.current}`;
+      mutateQueue((q) => [
+        ...q,
+        {
+          key,
+          id: sel,
+          name: details.model.name,
+          quant,
+          mode,
+          size: details.recommended?.size ?? null,
+          status: "pending",
+        },
+      ]);
+      void pump();
+    },
+    [sel, details, quant, mutateQueue, pump]
+  );
+
+  /// Cancel·la un element: si és en curs, demana al backend que l'aturi (esborra
+  /// el «.part»); si és en espera, el marca cancel·lat directament.
+  const cancelItem = useCallback(
+    (item: QueueItem) => {
+      if (item.status === "active") {
+        void invoke("hf_bay_cancel", { id: item.id }).catch(() => undefined);
+      } else if (item.status === "pending") {
+        mutateQueue((q) =>
+          q.map((it) =>
+            it.key === item.key
+              ? { ...it, status: "cancelled", message: t("hfBay.qCancelled") }
+              : it
+          )
+        );
+      }
+    },
+    [mutateQueue, t]
+  );
+
+  /// Treu de la vista els elements acabats (fet/error/cancel·lat).
+  const clearFinished = useCallback(() => {
+    mutateQueue((q) =>
+      q.filter((it) => it.status === "pending" || it.status === "active")
+    );
+  }, [mutateQueue]);
 
   /// TRIA ON ES BAIXEN ELS MODELS, DIRECTAMENT DES D'AQUÍ: l'usuari pot
   /// escollir una carpeta d'un DISC EXTERN (USB/HDD) sense haver d'anar a
@@ -257,7 +378,7 @@ export default function HuggingBayModal() {
     try {
       const sel = await open({
         directory: true,
-        title: "Tria la carpeta (p. ex. d'un disc extern) on es baixaran els models GGUF",
+        title: t("hfBay.pickDirTitle"),
       });
       if (typeof sel !== "string") return;
       const m = await invoke<string>("llamacpp_set_dirs", {
@@ -265,6 +386,7 @@ export default function HuggingBayModal() {
         engineDir: null,
       });
       setGgufDir(sel);
+      refreshSpace();
       setMsg(m);
     } catch (e) {
       setMsg(String(e));
@@ -281,11 +403,22 @@ export default function HuggingBayModal() {
         engineDir: null,
       });
       setGgufDir("");
+      refreshSpace();
       setMsg(m);
     } catch (e) {
       setMsg(String(e));
     }
   };
+
+  /// El model triat ja és a la cua (en espera o en curs) amb aquest mode?
+  const isQueued = (mode: "ollama" | "native") =>
+    queue.some(
+      (it) =>
+        it.id === sel &&
+        it.quant === quant &&
+        it.mode === mode &&
+        (it.status === "pending" || it.status === "active")
+    );
 
   if (!visible) return null;
 
@@ -293,7 +426,7 @@ export default function HuggingBayModal() {
     <div className="modal-overlay" onClick={close}>
       <div className="modal hb-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <span>Hugging Bay · models GGUF</span>
+          <span>{t("hfBay.title")}</span>
           <button className="icon-btn" onClick={close}>
             <X size={14} />
           </button>
@@ -305,7 +438,7 @@ export default function HuggingBayModal() {
             <input
               autoFocus
               value={query}
-              placeholder="Cerca models GGUF (p. ex. «qwen3 coder 4b»)…"
+              placeholder={t("hfBay.searchPh")}
               onChange={(e) => setQuery(e.target.value)}
             />
             <div className="hb-sort">
@@ -313,13 +446,13 @@ export default function HuggingBayModal() {
                 className={"btn sm" + (sort === "best" ? " primary" : "")}
                 onClick={() => setSort("best")}
               >
-                Relevància
+                {t("hfBay.sortBest")}
               </button>
               <button
                 className={"btn sm" + (sort === "downloads" ? " primary" : "")}
                 onClick={() => setSort("downloads")}
               >
-                Més descarregats
+                {t("hfBay.sortDownloads")}
               </button>
             </div>
           </div>
@@ -328,7 +461,7 @@ export default function HuggingBayModal() {
           <div className="hb-list">
             {loading && (
               <div className="hb-hint">
-                <Loader2 size={13} className="spin" /> Buscant al mirror…
+                <Loader2 size={13} className="spin" /> {t("hfBay.searching")}
               </div>
             )}
             {error && (
@@ -337,7 +470,7 @@ export default function HuggingBayModal() {
               </div>
             )}
             {!loading && page && page.models.length === 0 && (
-              <div className="hb-hint">Cap model trobat amb aquesta cerca.</div>
+              <div className="hb-hint">{t("hfBay.noResults")}</div>
             )}
             {page?.models.map((m) => (
               <button
@@ -371,10 +504,10 @@ export default function HuggingBayModal() {
                 void load(query, sort, prev);
               }}
             >
-              <ChevronLeft size={12} /> Anterior
+              <ChevronLeft size={12} /> {t("hfBay.prev")}
             </button>
             <span className="hb-pager-info">
-              {page ? `Pàgina ${stack.length + 1} · ${num(page.total)} models al mirror` : ""}
+              {page ? t("hfBay.pageInfo", { page: stack.length + 1, total: num(page.total) }) : ""}
             </span>
             <button
               className="btn sm ghost"
@@ -387,7 +520,7 @@ export default function HuggingBayModal() {
                 void load(query, sort, c);
               }}
             >
-              Següent <ChevronRight size={12} />
+              {t("hfBay.next")} <ChevronRight size={12} />
             </button>
           </div>
 
@@ -396,7 +529,7 @@ export default function HuggingBayModal() {
             <div className="hb-details">
               {detailsLoading && (
                 <div className="hb-hint">
-                  <Loader2 size={13} className="spin" /> Llegint els detalls…
+                  <Loader2 size={13} className="spin" /> {t("hfBay.loadingDetails")}
                 </div>
               )}
               {details && (
@@ -410,7 +543,7 @@ export default function HuggingBayModal() {
                   </div>
                   <div className="hb-fields">
                     <div>
-                      <span>Quantització</span>
+                      <span>{t("hfBay.quant")}</span>
                       <select value={quant} onChange={(e) => setQuant(e.target.value)}>
                         {["Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0", "Q4_0", "F16"].map((q) => (
                           <option key={q} value={q}>
@@ -420,21 +553,21 @@ export default function HuggingBayModal() {
                       </select>
                     </div>
                     <div>
-                      <span>RAM estimada</span>
+                      <span>{t("hfBay.ram")}</span>
                       <b>{details.ram_gb ? `${details.ram_gb} GB` : "—"}</b>
                     </div>
                     <div>
-                      <span>Estat</span>
+                      <span>{t("hfBay.status")}</span>
                       <b>{details.status ?? "—"}</b>
                     </div>
                   </div>
                   {details.recommended && (
                     <div className="hb-file">
                       <div>
-                        <span className="hb-k">Fitxer</span> {details.recommended.path}
+                        <span className="hb-k">{t("hfBay.file")}</span> {details.recommended.path}
                       </div>
                       <div>
-                        <span className="hb-k">Mida</span> {bytes(details.recommended.size)}
+                        <span className="hb-k">{t("hfBay.size")}</span> {bytes(details.recommended.size)}
                       </div>
                       <div className="hb-sha">
                         <span className="hb-k">
@@ -447,31 +580,28 @@ export default function HuggingBayModal() {
                   <div className="hb-actions">
                     <button
                       className="btn primary sm hb-download"
-                      disabled={!!progress || native}
-                      onClick={() => void download()}
+                      disabled={isQueued("ollama")}
+                      onClick={() => enqueue("ollama")}
+                      title={t("hfBay.downloadOllama")}
                     >
-                      {progress ? (
-                        <Loader2 size={12} className="spin" />
-                      ) : (
-                        <Download size={12} />
-                      )}
-                      {progress ? "Baixant…" : "Baixa i instal·la a Ollama"}
+                      <Download size={12} />
+                      {isQueued("ollama")
+                        ? t("hfBay.alreadyQueued")
+                        : t("hfBay.downloadOllama")}
                     </button>
                     {/* VIA NATIVA: el GGUF es queda al disc i s'engega amb el
                         motor local (llama.cpp): NO cal tenir Ollama. El model
                         es registra com a proveïdor i es pot triar al xat. */}
                     <button
                       className="btn sm hb-download"
-                      disabled={!!progress || native}
-                      onClick={() => void installNative()}
-                      title="Descarrega el GGUF i l'engega amb el motor local (llama.cpp), sense Ollama. Queda disponible com a IA al xat."
+                      disabled={isQueued("native")}
+                      onClick={() => enqueue("native")}
+                      title={t("hfBay.nativeHint")}
                     >
-                      {native ? (
-                        <Loader2 size={12} className="spin" />
-                      ) : (
-                        <Cpu size={12} />
-                      )}
-                      {native ? "Instal·lant…" : "Instal·la nativament (sense Ollama)"}
+                      <Cpu size={12} />
+                      {isQueued("native")
+                        ? t("hfBay.alreadyQueued")
+                        : t("hfBay.installNative")}
                     </button>
                   </div>
                   {/* ON ES DESA: l'usuari pot triar AQUÍ MATEIX una carpeta
@@ -479,29 +609,115 @@ export default function HuggingBayModal() {
                   <div className="hb-where">
                     <HardDrive size={11} />
                     <span>
-                      Es desa a:{" "}
-                      <b>{ggufDir || "les dades de NoOrbit"}</b>
+                      {t("hfBay.savedTo")}{" "}
+                      <b>{ggufDir || t("hfBay.defaultDir")}</b>
                     </span>
+                    {freeBytes != null && (
+                      <span className="hb-free">
+                        {t("hfBay.freeSpace", { size: bytes(freeBytes) })}
+                      </span>
+                    )}
                     <button
                       className="btn sm ghost hb-where-btn"
                       onClick={() => void pickGgufDir()}
-                      title="Tria una carpeta d'un disc extern (USB/HDD): els models GGUF s'hi baixaran directament."
+                      title={t("hfBay.pickDirHint")}
                     >
-                      <FolderOpen size={11} /> Tria carpeta / disc extern…
+                      <FolderOpen size={11} /> {t("hfBay.pickDir")}
                     </button>
                     {ggufDir && (
                       <button
                         className="btn sm ghost hb-where-btn"
                         onClick={() => void resetGgufDir()}
-                        title="Torna a desar els models a les dades de NoOrbit."
+                        title={t("hfBay.resetDirHint")}
                       >
-                        <RotateCcw size={11} /> Per defecte
+                        <RotateCcw size={11} /> {t("hfBay.resetDir")}
                       </button>
                     )}
                   </div>
-                  {progress && <div className="hb-progress">{progress}</div>}
+                  {/* AVÍS D'ESPAI: el model no cap al disc destí. */}
+                  {details.recommended?.size != null &&
+                    freeBytes != null &&
+                    details.recommended.size > freeBytes && (
+                      <div className="hb-hint err">
+                        <AlertTriangle size={12} />
+                        {t("hfBay.notEnoughSpace", {
+                          need: bytes(details.recommended.size),
+                          free: bytes(freeBytes),
+                        })}
+                      </div>
+                    )}
                 </>
               )}
+            </div>
+          )}
+
+          {/* CUA DE DESCÀRREGUES: una en curs, la resta en espera. Es pot
+              cancel·lar qualsevol element i netejar els acabats. */}
+          {queue.length > 0 && (
+            <div className="hb-queue">
+              <div className="hb-queue-head">
+                <span>{t("hfBay.queueTitle", { n: queue.length })}</span>
+                <button
+                  className="btn sm ghost"
+                  onClick={clearFinished}
+                  disabled={
+                    !queue.some(
+                      (it) =>
+                        it.status === "done" ||
+                        it.status === "error" ||
+                        it.status === "cancelled"
+                    )
+                  }
+                >
+                  {t("hfBay.clearFinished")}
+                </button>
+              </div>
+              {queue.map((it) => {
+                const prog =
+                  it.status === "active" ? pulling[`huggingbay:${it.id}`] : null;
+                return (
+                  <div key={it.key} className={"hb-q-item " + it.status}>
+                    <div className="hb-q-icon">
+                      {it.status === "active" ? (
+                        <Loader2 size={13} className="spin" />
+                      ) : it.status === "done" ? (
+                        <CheckCircle2 size={13} />
+                      ) : it.status === "error" ? (
+                        <AlertTriangle size={13} />
+                      ) : it.status === "cancelled" ? (
+                        <X size={13} />
+                      ) : (
+                        <Clock size={13} />
+                      )}
+                    </div>
+                    <div className="hb-q-main">
+                      <div className="hb-q-name">
+                        {it.name} <span className="hb-q-quant">{it.quant}</span>
+                        <span className="hb-q-mode">
+                          {it.mode === "native"
+                            ? t("hfBay.modeNative")
+                            : t("hfBay.modeOllama")}
+                        </span>
+                      </div>
+                      <div className="hb-q-meta">
+                        <span>{t(QSTATUS[it.status])}</span>
+                        {it.size ? <span>{bytes(it.size)}</span> : null}
+                      </div>
+                      {prog && <div className="hb-progress">{prog}</div>}
+                      {it.message && <div className="hb-q-msg">{it.message}</div>}
+                    </div>
+                    {(it.status === "pending" || it.status === "active") && (
+                      <button
+                        className="icon-btn hb-q-cancel"
+                        onClick={() => cancelItem(it)}
+                        title={t("hfBay.cancelHint")}
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -513,7 +729,7 @@ export default function HuggingBayModal() {
 
           {/* ATRIBUCIÓ */}
           <div className="hb-credit">
-            Fet per <b>Joan Puigbert Carreras</b> · Projecte de{" "}
+            {t("hfBay.creditMadeBy")} <b>Joan Puigbert Carreras</b> · {t("hfBay.creditProject")}{" "}
             <b>Thepuigberts.com</b>
           </div>
         </div>

@@ -377,8 +377,10 @@ export default function App() {
         {useUIStore((s) => s.showNewProject) && <NewProjectModal />}
         {useUIStore((s) => s.showRemoteServer) && <RemoteServerModal />}
         {useUIStore((s) => s.showOnboarding) && <OnboardingModalComponent />}
-        {/* Menú «Hugging Bay»: cercar/baixar models GGUF del mirror. */}
-        {useUIStore((s) => s.showHuggingBay) && <HuggingBayModal />}
+        {/* Menú «Hugging Bay»: SEMPRE muntat perquè la cua de descàrregues
+            sobrevisqui al tancament del diàleg. El component es mostra/oculta
+            amb el seu estat «visible» intern (no es desmunta en tancar). */}
+        <HuggingBayModal />
         {/* Menú «Pujar»: publicar temes WordPress al marketplace. */}
         {useUIStore((s) => s.showPublishTheme) && <PublishThemeModal />}
       </Suspense>

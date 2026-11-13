@@ -14,6 +14,9 @@
 use crate::ai::CloudModel;
 use anyhow::{anyhow, Result};
 use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Base de l'API de Hugging Bay.
 const API: &str = "https://huggingbay.xyz/api/mcp";
@@ -447,6 +450,129 @@ pub fn models_dir() -> std::path::PathBuf {
         .join("models")
 }
 
+/// Registre de cancel·lació de descàrregues (per id de model). Cada descàrrega
+/// consulta el seu flag en cada fragment: si l'usuari prem «Cancel·la», el
+/// bucle s'atura, esborra el «.part» i retorna un error clar.
+fn cancels() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
+    static C: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+    C.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Flag de cancel·lació d'una descàrrega (es crea si no existeix).
+pub fn cancel_token(id: &str) -> Arc<AtomicBool> {
+    let mut m = cancels().lock().unwrap();
+    m.entry(id.to_string())
+        .or_insert_with(|| Arc::new(AtomicBool::new(false)))
+        .clone()
+}
+
+/// Demana cancel·lar la descàrrega en curs d'aquest model.
+pub fn request_cancel(id: &str) {
+    cancel_token(id).store(true, Ordering::Relaxed);
+}
+
+/// Espai LLIURE (bytes) al disc on es desaran els models. Serveix per avisar
+/// ABANS de baixar un model enorme (p. ex. 247 GB) que no cap al disc/USB.
+pub fn free_space() -> Option<u64> {
+    let dir = models_dir();
+    // El directori pot no existir encara: pugem fins al pare que existeix.
+    let mut p: &std::path::Path = dir.as_path();
+    while !p.exists() {
+        match p.parent() {
+            Some(pp) => p = pp,
+            None => break,
+        }
+    }
+    disk_free(p)
+}
+
+#[cfg(unix)]
+fn disk_free(path: &std::path::Path) -> Option<u64> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let c = CString::new(path.as_os_str().as_bytes()).ok()?;
+    unsafe {
+        let mut st: libc::statvfs = std::mem::zeroed();
+        if libc::statvfs(c.as_ptr(), &mut st) == 0 {
+            Some(st.f_bavail as u64 * st.f_frsize as u64)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(windows)]
+fn disk_free(path: &std::path::Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetDiskFreeSpaceExW(
+            dir: *const u16,
+            free_avail: *mut u64,
+            total: *mut u64,
+            free_total: *mut u64,
+        ) -> i32;
+    }
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut free_avail = 0u64;
+    let mut total = 0u64;
+    let mut free_total = 0u64;
+    let ok = unsafe {
+        GetDiskFreeSpaceExW(wide.as_ptr(), &mut free_avail, &mut total, &mut free_total)
+    };
+    if ok != 0 {
+        Some(free_avail)
+    } else {
+        None
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn disk_free(_path: &std::path::Path) -> Option<u64> {
+    None
+}
+
+/// Esborra les descàrregues PARCIALS («*.part») que hagen quedat als
+/// directoris de models. Si l'app es va tancar (o va morir de cop) mentre
+/// baixava un model d'una IA, el «.part» a mitges no serveix de res: no es
+/// pot fer servir i ocupava disc debades. Es crida en arrencar, al costat
+/// de la neteja de servidors orfes (llamacpp::cleanup_stale).
+///
+/// SEGURETAT: només s'esborren fitxers acabats en «.part»; els models
+/// complets (.gguf/.safetensors) no es toquen MAI. Si una carpeta no
+/// existeix o no es pot llegir, se salta sense fallar l'arrencada.
+pub fn cleanup_partial_downloads() {
+    // GGUF (Hugging Bay) i models d'imatge en CPU: els dos llocs on una
+    // descàrrega interrompuda deixa un «.part».
+    let mut dirs = vec![models_dir()];
+    if let Ok(sd) = crate::imgen::sd_models_dir() {
+        dirs.push(sd);
+    }
+    let mut removed = 0usize;
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let is_part = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("part"))
+                .unwrap_or(false);
+            if is_part && path.is_file() && std::fs::remove_file(&path).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+    if removed > 0 {
+        eprintln!(
+            "NoOrbit/models: s'han esborrat {} descàrregues parcials (.part) d'una sessió anterior.",
+            removed
+        );
+    }
+}
+
 /// Descarrega un fitxer del mirror amb PROGRÉS (esdeveniment «ai://pull»,
 /// el mateix que usa la descàrrega d'Ollama) i el desa a la carpeta de models.
 ///
@@ -484,112 +610,133 @@ pub async fn download_file(
     let part = dir.join(format!("{}.part", dest_name));
     let _ = std::fs::remove_file(&part);
 
-    let mut attempts = 0;
-    let mut last_err = String::new();
-    // L'enllaç signat CADUCA (5 min): si arriba exhaurit es demana un de nou
-    // i es REINTENTA amb ell (abans es demanava i es descartava: el bucle
-    // repetia la mateixa URL caducada i no passava mai).
-    let mut url = url.to_string();
-    while attempts < 3 {
-        attempts += 1;
-        let resp = http
-            .get(&url)
-            .header("User-Agent", "NoOrbit")
-            .timeout(std::time::Duration::from_secs(60 * 30))
-            .send()
-            .await
-            .map_err(|e| anyhow!("No s'ha pogut descarregar: {}", e))?;
-        if !resp.status().is_success() {
-            last_err = format!("el mirror ha respost {}", resp.status());
-            // Enllaç caducat (403/404): en demanem un de nou.
-            let nou = match details(http, id, None).await {
-                Ok(d) => d.recommended.and_then(|f| f.download_url),
-                Err(e) => {
-                    last_err = format!("{} (i no s'ha pogut demanar un enllaç nou: {})", last_err, e);
-                    None
-                }
-            };
-            match nou {
-                Some(u) => {
-                    if u == url {
-                        // Mateix enllaç: no hi ha res a reintentar.
-                        break;
+    // Cancel·lació: nova descàrrega → netegem qualsevol cancel·lació prèvia.
+    let cancel = cancel_token(id);
+    cancel.store(false, Ordering::Relaxed);
+
+    // Tot el cos de la descàrrega dins d'un bloc: si falla a MITGES (xarxa,
+    // disc o rename) el «.part» s'esborra igualment, igual que en la
+    // descàrrega de models d'imatge. Una descàrrega interrompuda mai deixa
+    // restes que després es donarien per bones.
+    let result = async {
+        let mut attempts = 0;
+        let mut last_err = String::new();
+        // L'enllaç signat CADUCA (5 min): si arriba exhaurit es demana un de nou
+        // i es REINTENTA amb ell (abans es demanava i es descartava: el bucle
+        // repetia la mateixa URL caducada i no passava mai).
+        let mut url = url.to_string();
+        while attempts < 3 {
+            attempts += 1;
+            let resp = http
+                .get(&url)
+                .header("User-Agent", "NoOrbit")
+                .timeout(std::time::Duration::from_secs(60 * 30))
+                .send()
+                .await
+                .map_err(|e| anyhow!("No s'ha pogut descarregar: {}", e))?;
+            if !resp.status().is_success() {
+                last_err = format!("el mirror ha respost {}", resp.status());
+                // Enllaç caducat (403/404): en demanem un de nou.
+                let nou = match details(http, id, None).await {
+                    Ok(d) => d.recommended.and_then(|f| f.download_url),
+                    Err(e) => {
+                        last_err = format!("{} (i no s'ha pogut demanar un enllaç nou: {})", last_err, e);
+                        None
                     }
-                    url = u;
-                    continue;
+                };
+                match nou {
+                    Some(u) => {
+                        if u == url {
+                            // Mateix enllaç: no hi ha res a reintentar.
+                            break;
+                        }
+                        url = u;
+                        continue;
+                    }
+                    None => break,
                 }
-                None => break,
             }
-        }
-        let total = resp.content_length().unwrap_or(0);
-        let mut out = std::fs::File::create(&part)?;
-        let mut stream = resp.bytes_stream();
-        use futures::StreamExt;
-        let mut written: u64 = 0;
-        let mut last_pct: i64 = -1;
-        let mut hasher = Sha256::new();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk?;
-            use std::io::Write;
-            out.write_all(&chunk)?;
-            hasher.update(&chunk);
-            written += chunk.len() as u64;
-            if total > 0 {
-                let pct = (written * 100 / total) as i64;
-                if pct != last_pct {
-                    last_pct = pct;
-                    if let Some(app) = app {
-                        let _ = app.emit(
-                            "ai://pull",
-                            serde_json::json!({
-                                "model": dest_name,
-                                "message": format!("descarregant {} — {}%", dest_name, pct)
-                            }),
-                        );
+            let total = resp.content_length().unwrap_or(0);
+            let mut out = std::fs::File::create(&part)?;
+            let mut stream = resp.bytes_stream();
+            use futures::StreamExt;
+            let mut written: u64 = 0;
+            let mut last_pct: i64 = -1;
+            let mut hasher = Sha256::new();
+            while let Some(chunk) = stream.next().await {
+                // Cancel·lació de l'usuari: aturem, esborrem el parcial i sortim.
+                if cancel.load(Ordering::Relaxed) {
+                    drop(out);
+                    let _ = std::fs::remove_file(&part);
+                    return Err(anyhow!("Descàrrega cancel·lada."));
+                }
+                let chunk = chunk?;
+                use std::io::Write;
+                out.write_all(&chunk)?;
+                hasher.update(&chunk);
+                written += chunk.len() as u64;
+                if total > 0 {
+                    let pct = (written * 100 / total) as i64;
+                    if pct != last_pct {
+                        last_pct = pct;
+                        if let Some(app) = app {
+                            let _ = app.emit(
+                                "ai://pull",
+                                serde_json::json!({
+                                    "model": format!("huggingbay:{}", id),
+                                    "message": format!("descarregant {} — {}%", dest_name, pct)
+                                }),
+                            );
+                        }
                     }
                 }
             }
-        }
-        let _ = std::io::Write::flush(&mut out);
-        drop(out);
-        if total > 0 && written != total {
-            last_err = format!("descàrrega incompleta ({} de {} bytes)", written, total);
-            continue;
-        }
-        // Verificació SHA-256: el mirror el dona per a cada fitxer. Si no
-        // coincideix, la descàrrega està corrupta: es descarta (mai es dóna
-        // per bona) i es diu clarament a l'usuari.
-        if let Some(expected) = sha256.filter(|s| !s.trim().is_empty()) {
-            if let Some(app) = app {
-                let _ = app.emit(
-                    "ai://pull",
-                    serde_json::json!({
-                        "model": dest_name,
-                        "message": format!("verificant SHA-256 de {}…", dest_name)
-                    }),
-                );
+            let _ = std::io::Write::flush(&mut out);
+            drop(out);
+            if total > 0 && written != total {
+                last_err = format!("descàrrega incompleta ({} de {} bytes)", written, total);
+                continue;
             }
-            let digest = hasher.finalize();
-            let actual = hex_digest(&digest);
-            if !actual.eq_ignore_ascii_case(expected.trim()) {
-                let _ = std::fs::remove_file(&part);
-                return Err(anyhow!(
-                    "El SHA-256 de «{}» no coincideix amb el del mirror: la descàrrega \
-                     està corrupta i s'ha descartat. Torna-ho a provar.",
-                    dest_name
-                ));
+            // Verificació SHA-256: el mirror el dona per a cada fitxer. Si no
+            // coincideix, la descàrrega està corrupta: es descarta (mai es dóna
+            // per bona) i es diu clarament a l'usuari.
+            if let Some(expected) = sha256.filter(|s| !s.trim().is_empty()) {
+                if let Some(app) = app {
+                    let _ = app.emit(
+                        "ai://pull",
+                        serde_json::json!({
+                            "model": format!("huggingbay:{}", id),
+                            "message": format!("verificant SHA-256 de {}…", dest_name)
+                        }),
+                    );
+                }
+                let digest = hasher.finalize();
+                let actual = hex_digest(&digest);
+                if !actual.eq_ignore_ascii_case(expected.trim()) {
+                    return Err(anyhow!(
+                        "El SHA-256 de «{}» no coincideix amb el del mirror: la descàrrega \
+                         està corrupta i s'ha descartat. Torna-ho a provar.",
+                        dest_name
+                    ));
+                }
             }
+            // Tot correcte: el nom final NOMÉS existeix quan el fitxer és bo
+            // (rename atòmic dins del mateix directori).
+            std::fs::rename(&part, &dest)?;
+            return Ok(dest);
         }
-        // Tot correcte: el nom final NOMÉS existeix quan el fitxer és bo
-        // (rename atòmic dins del mateix directori).
-        std::fs::rename(&part, &dest)?;
-        return Ok(dest);
+        Err(anyhow!(
+            "No s'ha pogut baixar el model de Hugging Bay: {}",
+            if last_err.is_empty() { "error desconegut" } else { &last_err }
+        ))
     }
-    let _ = std::fs::remove_file(&part);
-    Err(anyhow!(
-        "No s'ha pogut baixar el model de Hugging Bay: {}",
-        if last_err.is_empty() { "error desconegut" } else { &last_err }
-    ))
+    .await;
+    // Qualsevol error (xarxa, disc, SHA, rename o reintents esgotats) deixa
+    // el «.part» net: mai queda una descàrrega parcial al disc.
+    if result.is_err() {
+        let _ = std::fs::remove_file(&part);
+    }
+    result
 }
 
 /// SHA-256 en hex minúscules (sense dependència «hex»).

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { Loader2, Plus, Trash2, Pencil, Users, X, Square, MessagesSquare } from "lucide-react";
 import { useT } from "../../i18n";
 import { useExpertStore, type Expert, type ExpertInput } from "../../stores/expertStore";
@@ -80,8 +81,30 @@ function ExpertLiveCard({ expert }: { expert: Expert }) {
 /// i pot fer-los treballar junts en paral·lel (treball múltiple).
 export default function ExpertsPanel() {
   const { t } = useT();
-  const s = useExpertStore();
-  const { models } = useAIStore();
+  // Selectors fins: només els camps que pinta aquest panell. Amb el store
+  // sencer, qualsevol canvi (p. ex. soloResult o eventsReady) re-renderitzava
+  // el panell durant el streaming de l'equip.
+  const s = useExpertStore(
+    useShallow((st) => ({
+      experts: st.experts,
+      busy: st.busy,
+      teamRunning: st.teamRunning,
+      teamProgress: st.teamProgress,
+      teamResult: st.teamResult,
+      teamStartedAt: st.teamStartedAt,
+      error: st.error,
+      createRequested: st.createRequested,
+      load: st.load,
+      setupEvents: st.setupEvents,
+      create: st.create,
+      update: st.update,
+      remove: st.remove,
+      clearCreateRequest: st.clearCreateRequest,
+      runTeam: st.runTeam,
+      stopTeam: st.stopTeam,
+    }))
+  );
+  const models = useAIStore((st) => st.models);
   const [form, setForm] = useState<ExpertInput | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [goal, setGoal] = useState("");

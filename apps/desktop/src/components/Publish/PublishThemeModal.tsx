@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "../../stores/authStore";
 import { useUIStore } from "../../stores/uiStore";
+import { useT } from "../../i18n";
 import "./PublishThemeModal.css";
 
 /**
@@ -51,6 +52,7 @@ interface ThemeInfo {
 const SITE_DEFECTE = "https://themes.thepuigberts.com";
 
 export default function PublishThemeModal() {
+  const { t } = useT();
   const [visible, setVisible] = useState(false);
   const showMenu = useUIStore((s) => s.showPublishTheme);
   const setShowMenu = useUIStore((s) => s.setShowPublishTheme);
@@ -99,7 +101,7 @@ export default function PublishThemeModal() {
       const dir = await open({
         directory: true,
         multiple: false,
-        title: "Tria la carpeta del tema WordPress",
+        title: t("publish.pickDir"),
       });
       if (typeof dir !== "string") return;
       setBusy("inspect");
@@ -110,7 +112,7 @@ export default function PublishThemeModal() {
         setBusy("zip");
         const [z] = await invoke<[string, string]>("theme_build_zip", { dir });
         setZip(z);
-        setMsg(`ZIP preparat: ${z.split("/").pop()}`);
+        setMsg(t("publish.zipPrepared", { name: z.split("/").pop() ?? "" }));
       }
     } catch (e) {
       setErr(String(e));
@@ -124,7 +126,7 @@ export default function PublishThemeModal() {
     try {
       if (mode === "signup") await signUp(name, email, pass);
       else await logIn(email, pass);
-      setMsg("Compte verificat.");
+      setMsg(t("publish.accountVerified"));
     } catch (e) {
       setErr(String(e));
     }
@@ -134,7 +136,7 @@ export default function PublishThemeModal() {
     setErr(null);
     setMsg(null);
     if (!zip) {
-      setErr("Primer has de triar i empaquetar el tema.");
+      setErr(t("publish.needZip"));
       return;
     }
     setBusy("upload");
@@ -162,7 +164,7 @@ export default function PublishThemeModal() {
           .getState()
           .addConnection({
             kind: "wordpress",
-            label: "Marketplace de temes",
+            label: t("publish.connectionLabel"),
             url: site,
             username: wpUser,
             secret: wpPass,
@@ -205,7 +207,7 @@ export default function PublishThemeModal() {
     <div className="modal-overlay" onClick={close}>
       <div className="modal pb-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <span>Pujar tema a themes.thepuigberts.com</span>
+          <span>{t("publish.title")}</span>
           <button className="icon-btn" onClick={close}>
             <X size={14} />
           </button>
@@ -214,20 +216,20 @@ export default function PublishThemeModal() {
           {/* 1 · TEMA */}
           <section className="pb-step">
             <div className="pb-step-head">
-              <span className="pb-num">1</span> Tema
+              <span className="pb-num">1</span> {t("publish.step1")}
               <button className="btn sm" onClick={() => void pickTheme()} disabled={busy !== null}>
-                <FolderOpen size={12} /> Tria la carpeta
+                <FolderOpen size={12} /> {t("publish.chooseFolder")}
               </button>
             </div>
             {busy === "inspect" && (
               <div className="pb-hint">
-                <Loader2 size={12} className="spin" /> Revisant el tema…
+                <Loader2 size={12} className="spin" /> {t("publish.inspecting")}
               </div>
             )}
             {info && (
               <div className="pb-theme">
                 <div className="pb-theme-name">
-                  <Package size={13} /> {info.name || "(sense nom)"}
+                  <Package size={13} /> {info.name || t("publish.noName")}
                   {info.version ? <span className="pb-ver">v{info.version}</span> : null}
                 </div>
                 {info.description ? (
@@ -245,7 +247,7 @@ export default function PublishThemeModal() {
                       ? ` (${info.screenshotSize[0]}×${info.screenshotSize[1]})`
                       : ""}
                   </span>
-                  <span className="info">{info.files.length} fitxers</span>
+                  <span className="info">{t("publish.filesCount", { n: info.files.length })}</span>
                   {info.requiresPhp ? <span className="info">PHP {info.requiresPhp}</span> : null}
                 </div>
                 {info.errors.map((e, i) => (
@@ -260,7 +262,7 @@ export default function PublishThemeModal() {
                 ))}
                 {zip && (
                   <div className="pb-line ok">
-                    <CheckCircle2 size={11} /> ZIP a punt: {zip.split("/").pop()}
+                    <CheckCircle2 size={11} /> {t("publish.zipReady", { name: zip.split("/").pop() ?? "" })}
                   </div>
                 )}
               </div>
@@ -270,7 +272,7 @@ export default function PublishThemeModal() {
           {/* 2 · COMTE DE NOORBIT */}
           <section className="pb-step">
             <div className="pb-step-head">
-              <span className="pb-num">2</span> El teu compte (opcional)
+              <span className="pb-num">2</span> {t("publish.step2")}
               {user ? (
                 <span className="pb-user">
                   <CheckCircle2 size={12} /> {user.name} · {user.email}
@@ -282,38 +284,38 @@ export default function PublishThemeModal() {
                       className={"btn sm" + (mode === "login" ? " primary" : "")}
                       onClick={() => setMode("login")}
                     >
-                      <LogIn size={11} /> Entrar
+                      <LogIn size={11} /> {t("publish.login")}
                     </button>
                     <button
                       className={"btn sm" + (mode === "signup" ? " primary" : "")}
                       onClick={() => setMode("signup")}
                     >
-                      <UserPlus size={11} /> Crear compte
+                      <UserPlus size={11} /> {t("publish.signup")}
                     </button>
                   </div>
                   {mode === "signup" && (
                     <input
                       className="pb-input"
-                      placeholder="Nom"
+                      placeholder={t("publish.namePh")}
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                     />
                   )}
                   <input
                     className="pb-input"
-                    placeholder="Correu"
+                    placeholder={t("publish.emailPh")}
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                   />
                   <input
                     className="pb-input"
                     type="password"
-                    placeholder="Contrasenya"
+                    placeholder={t("publish.passPh")}
                     value={pass}
                     onChange={(e) => setPass(e.target.value)}
                   />
                   <button className="btn sm primary" onClick={() => void doAuth()}>
-                    {mode === "signup" ? "Crea el compte" : "Entra"}
+                    {mode === "signup" ? t("publish.createAccount") : t("publish.enter")}
                   </button>
                 </div>
               )}
@@ -323,35 +325,31 @@ export default function PublishThemeModal() {
           {/* 3 · PUJADA */}
           <section className="pb-step">
             <div className="pb-step-head">
-              <span className="pb-num">3</span> Pujada al lloc
+              <span className="pb-num">3</span> {t("publish.step3")}
             </div>
             <div className="pb-site">
               <input
                 className="pb-input wide"
-                placeholder="Adreça del lloc"
+                placeholder={t("publish.sitePh")}
                 value={site}
                 onChange={(e) => setSite(e.target.value)}
               />
               <input
                 className="pb-input"
-                placeholder="Usuari WordPress (opcional)"
+                placeholder={t("publish.wpUserPh")}
                 value={wpUser}
                 onChange={(e) => setWpUser(e.target.value)}
               />
               <input
                 className="pb-input"
                 type="password"
-                placeholder="Contrasenya d'aplicació (opcional)"
+                placeholder={t("publish.wpPassPh")}
                 value={wpPass}
                 onChange={(e) => setWpPass(e.target.value)}
               />
             </div>
             <div className="pb-note">
-              <Lock size={11} /> Pots pujar amb la <b>sessió del navegador</b> (prems
-              «Inicia sessió», entra al lloc i torna): és el mànec més simple. Si
-              prefereixes automàtic, posa un usuari i una contrasenya
-              d'aplicació (WordPress ▸ «El teu perfil ▸ Contrasenyes
-              d'aplicació»); es desen al teu compte de NoOrbit, mai al servidor.
+              <Lock size={11} /> {t("publish.notePre")}<b>{t("publish.noteBold")}</b>{t("publish.notePost")}
             </div>
             <div className="pb-actions">
               <button
@@ -359,7 +357,7 @@ export default function PublishThemeModal() {
                 disabled={busy !== null}
                 onClick={() => void openLogin()}
               >
-                <LogIn size={12} /> Inicia sessió
+                <LogIn size={12} /> {t("publish.openLogin")}
               </button>
               <button
                 className="btn primary sm"
@@ -371,10 +369,10 @@ export default function PublishThemeModal() {
                 ) : (
                   <CloudUpload size={12} />
                 )}
-                {busy === "upload" ? "Pujant…" : "Puja el ZIP"}
+                {busy === "upload" ? t("publish.uploading") : t("publish.uploadZip")}
               </button>
               <button className="btn sm" onClick={() => void openSales()}>
-                Obre «Vendes ▸ Pujar Tema»
+                {t("publish.openSales")}
               </button>
             </div>
           </section>
@@ -391,7 +389,7 @@ export default function PublishThemeModal() {
           )}
 
           <div className="pb-credit">
-            Fet per <b>Joan Puigbert Carreras</b> · Projecte de{" "}
+            {t("publish.creditMadeBy")} <b>Joan Puigbert Carreras</b> · {t("publish.creditProject")}{" "}
             <b>Thepuigberts.com</b>
           </div>
         </div>

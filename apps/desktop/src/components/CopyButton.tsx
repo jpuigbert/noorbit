@@ -2,6 +2,7 @@ import { useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { Copy, Check, Save } from "lucide-react";
+import { useT } from "../i18n";
 
 /// Copia text al porta-retalls. Intenta l'API nadi (requereix context segur)
 /// i, si falla o no hi és, fa servir el mètode clàssic amb un camp temporal
@@ -57,11 +58,12 @@ interface CopyButtonProps {
 
 /// Botó petit que copia `text` al porta-retalls i confirma-ho breument.
 export function CopyButton({ text, label, title }: CopyButtonProps) {
+  const { t } = useT();
   const [copied, setCopied] = useState(false);
   return (
     <button
       className="btn sm ghost chat-copy"
-      title={title ?? "Copia al porta-retalls"}
+      title={title ?? t("common.copyHint")}
       onClick={async (e) => {
         e.stopPropagation();
         if (await copyText(text)) {
@@ -71,7 +73,7 @@ export function CopyButton({ text, label, title }: CopyButtonProps) {
       }}
     >
       {copied ? <Check size={12} /> : <Copy size={12} />}
-      {label ? <span> {copied ? "Copiat" : label}</span> : null}
+      {label ? <span> {copied ? t("common.copied") : label}</span> : null}
     </button>
   );
 }
@@ -83,12 +85,13 @@ interface SaveButtonProps {
 }
 
 /// Botó «Desa»: guarda el text a un fitxer triat per l'usuari.
-export function SaveButton({ text, suggestedName, label = "Desa" }: SaveButtonProps) {
+export function SaveButton({ text, suggestedName, label }: SaveButtonProps) {
+  const { t } = useT();
   const [saved, setSaved] = useState(false);
   return (
     <button
       className="btn sm ghost chat-copy"
-      title="Desa el resultat en un fitxer"
+      title={t("common.saveHint")}
       onClick={async (e) => {
         e.stopPropagation();
         const path = await saveTextToFile(text, suggestedName);
@@ -98,7 +101,7 @@ export function SaveButton({ text, suggestedName, label = "Desa" }: SaveButtonPr
         }
       }}
     >
-      <Save size={12} /> <span>{saved ? "Desat" : label}</span>
+      <Save size={12} /> <span>{saved ? t("common.saved") : (label ?? t("common.save"))}</span>
     </button>
   );
 }

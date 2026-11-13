@@ -1,4 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
+import { useShallow } from "zustand/react/shallow";
 import { Plug, Unplug, FolderSearch, Loader2 } from "lucide-react";
 import { useT } from "../../i18n";
 import { useUnrealStore } from "../../stores/unrealStore";
@@ -16,7 +17,20 @@ export default function UnrealConnectButton() {
     setProjectPath,
     connect,
     disconnect,
-  } = useUnrealStore();
+  } = useUnrealStore(
+    useShallow((st) => ({
+      connected: st.connected,
+      status: st.status,
+      statusMessage: st.statusMessage,
+      projectPath: st.projectPath,
+      engineVersion: st.engineVersion,
+      projectName: st.projectName,
+      installations: st.installations,
+      setProjectPath: st.setProjectPath,
+      connect: st.connect,
+      disconnect: st.disconnect,
+    }))
+  );
 
   const busy = status === "detecting" || status === "launching" || status === "waiting" || status === "connecting";
   // Llista d'instal·lacions: sempre un array (mai null) — un null aquí

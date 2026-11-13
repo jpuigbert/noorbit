@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { Code2, Boxes, Lightbulb, Video, Package, Play } from "lucide-react";
 import { useT } from "../../i18n";
 import { useUnrealStore } from "../../stores/unrealStore";
@@ -12,7 +13,16 @@ type Tab = "python" | "objects" | "lighting" | "live" | "build";
 export default function UnrealPanel() {
   const { t } = useT();
   const { connected, lastPythonResult, runPython, createBlueprint, spawnActor, buildLighting } =
-    useUnrealStore();
+    useUnrealStore(
+      useShallow((st) => ({
+        connected: st.connected,
+        lastPythonResult: st.lastPythonResult,
+        runPython: st.runPython,
+        createBlueprint: st.createBlueprint,
+        spawnActor: st.spawnActor,
+        buildLighting: st.buildLighting,
+      }))
+    );
 
   const [tab, setTab] = useState<Tab>("python");
   const [py, setPy] = useState(

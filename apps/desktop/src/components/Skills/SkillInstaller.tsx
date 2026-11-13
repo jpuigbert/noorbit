@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -13,13 +14,27 @@ import {
   Search,
   Code2,
   FolderPlus,
+  AlertTriangle,
+  ShieldAlert,
 } from "lucide-react";
 import { useT } from "../../i18n";
-import { useSkillStore } from "../../stores/skillStore";
+import { useSkillStore, type SkillPreview } from "../../stores/skillStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { SKILL_CATALOG, searchSkillsGitHub, type SkillSearchResult } from "./skillCatalog";
 
 type Source = "github" | "url" | "zip" | "local";
+
+function bytes(n: number): string {
+  if (!n || n <= 0) return "0 B";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let v = n;
+  let i = 0;
+  while (v >= 1000 && i < u.length - 1) {
+    v /= 1000;
+    i++;
+  }
+  return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${u[i]}`;
+}
 
 export default function SkillInstaller() {
   const { t } = useT();
@@ -33,10 +48,27 @@ export default function SkillInstaller() {
     installUrl,
     installZip,
     installLocal,
+    preview,
     uninstall,
     restoreBuiltins,
     exportExternal,
-  } = useSkillStore();
+  } = useSkillStore(
+    useShallow((st) => ({
+      skills: st.skills,
+      busy: st.busy,
+      lastError: st.lastError,
+      load: st.load,
+      reload: st.reload,
+      installGithub: st.installGithub,
+      installUrl: st.installUrl,
+      installZip: st.installZip,
+      installLocal: st.installLocal,
+      preview: st.preview,
+      uninstall: st.uninstall,
+      restoreBuiltins: st.restoreBuiltins,
+      exportExternal: st.exportExternal,
+    }))
+  );
   const workspaceRoot = useWorkspaceStore((s) => s.root);
 
   const [source, setSource] = useState<Source>("github");
@@ -49,26 +81,59 @@ export default function SkillInstaller() {
   const [searching, setSearching] = useState(false);
   // ── Importació de VS Code (comandes + fragments de les extensions) ──
   const [vscodeBusy, setVscodeBusy] = useState(false);
+  // ── Consentiment: preview de la skill ABANS d'instal·lar-la ──
+  const [previewData, setPreviewData] = useState<SkillPreview | null>(null);
+  const [pending, setPending] = useState<{ kind: Source; source: string } | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const doInstall = async () => {
-    if (source === "github") {
-      if (!repo.trim()) return;
-      const ok = await installGithub(repo.trim());
-      if (ok) setRepo("");
-    } else {
-      if (!value.trim()) return;
-      const ok =
-        source === "url"
-          ? await installUrl(value.trim())
-          : source === "zip"
-            ? await installZip(value.trim())
-            : await installLocal(value.trim());
-      if (ok) setValue("");
+  /// Demana la PREVIEW de la font i, si arriba, obre el panell de consentiment.
+  /// NO instal·la res encara: l'usuari ha de confirmar després de veure el resum.
+  const requestInstall = async (kind: Source, src: string) => {
+    const s = src.trim();
+    if (!s) return;
+    setInfo(null);
+    setPreviewBusy(true);
+    const p = await preview(kind, s);
+    setPreviewBusy(false);
+    if (p) {
+      setPreviewData(p);
+      setPending({ kind, source: s });
     }
+  };
+
+  /// Confirmació explícita: ara sí, instal·la la skill pendent.
+  const confirmInstall = async () => {
+    if (!pending) return;
+    const { kind, source: s } = pending;
+    setPreviewData(null);
+    setPending(null);
+    const ok =
+      kind === "github"
+        ? await installGithub(s)
+        : kind === "url"
+          ? await installUrl(s)
+          : kind === "zip"
+            ? await installZip(s)
+            : await installLocal(s);
+    if (ok) {
+      if (kind === "github") setRepo("");
+      else setValue("");
+      setInfo(t("skills.installed_ok"));
+    }
+  };
+
+  const cancelPreview = () => {
+    setPreviewData(null);
+    setPending(null);
+  };
+
+  const doInstall = () => {
+    if (source === "github") void requestInstall("github", repo);
+    else void requestInstall(source, value);
   };
 
   const pickZip = async () => {
@@ -108,10 +173,8 @@ export default function SkillInstaller() {
     }
   };
 
-  const installResult = async (r: SkillSearchResult) => {
-    setInfo(null);
-    const ok = await installGithub(r.repo);
-    setInfo(ok ? t("skills.installed_ok") : null);
+  const installResult = (r: SkillSearchResult) => {
+    void requestInstall("github", r.repo);
   };
 
   // Importaquí les extensions instal·lades de VS Code com a skills: comandes
@@ -257,9 +320,9 @@ export default function SkillInstaller() {
         <button
           className="btn primary sm"
           onClick={doInstall}
-          disabled={busy || (source === "github" ? !repo.trim() : !value.trim())}
+          disabled={busy || previewBusy || (source === "github" ? !repo.trim() : !value.trim())}
         >
-          {busy ? t("common.loading") : t("skills.install")}
+          {busy || previewBusy ? t("common.loading") : t("skills.install")}
         </button>
         {lastError && (
           <div className="si-error">
@@ -272,6 +335,72 @@ export default function SkillInstaller() {
         )}
         {info && <div className="si-info">{info}</div>}
       </div>
+
+      {/* ── CONSENTIMENT: resum del que la skill pot executar ABANS d'instal·lar ── */}
+      {previewData && (
+        <div className="si-preview">
+          <div className="si-preview-head">
+            <ShieldAlert size={14} />
+            <span>{t("skills.previewTitle")}</span>
+          </div>
+          <div className="si-preview-name">{previewData.name}</div>
+          {previewData.description && (
+            <div className="si-preview-desc">{previewData.description}</div>
+          )}
+          <div className="si-preview-meta">
+            {t("skills.previewFiles", {
+              n: previewData.file_count,
+              size: bytes(previewData.total_bytes),
+            })}
+          </div>
+          {previewData.warnings.length > 0 && (
+            <div className="si-preview-warns">
+              {previewData.warnings.map((w) => (
+                <div key={w} className="si-warn">
+                  <AlertTriangle size={12} /> {t("skills.warn." + w)}
+                </div>
+              ))}
+            </div>
+          )}
+          {previewData.scripts.length > 0 && (
+            <div className="si-preview-section">
+              <div className="si-preview-label">{t("skills.previewScripts")}</div>
+              <ul className="si-scripts">
+                {previewData.scripts.map((s) => (
+                  <li key={s}>
+                    <code>{s}</code>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {previewData.code_blocks.length > 0 && (
+            <div className="si-preview-section">
+              <div className="si-preview-label">{t("skills.previewCode")}</div>
+              {previewData.code_blocks.map((b, i) => (
+                <details key={i} className="si-code">
+                  <summary>
+                    <Code2 size={11} /> {b.lang}
+                  </summary>
+                  <pre>{b.code}</pre>
+                </details>
+              ))}
+            </div>
+          )}
+          {previewData.code_blocks.length === 0 && previewData.scripts.length === 0 && (
+            <div className="si-preview-none">{t("skills.previewNoCode")}</div>
+          )}
+          <div className="si-preview-actions">
+            <button className="btn primary sm" disabled={busy} onClick={() => void confirmInstall()}>
+              <FolderPlus size={12} /> {t("skills.confirmInstall")}
+            </button>
+            <button className="btn sm ghost" onClick={cancelPreview}>
+              {t("skills.cancel")}
+            </button>
+          </div>
+          <div className="si-preview-hint">{t("skills.previewHint")}</div>
+        </div>
+      )}
 
       <div className="si-builtin">
         <div className="si-builtin-head">

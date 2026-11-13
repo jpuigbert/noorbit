@@ -1,4 +1,5 @@
 import { useState, type KeyboardEvent } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { ask } from "@tauri-apps/plugin-dialog";
 import {
   ChevronRight,
@@ -38,9 +39,14 @@ function TreeNode({
   onDialog: (d: Dialog) => void;
 }) {
   const { t } = useT();
-  const { expanded, toggleDir, loadFile, openFile, removeNode } = useWorkspaceStore();
-  const isOpen = !!expanded[node.path];
-  const active = openFile?.path === node.path;
+  // Selectors per node (primitius estables): cada node només es re-renderitza
+  // quan canvia el SEU estat d'obertura o el fitxer actiu, no amb qualsevol
+  // canvi del store (arbre gran = molts nodes).
+  const isOpen = useWorkspaceStore((st) => !!st.expanded[node.path]);
+  const active = useWorkspaceStore((st) => st.openFile?.path === node.path);
+  const toggleDir = useWorkspaceStore((st) => st.toggleDir);
+  const loadFile = useWorkspaceStore((st) => st.loadFile);
+  const removeNode = useWorkspaceStore((st) => st.removeNode);
 
   const doDelete = async () => {
     const ok = await ask(
@@ -132,7 +138,18 @@ function TreeNode({
 export default function Sidebar() {
   const { t } = useT();
   const { tree, root, pickWorkspace, refreshTree, createFile, createFolder, renameNode, loadFile } =
-    useWorkspaceStore();
+    useWorkspaceStore(
+      useShallow((st) => ({
+        tree: st.tree,
+        root: st.root,
+        pickWorkspace: st.pickWorkspace,
+        refreshTree: st.refreshTree,
+        createFile: st.createFile,
+        createFolder: st.createFolder,
+        renameNode: st.renameNode,
+        loadFile: st.loadFile,
+      }))
+    );
   const [dialog, setDialog] = useState<Dialog>(null);
   const [value, setValue] = useState("");
 

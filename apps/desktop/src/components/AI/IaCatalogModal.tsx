@@ -74,12 +74,12 @@ export default function IaCatalogModal() {
   const no = <span className="ic-no">—</span>;
 
   const filters: { id: Filter; label: string }[] = [
-    { id: "all", label: "Totes" },
-    { id: "uncensored", label: "Sense censura" },
-    { id: "vision", label: "Accepten imatges" },
-    { id: "image_gen", label: "Generen imatges" },
-    { id: "video_gen", label: "Generen vídeo" },
-    { id: "installed", label: "Ja instal·lades" },
+    { id: "all", label: t("ai.catFilterAll") },
+    { id: "uncensored", label: t("ai.catFilterUncensored") },
+    { id: "vision", label: t("ai.catFilterVision") },
+    { id: "image_gen", label: t("ai.catFilterImageGen") },
+    { id: "video_gen", label: t("ai.catFilterVideoGen") },
+    { id: "installed", label: t("ai.catFilterInstalled") },
   ];
 
   return (
@@ -87,7 +87,7 @@ export default function IaCatalogModal() {
       <div className="modal ic-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <span>{t("ai.catalog")}</span>
-          <button className="icon-btn" title="Actualitza" onClick={() => void load()}>
+          <button className="icon-btn" title={t("common.refresh")} onClick={() => void load()}>
             <RefreshCw size={13} />
           </button>
           <button className="icon-btn" onClick={() => setShow(false)}>
@@ -95,12 +95,7 @@ export default function IaCatalogModal() {
           </button>
         </div>
         <div className="modal-body">
-          <p className="lp-hint">
-            Mides aproximades de l'etiqueta estàndard (les variants «:3b» o q4
-            pesen molt menys). «Núvol» = no cal baixar res. Cap model d'aquesta
-            llista genera vídeo avui; per a vídeo a parts locals caldria un
-            model dedicat (p. ex. via ComfyUI) encara no integrat.
-          </p>
+          <p className="lp-hint">{t("ai.catHint")}</p>
           <div className="ic-filters">
             {filters.map((f) => (
               <button
@@ -119,13 +114,13 @@ export default function IaCatalogModal() {
             <table className="ic-table">
               <thead>
                 <tr>
-                  <th>Model</th>
-                  <th>Origen</th>
-                  <th title="Mida aprox. abans de descarregar">Mida</th>
-                  <th title="Sense filtres de contingut">Censura</th>
-                  <th title="Rep imatges com a entrada (visió)">Imatges in.</th>
-                  <th title="Genera imatges noves">Imatges out.</th>
-                  <th title="Genera vídeo">Vídeo</th>
+                  <th>{t("ai.model")}</th>
+                  <th>{t("ai.catSource")}</th>
+                  <th title={t("ai.catSizeHint")}>{t("ai.catSize")}</th>
+                  <th title={t("ai.catCensorshipHint")}>{t("ai.catCensorship")}</th>
+                  <th title={t("ai.catImagesInHint")}>{t("ai.catImagesIn")}</th>
+                  <th title={t("ai.catImagesOutHint")}>{t("ai.catImagesOut")}</th>
+                  <th title={t("ai.catVideoHint")}>{t("ai.catVideo")}</th>
                   <th></th>
                 </tr>
               </thead>
@@ -136,7 +131,7 @@ export default function IaCatalogModal() {
                     <tr key={e.source + "/" + e.name} title={e.note}>
                       <td className="ic-name">{e.name}</td>
                       <td>{e.source}</td>
-                      <td>{e.approx_size_gb > 0 ? `~${e.approx_size_gb} GB` : "núvol"}</td>
+                      <td>{e.approx_size_gb > 0 ? `~${e.approx_size_gb} GB` : t("ai.catCloud")}</td>
                       <td>{e.uncensored ? yes : no}</td>
                       <td>{e.vision ? yes : no}</td>
                       <td>{e.image_gen ? yes : no}</td>
@@ -144,17 +139,17 @@ export default function IaCatalogModal() {
                       <td>
                         {e.source !== "ollama" ? (
                           e.installed ? (
-                            <span className="mm-installed">clau lista</span>
+                            <span className="mm-installed">{t("ai.catKeyReady")}</span>
                           ) : (
-                            <span className="ic-no" title="Cal registrar el token al Gestor de proveïdors">
-                              sense clau
+                            <span className="ic-no" title={t("ai.catNoKeyHint")}>
+                              {t("ai.catNoKey")}
                             </span>
                           )
                         ) : prog ? (
                           <span className="mm-prog">{prog}</span>
                         ) : e.installed ? (
                           <span className="mm-installed">
-                            <Check size={12} /> instal·lat
+                            <Check size={12} /> {t("ai.catInstalled")}
                           </span>
                         ) : (
                           <button className="btn sm" onClick={() => void pullModel(e.name)}>

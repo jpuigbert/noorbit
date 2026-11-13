@@ -1,10 +1,18 @@
 import { Camera, Loader2 } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
 import { useT } from "../../i18n";
 import { useUnrealStore } from "../../stores/unrealStore";
 
 export default function UnrealLiveView() {
   const { t } = useT();
-  const { connected, liveCapture, capturing, captureViewport } = useUnrealStore();
+  const { connected, liveCapture, capturing, captureViewport } = useUnrealStore(
+    useShallow((st) => ({
+      connected: st.connected,
+      liveCapture: st.liveCapture,
+      capturing: st.capturing,
+      captureViewport: st.captureViewport,
+    }))
+  );
 
   return (
     <div className="ue-live">

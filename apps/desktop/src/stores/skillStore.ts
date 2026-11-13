@@ -9,6 +9,24 @@ export interface Skill {
   builtin?: boolean;
 }
 
+/// Bloc de codi trobat al SKILL.md (preview abans d'instal·lar).
+export interface SkillCodeBlock {
+  lang: string;
+  code: string;
+}
+
+/// Resum d'una skill ABANS d'instal·lar-la: el que l'agent pot executar.
+/// `warnings` són codis que el frontend tradueix amb t("skills.warn.<codi>").
+export interface SkillPreview {
+  name: string;
+  description: string;
+  code_blocks: SkillCodeBlock[];
+  scripts: string[];
+  warnings: string[];
+  file_count: number;
+  total_bytes: number;
+}
+
 interface SkillState {
   skills: Skill[];
   loading: boolean;
@@ -21,6 +39,7 @@ interface SkillState {
   installUrl: (url: string) => Promise<boolean>;
   installZip: (path: string) => Promise<boolean>;
   installLocal: (path: string) => Promise<boolean>;
+  preview: (kind: string, source: string) => Promise<SkillPreview | null>;
   uninstall: (id: string) => Promise<void>;
   restoreBuiltins: () => Promise<boolean>;
   exportExternal: (directory: string) => Promise<number | null>;
@@ -102,6 +121,18 @@ export const useSkillStore = create<SkillState>((set, get) => ({
     if (!ok) set({ lastError: "local" });
     set({ busy: false });
     return ok;
+  },
+
+  preview: async (kind, source) => {
+    set({ busy: true, lastError: null });
+    try {
+      const p = await invoke<SkillPreview>("skills_preview", { kind, source });
+      set({ busy: false });
+      return p;
+    } catch {
+      set({ busy: false, lastError: kind });
+      return null;
+    }
   },
 
   uninstall: async (id) => {

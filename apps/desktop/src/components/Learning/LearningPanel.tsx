@@ -7,6 +7,7 @@
 // El dataset es pot exportar en JSONL per entrenar un model local (LoRA)
 // més endavant: LLaMA-Factory, Unsloth o Axolotl.
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import {
   Brain,
   Download,
@@ -43,7 +44,23 @@ export default function LearningPanel() {
     clearAll,
     exportDataset,
     watch,
-  } = useLearningStore();
+  } = useLearningStore(
+    useShallow((st) => ({
+      status: st.status,
+      lessons: st.lessons,
+      exchanges: st.exchanges,
+      busy: st.busy,
+      error: st.error,
+      notice: st.notice,
+      refresh: st.refresh,
+      setConfig: st.setConfig,
+      distill: st.distill,
+      removeLesson: st.removeLesson,
+      clearAll: st.clearAll,
+      exportDataset: st.exportDataset,
+      watch: st.watch,
+    }))
+  );
   const [showExchanges, setShowExchanges] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
 

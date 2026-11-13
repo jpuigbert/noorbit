@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import {
   Terminal,
   Play,
@@ -20,7 +21,24 @@ function fmtTime(secs: number): string {
 
 export default function ComputerPanel() {
   const { t } = useT();
-  const s = useComputerStore();
+  const s = useComputerStore(
+    useShallow((st) => ({
+      perms: st.perms,
+      busy: st.busy,
+      agentRunning: st.agentRunning,
+      agentSteps: st.agentSteps,
+      error: st.error,
+      lastOutput: st.lastOutput,
+      history: st.history,
+      setupEvents: st.setupEvents,
+      load: st.load,
+      setPerms: st.setPerms,
+      runCommand: st.runCommand,
+      removePattern: st.removePattern,
+      runAgent: st.runAgent,
+      clearHistory: st.clearHistory,
+    }))
+  );
   const [cmd, setCmd] = useState("");
   const [goal, setGoal] = useState("");
 

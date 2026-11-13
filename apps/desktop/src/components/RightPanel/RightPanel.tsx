@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useShallow } from "zustand/react/shallow";
 import {
   Eye, Bot, Play, Square, Globe, Users, Monitor, Boxes, Clapperboard,
   Smartphone, Wrench, Brain, Activity, GitBranch, AlertTriangle, Terminal,
@@ -56,7 +57,19 @@ const SUB_DEV_ICONS: Record<SubKeyDev, ReactNode> = {
 export default function RightPanel() {
   const { t } = useT();
   const { rightTab, setRightTab, agentSub, setAgentSub, previewUrl, previewActive, init, startPreview, stopPreview } =
-    usePreviewStore();
+    usePreviewStore(
+      useShallow((st) => ({
+        rightTab: st.rightTab,
+        setRightTab: st.setRightTab,
+        agentSub: st.agentSub,
+        setAgentSub: st.setAgentSub,
+        previewUrl: st.previewUrl,
+        previewActive: st.previewActive,
+        init: st.init,
+        startPreview: st.startPreview,
+        stopPreview: st.stopPreview,
+      }))
+    );
   // Record de la sub-pestanya de Treball (local al panell, no cal persistir).
   const [subDev, setSubDev] = useSubDev();
   const teamRunning = useExpertStore((s) => s.teamRunning);
@@ -133,37 +146,37 @@ export default function RightPanel() {
                   peta (un null d'una dada), només mor AQUELL panell — la resta
                   de NoOrbit (xat, editor, terminal) continua funcionant. */}
               {agentSub === "chat" && (
-                <PanelErrorBoundary label="Error al xat">
+                <PanelErrorBoundary label={t("rightPanel.errChat")}>
                   <AgentPanel />
                 </PanelErrorBoundary>
               )}
               {agentSub === "experts" && (
-                <PanelErrorBoundary label="Error als especialistes">
+                <PanelErrorBoundary label={t("rightPanel.errExperts")}>
                   <ExpertsPanel />
                 </PanelErrorBoundary>
               )}
               {agentSub === "learning" && (
-                <PanelErrorBoundary label="Error a l'aprenentatge">
+                <PanelErrorBoundary label={t("rightPanel.errLearning")}>
                   <LearningPanel />
                 </PanelErrorBoundary>
               )}
               {agentSub === "computer" && (
-                <PanelErrorBoundary label="Error al panell d'ordinador">
+                <PanelErrorBoundary label={t("rightPanel.errComputer")}>
                   <ComputerPanel />
                 </PanelErrorBoundary>
               )}
               {agentSub === "unreal" && (
-                <PanelErrorBoundary label="Error al panell d'Unreal">
+                <PanelErrorBoundary label={t("rightPanel.errUnreal")}>
                   <UnrealPanel />
                 </PanelErrorBoundary>
               )}
               {agentSub === "blender" && (
-                <PanelErrorBoundary label="Error al panell de Blender">
+                <PanelErrorBoundary label={t("rightPanel.errBlender")}>
                   <BlenderPanel />
                 </PanelErrorBoundary>
               )}
               {agentSub === "mobile" && (
-                <PanelErrorBoundary label="Error al panell mòbil">
+                <PanelErrorBoundary label={t("rightPanel.errMobile")}>
                   <MobilePanel />
                 </PanelErrorBoundary>
               )}
@@ -172,7 +185,7 @@ export default function RightPanel() {
         )}
 
         {rightTab === "web" && (
-          <PanelErrorBoundary label="Error a la IA de web">
+          <PanelErrorBoundary label={t("rightPanel.errWebAi")}>
             <WebAiPanel />
           </PanelErrorBoundary>
         )}
@@ -192,7 +205,7 @@ export default function RightPanel() {
               )}
             </div>
             {previewActive && previewUrl ? (
-              <iframe className="preview-frame" src={previewUrl} title="preview" />
+              <iframe className="preview-frame" src={previewUrl} title={t("rightPanel.previewFrame")} />
             ) : (
               <div className="empty-hint" style={{ marginTop: 40 }}>
                 {t("rightPanel.previewNotRunning")}
@@ -219,22 +232,22 @@ export default function RightPanel() {
             </div>
             <div className="rp-group-body">
               {subDev === "process" && (
-                <PanelErrorBoundary label="Error a l'activitat IA">
+                <PanelErrorBoundary label={t("rightPanel.errProcess")}>
                   <AIProcessViewer />
                 </PanelErrorBoundary>
               )}
               {subDev === "git" && (
-                <PanelErrorBoundary label="Error al panell de Git">
+                <PanelErrorBoundary label={t("rightPanel.errGit")}>
                   <GitPanel />
                 </PanelErrorBoundary>
               )}
               {subDev === "problems" && (
-                <PanelErrorBoundary label="Error al panell de problemes">
+                <PanelErrorBoundary label={t("rightPanel.errProblems")}>
                   <ProblemsPanel />
                 </PanelErrorBoundary>
               )}
               {subDev === "console" && (
-                <PanelErrorBoundary label="Error a la consola">
+                <PanelErrorBoundary label={t("rightPanel.errConsole")}>
                   <DebugConsole />
                 </PanelErrorBoundary>
               )}

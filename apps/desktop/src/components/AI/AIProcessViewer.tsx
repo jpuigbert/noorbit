@@ -5,15 +5,16 @@ import { useProcessStore } from "../../stores/processStore";
 import type { ProcessTurn } from "../../stores/processStore";
 import { useAgentStore } from "../../stores/agentStore";
 import { CopyButton, SaveButton } from "../CopyButton";
+import { useT } from "../../i18n";
 
 /// El backend diu la fase en anglès; l'usuari l'ha de llegir en català i amb
 /// el matís de què està passant realment (carregar un model no és «pensar»).
-const PHASE_LABEL: Record<string, string> = {
-  idle: "Esperant",
-  thinking: "Pensant",
-  streaming: "Generant",
-  done: "Acabat",
-  error: "Ha fallat",
+const PHASE_KEY: Record<string, string> = {
+  idle: "process.phaseIdle",
+  thinking: "process.phaseThinking",
+  streaming: "process.phaseStreaming",
+  done: "process.phaseDone",
+  error: "process.phaseError",
 };
 
 function timeLabel(ms: number): string {
@@ -54,6 +55,7 @@ function Section(props: {
 /// proveïdors remots via SSE). Ara cada xat té el seu propre llenç: el visor
 /// mostra la generació del xat actiu, així dos xats en paral·lel no es mezclen.
 export default function AIProcessViewer() {
+  const { t } = useT();
   const activeId = useAgentStore((s) => s.activeId);
   const snap = useProcessStore((s) => s.per[activeId]);
   const text = snap?.text ?? "";
@@ -105,22 +107,22 @@ export default function AIProcessViewer() {
       <div className="proc-head">
         <span className="proc-title">
           <Radio size={12} style={{ verticalAlign: -2, marginRight: 4 }} />
-          Procés de la IA
+          {t("process.title")}
         </span>
         <span className={"proc-phase " + phaseClass}>
-          {PHASE_LABEL[phase] ?? phase}
+          {PHASE_KEY[phase] ? t(PHASE_KEY[phase]) : phase}
         </span>
         <span className="proc-meta">{seconds}</span>
         {fullResult && (
           <>
-            <CopyButton text={fullResult} label="Copia" />
+            <CopyButton text={fullResult} label={t("common.copy")} />
             <SaveButton text={fullResult} suggestedName="proces-ia.md" />
           </>
         )}
         <button
           className="btn sm ghost"
           onClick={() => reset(activeId)}
-          title="Neteja el visor d'aquest xat, també els torns arxivats"
+          title={t("process.clearHint")}
         >
           <RefreshCw size={12} />
         </button>
@@ -130,42 +132,37 @@ export default function AIProcessViewer() {
       <div className="proc-body" ref={ref}>
         {error && (
           <div className="proc-error">
-            <strong>Què ha passat:</strong> {error}
+            <strong>{t("process.whatHappened")}</strong> {error}
           </div>
         )}
         {thinking && (
           <Section
-            title="Raonament de la IA"
-            hint={live ? "en directe" : `${timeLabel(elapsedMs)}`}
+            title={t("process.reasoning")}
+            hint={live ? t("process.live") : `${timeLabel(elapsedMs)}`}
             open={openNow || !text}
             text={thinking}
             tone="sec-think"
           />
         )}
         {text && (
-          <Section title="Resposta" open={!live} text={text} tone="sec-answer" />
+          <Section title={t("process.answer")} open={!live} text={text} tone="sec-answer" />
         )}
         {!thinking && !text && !error && (
-          <div className="empty-hint">
-            Esperant que la IA genere alguna cosa… El text d'aquest visor
-            arriba en directe des de qualsevol model (local o en línia). Els
-            models que no separen el pensament en un canal propi es mostren
-            igualment aquí, paraula a paraula.
-          </div>
+          <div className="empty-hint">{t("process.empty")}</div>
         )}
         {turns.length > 0 && (
           <details className="proc-sec sec-old">
             <summary>
-              Torns anteriors d'aquest xat
+              {t("process.prevTurns")}
               <span className="proc-sec-hint">{turns.length}</span>
             </summary>
             <div className="proc-turns">
-              {[...turns].reverse().map((t, i) => (
+              {[...turns].reverse().map((tn, i) => (
                 // La clau NO pot ser l'índex: en invertir la llista, un torn
                 // nou entra a l'índex 0 i TOTS els anteriors canvien
                 // d'índex → React els desmunta i es per l'estat obert/plegat
                 // que l'usuari havia deixat.
-                <Turn key={t.id ?? `t-${turns.length - i}`} turn={t} label={`Torn ${turns.length - i}`} />
+                <Turn key={tn.id ?? `t-${turns.length - i}`} turn={tn} label={t("process.turn", { n: turns.length - i })} />
               ))}
             </div>
           </details>
@@ -177,6 +174,7 @@ export default function AIProcessViewer() {
 
 /// Un torn ja acabat: es pot obrir per rellegir el pensament i la resposta.
 function Turn({ turn, label }: { turn: ProcessTurn; label: string }) {
+  const { t } = useT();
   // Un torn interromput pot no tenir `endedAt`: «Invalid Date» no serveix.
   const when = turn.endedAt
     ? new Date(turn.endedAt).toLocaleTimeString([], {
@@ -195,7 +193,7 @@ function Turn({ turn, label }: { turn: ProcessTurn; label: string }) {
       )}
       {turn.text && <pre className="proc-block">{turn.text}</pre>}
       {!turn.error && !turn.thinking && !turn.text && (
-        <pre className="proc-block">(buit)</pre>
+        <pre className="proc-block">{t("process.emptyTurn")}</pre>
       )}
     </details>
   );

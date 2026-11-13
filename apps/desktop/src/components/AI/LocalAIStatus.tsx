@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useAIStore } from "../../stores/aiStore";
 import { useProviderStore } from "../../stores/providerStore";
+import { useT, t } from "../../i18n";
 import "./LocalAIStatus.css";
 
 /**
@@ -135,43 +136,44 @@ export function useLocalAIHealth(): LocalAIHealth {
 export function localAIStateLabel(h: LocalAIHealth): string {
   switch (h.state) {
     case "checking":
-      return "Comprovant la IA local…";
+      return t("localAI.checking");
     case "missing":
-      return "Ollama no està instal·lat";
+      return t("localAI.missing");
     case "stopped":
-      return "Ollama està instal·lat però aturat";
+      return t("localAI.stopped");
     case "no-model":
-      return "Cap model instal·lat: la IA no pot respondre";
+      return t("localAI.noModel");
     case "downloading":
-      return h.progress ?? "Baixant el model…";
+      return h.progress ?? t("localAI.downloading");
     case "cloud":
-      return "IA al núvol (Ollama no cal)";
+      return t("localAI.cloud");
     case "ready":
-      return h.model ? `A punt · ${h.model}` : "A punt";
+      return h.model ? t("localAI.readyModel", { model: h.model }) : t("localAI.ready");
   }
 }
 
 /// Botó d'acció segons l'estat (l'única cosa que l'usuari necessita).
 function ActionButton({ h }: { h: LocalAIHealth }) {
+  const { t } = useT();
   const label =
     h.state === "missing"
-      ? "Instal·la"
+      ? t("localAI.install")
       : h.state === "stopped"
-        ? "Engega"
+        ? t("localAI.start")
         : h.state === "no-model"
           ? h.starter
-            ? `Baixa ${h.starter}`
-            : "Baixa el model"
+            ? t("localAI.pullStarter", { model: h.starter })
+            : t("localAI.pullModel")
           : "";
   if (!label) return null;
   const Icon =
     h.state === "missing" ? Download : h.state === "stopped" ? Play : Sparkles;
   const busyLabel =
     h.state === "missing"
-      ? "Instal·lant…"
+      ? t("localAI.installing")
       : h.state === "stopped"
-        ? "Engegant…"
-        : "Baixant…";
+        ? t("localAI.starting")
+        : t("localAI.pulling");
   return (
     <button className="btn sm primary lps-action" disabled={h.busy} onClick={() => void h.fix()}>
       {h.busy ? <Loader2 size={12} className="spin" /> : <Icon size={12} />}
@@ -182,14 +184,15 @@ function ActionButton({ h }: { h: LocalAIHealth }) {
 
 /// Barra de salut de la IA local per al panell del xat.
 export default function LocalAIStatus() {
+  const { t } = useT();
   const h = useLocalAIHealth();
   if (h.state === "ready") {
     // Estat correcte: només una línia discreta (no crida l'atenció).
     return (
-      <div className="lps lps-ready" title="La IA local està instal·lada i en marxa.">
+      <div className="lps lps-ready" title={t("localAI.readyHint")}>
         <CheckCircle2 size={13} />
-        <span className="lps-label">IA local</span>
-        <span className="lps-detail">{h.model ?? "a punt"}</span>
+        <span className="lps-label">{t("localAI.label")}</span>
+        <span className="lps-detail">{h.model ?? t("localAI.readyDetail")}</span>
       </div>
     );
   }
@@ -199,11 +202,11 @@ export default function LocalAIStatus() {
     return (
       <div
         className="lps lps-ready"
-        title="Estàs fent servir una IA en línia: Ollama no és necessari."
+        title={t("localAI.cloudHint")}
       >
         <Cloud size={13} />
-        <span className="lps-label">IA al núvol</span>
-        <span className="lps-detail">Ollama opcional</span>
+        <span className="lps-label">{t("localAI.cloudLabel")}</span>
+        <span className="lps-detail">{t("localAI.ollamaOptional")}</span>
       </div>
     );
   }
@@ -215,7 +218,7 @@ export default function LocalAIStatus() {
         <AlertTriangle size={13} />
       )}
       <Cpu size={13} className="lps-cpu" />
-      <span className="lps-label">IA local</span>
+      <span className="lps-label">{t("localAI.label")}</span>
       <span className="lps-detail">{localAIStateLabel(h)}</span>
       <ActionButton h={h} />
       {h.error && <span className="lps-error">{h.error}</span>}

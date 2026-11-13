@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ClipboardEvent, type DragEvent } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -71,7 +72,39 @@ export default function AgentPanel() {
     importWebCode,
     clearChat,
     stop,
-  } = useAgentStore();
+  } = useAgentStore(
+    // Selectors fins: amb el store sencer, qualsevol canvi d'estat (tasques,
+    // usage, altres xats…) re-renderitzava tot el panell. Ací només es
+    // subscriu als camps que es pinten; les accions són referències estables.
+    useShallow((st) => ({
+      backends: st.backends,
+      sessions: st.sessions,
+      activeId: st.activeId,
+      refreshBackends: st.refreshBackends,
+      newChat: st.newChat,
+      forkChat: st.forkChat,
+      closeChat: st.closeChat,
+      setActive: st.setActive,
+      setChatProvider: st.setChatProvider,
+      setChatModel: st.setChatModel,
+      setChatExpert: st.setChatExpert,
+      setChatPlatform: st.setChatPlatform,
+      send: st.send,
+      enqueue: st.enqueue,
+      dequeue: st.dequeue,
+      plan: st.plan,
+      quick: st.quick,
+      apply: st.apply,
+      scaffold: st.scaffold,
+      materialize: st.materialize,
+      createStructure: st.createStructure,
+      pushStep: st.pushStep,
+      appendStream: st.appendStream,
+      importWebCode: st.importWebCode,
+      clearChat: st.clearChat,
+      stop: st.stop,
+    }))
+  );
 
   // ── Història de xats: NOMÉS es mostren els del projecte actual ─────────
   // Els chats d'altres projectes no es barregen aquí (simplicitat: el calaix
@@ -102,21 +135,22 @@ export default function AgentPanel() {
   // cal una etiqueta curta; el detall complet viu al tooltip del badge.
   const ctxCount = contextInfo?.match(/(\d+)\s+fitxers/)?.[1];
   const ctxLabel = contextInfo?.startsWith("⚠️")
-    ? "Sense codi del projecte"
+    ? t("agent.ctxNone")
     : ctxCount
-    ? `Codi del projecte · ${ctxCount} fitxers`
+    ? t("agent.ctxFiles", { n: ctxCount })
     : null;
 
-  const {
-    models,
-    selectedModel,
-    pulling,
-    ollamaRunning,
-    selectModel,
-    pullModel,
-    loadModels,
-    checkOllama,
-  } = useAIStore();
+  const { models, pulling, ollamaRunning, pullModel, loadModels, checkOllama } =
+    useAIStore(
+      useShallow((st) => ({
+        models: st.models,
+        pulling: st.pulling,
+        ollamaRunning: st.ollamaRunning,
+        pullModel: st.pullModel,
+        loadModels: st.loadModels,
+        checkOllama: st.checkOllama,
+      }))
+    );
 
   // Mode expert PER XAT: si en triem un, les tasques d'aquest xat les fa
   // l'expert (rol + model propis). Cada xat pot treballar amb un d'diferent.
@@ -222,8 +256,8 @@ export default function AgentPanel() {
       .map((l) => l.trim())
       .filter(Boolean)
       .pop();
-    if (fase === "thinking" && línia) return `Pensant… ${línia}`;
-    if (fase === "streaming" && línia) return `Generant… ${línia}`;
+    if (fase === "thinking" && línia) return t("agent.liveThinking", { line: línia });
+    if (fase === "streaming" && línia) return t("agent.liveGenerating", { line: línia });
     return "";
   })();
   const liveWhatShort =
@@ -233,7 +267,7 @@ export default function AgentPanel() {
   const ramPct = memPercent(mem);
   const ramChip =
     ramPct === null || !mem ? null : (
-      <span className="ap-ram" title={`RAM usada ${formatBytes(mem.used)} de ${formatBytes(mem.total)}`}>
+      <span className="ap-ram" title={t("agent.ramTitle", { used: formatBytes(mem.used), total: formatBytes(mem.total) })}>
         · RAM {ramPct}%
       </span>
     );
@@ -295,7 +329,7 @@ export default function AgentPanel() {
       const queued = [text, ...imgs].filter(Boolean).join("\n") + attachBlock;
       enqueue(queued);
     } else {
-      const base = text || (imgs.length ? "(imatge adjunta)" : "(fitxer adjunt)");
+      const base = text || (imgs.length ? t("agent.attachImage") : t("agent.attachFile"));
       void send(base + attachBlock, undefined, imgs);
     }
   };
@@ -567,7 +601,7 @@ export default function AgentPanel() {
             title={t("agent.providerHint")}
           >
             <option value="">{t("agent.providerGlobal")}</option>
-            <option value="ollama">Ollama (local)</option>
+            <option value="ollama">{t("agent.ollamaLocal")}</option>
             {providers
               .filter((p) => p.enabled && p.id !== "ollama")
               .map((p) => (
@@ -662,10 +696,10 @@ export default function AgentPanel() {
             <button
               className="btn sm ap-web-import"
               disabled={running}
-              title="Ara el codi que ha generat la IA del navegador i descàrrega'l al projecte (també crea les carpetes que ha dit)."
+              title={t("agent.webImportHint")}
               onClick={() => void importWebCode(activeId)}
             >
-              <Download size={12} /> Importa el codi
+              <Download size={12} /> {t("agent.webImport")}
             </button>
           )}
         </div>
@@ -694,29 +728,29 @@ export default function AgentPanel() {
             className="ap-platform"
             title={
               sess.platform === "android"
-                ? "Android natiu: Kotlin + Jetpack Compose"
+                ? t("agent.platAndroidHint")
                 : sess.platform === "ios"
-                ? "iOS natiu: Swift + SwiftUI"
-                : "Escriptori: Python, JS, Rust i qualsevol altre llenguatge"
+                ? t("agent.platIosHint")
+                : t("agent.platDesktopHint")
             }
           >
             <button
               className={"ap-plat" + (sess.platform === "desktop" ? " active" : "")}
               onClick={() => setChatPlatform(activeId, "desktop")}
             >
-              <Monitor size={12} /> Escriptori
+              <Monitor size={12} /> {t("agent.platDesktop")}
             </button>
             <button
               className={"ap-plat" + (sess.platform === "android" ? " active" : "")}
               onClick={() => setChatPlatform(activeId, "android")}
             >
-              <Smartphone size={12} /> Android
+              <Smartphone size={12} /> {t("agent.platAndroid")}
             </button>
             <button
               className={"ap-plat" + (sess.platform === "ios" ? " active" : "")}
               onClick={() => setChatPlatform(activeId, "ios")}
             >
-              <Apple size={12} /> iOS
+              <Apple size={12} /> {t("agent.platIos")}
             </button>
           </div>
         </div>
@@ -761,7 +795,7 @@ export default function AgentPanel() {
       >
         {dragOver && (
           <div className="ap-dropzone">
-            <Paperclip size={14} /> Solta ací: imatges com a adjunts, fitxers com a context
+            <Paperclip size={14} /> {t("agent.dropHint")}
           </div>
         )}
         {/* Miniatures de les imatges + xips dels fitxers adjunts pendents. */}
@@ -780,7 +814,7 @@ export default function AgentPanel() {
                 <button
                   className="ap-thumb-x"
                   onClick={() => setPendingFiles((x) => x.filter((_, k) => k !== i))}
-                  title="Treu aquest fitxer"
+                  title={t("agent.removeFile")}
                 >
                   <X size={10} />
                 </button>
@@ -791,7 +825,7 @@ export default function AgentPanel() {
         )}
         <textarea
           ref={promptRef}
-          placeholder={t("agent.promptPlaceholder") + " · ⌘V imatges · arrossega fitxers ací"}
+          placeholder={t("agent.promptPlaceholder") + t("agent.composerSuffix")}
           value={prompt}
           onChange={(e) => {
             setPrompt(e.target.value);
@@ -814,10 +848,7 @@ export default function AgentPanel() {
                 "ap-ctx-badge" +
                 (contextInfo && contextInfo.startsWith("⚠️") ? " warn" : "")
               }
-              title={
-                contextInfo ??
-                "La IA rep sempre el codi del projecte obert: les rutes de tots els fitxers i el contingut dels que hi caben."
-              }
+              title={contextInfo ?? t("agent.ctxAlwaysHint")}
             >
               <FolderTree size={12} />
               {ctxLabel || t("agent.ctxAlways")}
@@ -827,7 +858,7 @@ export default function AgentPanel() {
             <button
               className="icon-btn"
               onClick={() => fileRef.current?.click()}
-              title="Adjunta un fitxer: imatges es mostren al xat; codi/documents s'envien com a context"
+              title={t("agent.attachHint")}
             >
               <Paperclip size={13} />
             </button>
@@ -846,9 +877,9 @@ export default function AgentPanel() {
               onClick={() => {
                 const root = useWorkspaceStore.getState().root;
                 if (root) void invoke("open_externally", { path: root }).catch(() => undefined);
-                else setAttachErr("No hi ha cap projecte obert.");
+                else setAttachErr(t("agent.noProject"));
               }}
-              title="Obri la carpeta del projecte amb l'aplicació per defecte"
+              title={t("agent.openFolderHint")}
             >
               <FolderOpen size={13} />
             </button>
@@ -1108,21 +1139,23 @@ export default function AgentPanel() {
                   className="chat-usage"
                   title={
                     m.usage.contextWindow > 0
-                      ? `Context del model: ${m.usage.contextWindow.toLocaleString("ca")} tokens`
+                      ? t("agent.usageContextWindow", { n: m.usage.contextWindow.toLocaleString("ca") })
                       : undefined
                   }
                 >
                   <Gauge size={11} />
                   <span>
-                    {m.usage.input.toLocaleString("ca")} entrada ·{" "}
-                    {m.usage.output.toLocaleString("ca")} sortida
+                    {m.usage.input.toLocaleString("ca")} {t("agent.usageInput")} ·{" "}
+                    {m.usage.output.toLocaleString("ca")} {t("agent.usageOutput")}
                   </span>
                   {m.usage.contextWindow > 0 && (
                     <>
                       <span className="chat-usage-sep">·</span>
                       <span>
-                        {m.usage.contextUsedPct.toFixed(0)}% del context (
-                        {m.usage.contextWindow.toLocaleString("ca")})
+                        {t("agent.usageContextPct", {
+                          pct: m.usage.contextUsedPct.toFixed(0),
+                          window: m.usage.contextWindow.toLocaleString("ca"),
+                        })}
                       </span>
                       <span className="chat-usage-bar" aria-hidden>
                         <span
@@ -1146,9 +1179,9 @@ export default function AgentPanel() {
                   a fitxer, sense eixir del xat. */}
               {!m.error && m.text && (
                 <div className="chat-copy-row">
-                  <CopyButton text={m.text} label="Resposta" />
+                  <CopyButton text={m.text} label={t("agent.copyResponse")} />
                   {m.thinking && showThinking && (
-                    <CopyButton text={m.thinking} label="Raonament" />
+                    <CopyButton text={m.thinking} label={t("agent.copyReasoning")} />
                   )}
                   <SaveButton text={m.text} suggestedName="resposta-ia.md" />
                   {/* Fork des de la resposta: continua a partir d'aquí amb una
@@ -1183,9 +1216,9 @@ export default function AgentPanel() {
                   className="btn sm chat-materialize"
                   disabled={running}
                   onClick={() => void importWebCode(activeId)}
-                  title="Ara el codi que ha generat la IA del navegador i descàrrega'l al projecte (amb les carpetes que ha dit)."
+                  title={t("agent.webImportMsgHint")}
                 >
-                  <Download size={12} /> Importa el codi del navegador
+                  <Download size={12} /> {t("agent.webImportMsg")}
                 </button>
               )}
               {/* Creació a mà: parteix de les rutes que la IA recomana (també
@@ -1358,6 +1391,7 @@ function useImageDataUrl(path: string): string | null {
 /** Imatge dins del xat: previsualització + copiar al porta-retalls + mostrar
     al Finder/explorador. Els models amb visió la reben si l'usuari l'adjunta. */
 function ChatImage({ path }: { path: string }) {
+  const { t } = useT();
   const url = useImageDataUrl(path);
   const name = path.split(/[\\/]/).pop() ?? path;
 
@@ -1394,23 +1428,23 @@ function ChatImage({ path }: { path: string }) {
         <button
           className="btn sm ghost"
           onClick={() => void copyImage()}
-          title="Copia la imatge al porta-retalls"
+          title={t("agent.copyImageHint")}
         >
-          <Copy size={11} /> Copiar
+          <Copy size={11} /> {t("agent.copyImage")}
         </button>
         <button
           className="btn sm ghost"
           onClick={() => void invoke("reveal_in_finder", { path }).catch(() => undefined)}
-          title="Mostra al Finder / explorador de fitxers"
+          title={t("agent.revealHint")}
         >
-          <FolderOpen size={11} /> Mostra
+          <FolderOpen size={11} /> {t("agent.reveal")}
         </button>
         <button
           className="btn sm ghost"
           onClick={() => void invoke("open_externally", { path }).catch(() => undefined)}
-          title="Obri amb l'aplicació per defecte (exportar a un altre programa)"
+          title={t("agent.openExternHint")}
         >
-          <ExternalLink size={11} /> Obri
+          <ExternalLink size={11} /> {t("agent.openExtern")}
         </button>
       </figcaption>
     </figure>
@@ -1419,11 +1453,12 @@ function ChatImage({ path }: { path: string }) {
 
 /** Miniatura d'una imatge adjunta pendent d'enviar, amb botó per treure-la. */
 function ChatThumb({ path, onRemove }: { path: string; onRemove: () => void }) {
+  const { t } = useT();
   const url = useImageDataUrl(path);
   return (
     <span className="ap-thumb" title={path}>
       {url ? <img src={url} alt="" /> : <ImageOff size={14} />}
-      <button className="ap-thumb-x" onClick={onRemove} title="Treu aquesta imatge">
+      <button className="ap-thumb-x" onClick={onRemove} title={t("agent.removeImage")}>
         <X size={10} />
       </button>
     </span>

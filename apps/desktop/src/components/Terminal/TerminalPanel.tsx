@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { ChevronDown, Eraser, Square, Terminal as TerminalIcon } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useT } from "../../i18n";
@@ -13,7 +14,15 @@ export default function TerminalPanel() {
   const { t } = useT();
   const open = useUIStore((s) => s.terminalOpen);
   const setOpen = useUIStore((s) => s.setTerminalOpen);
-  const { lines, running, history, run, clear } = useTerminalStore();
+  const { lines, running, history, run, clear } = useTerminalStore(
+    useShallow((st) => ({
+      lines: st.lines,
+      running: st.running,
+      history: st.history,
+      run: st.run,
+      clear: st.clear,
+    }))
+  );
 
   const [value, setValue] = useState("");
   const [histIdx, setHistIdx] = useState(-1);
