@@ -3,12 +3,9 @@
 Totes les releases amb els seus binaris: <https://github.com/jpuigbert/noorbit/releases>.
 Les notes completes de cada release són a la pàgina del release corresponent.
 
-## 0.71.8-alpha (2026-11-12)
+## 0.71.9-alpha (2026-11-13)
 
-**Estabilitat, integritat i qualitat — auditoria de codi + importació de codi web fiable**
-
-- **Hugging Bay, destí a triar**: el destí de la descàrrega es pot triar **directament des del modal** («Tria carpeta / disc extern…»): els models GGUF es baixen a un disc extern (USB/HDD) sense passar per IA ▸ Models, amb botó per tornar al destí per defecte.
-- **Importar codi del web, fiable**: l'extracció ja no depèn del títol del document — amb `eval_with_callback` de Tauri 2 el valor torna DIRECTAMENT a Rust (sense curses, sense límit de temps i la pàgina no es queda amb el títol esborrat); xarxa de seguretat per a pàgines sense `<pre><code>` (molts xats web renderitzen el codi en `<div class=language-…>` o en text entre clausilles), reintents (4 intents en 12 s) per a les pàgines que tarden a pintar, errors de l'script com a JSON (a Windows les exceptions no arriben al callback) i, quan no hi ha cap bloc, missatge útil (esperar que la IA acabi d'escriure, obrir «Veure codi» o prémer-ho de nou).
+**Auditoria de codi integral — fiabilitat, qualitat i UX**
 
 *Correccions de les auditories de codi:*
 - *fitxers: cursa en cadena a `loadFile` (dues lectures ràpides podien fer que l'editor mostrés i **desés** el fitxer equivocat); avisos visibles (toasts) per a desats, proveïdors i descàrregues de models que fallaven en silenci.*
@@ -28,6 +25,15 @@ Les notes completes de cada release són a la pàgina del release corresponent.
 - *estabilitat de la interfície (React #185): la migració a `t()` del renderitzador Markdown del xat (`ChatMarkdown`) havia corromput una expressió regular (salts de línia literals dins de les classes `[^…]` → «Unterminated regular expression literal»), que trencava la compilació i la pantalla en pintar; l'expressió s'ha restaurat. Amb els selectors estables (`useShallow`), la interfície ja no cau en el bucle infinit de re-render («Maximum update depth exceeded», #185). Typecheck, lint i tests en verd.*
 - *Hugging Bay, cua de descàrregues*: es poden **encuar múltiples models** (una en curs, la resta en espera) i **cancel·lar** cada descàrrega (atura el backend i esborra el «.part»); el modal mostra l'**espai lliure del disc destí** i avisa ABANS de baixar si el model no hi cap (p. ex. un GGUF de 247 GB en un USB petit). La cua sobreviu al tancament del diàleg (el modal ja no es desmunta) i el progrés en viu ara és visible per a cada model (claus d'event unificades `huggingbay:<id>`). Typecheck, lint, tests i `cargo check` en verd.*
 - *Skills externes, verificació abans d'instal·lar*: una skill és codi que l'agent pot executar, així que abans d'instal·lar-la des de GitHub/URL/zip/carpeta es mostra un **resum del que conté** (blocs de codi, fitxers executables i senyals de risc: shell, sudo, ordres destructives, xarxa, `curl … | sh`, eval) i cal **confirmació explícita**. La preview llegeix la font en una carpeta temporal sense instal·lar res (mateixos límits de mida/HTTPS) i l'esborra després; nou comandament `skills_preview` + test del detector de riscos. Typecheck, lint, tests i `cargo test` (37) en verd.*
+
+---
+
+## 0.71.8-alpha (2026-11-12)
+
+**Hugging Bay amb destí a triar + importació de codi web fiable**
+
+- **Hugging Bay, destí a triar**: el destí de la descàrrega es pot triar **directament des del modal** («Tria carpeta / disc extern…»): els models GGUF es baixen a un disc extern (USB/HDD) sense passar per IA ▸ Models, amb botó per tornar al destí per defecte.
+- **Importar codi del web, fiable**: l'extracció ja no depèn del títol del document — amb `eval_with_callback` de Tauri 2 el valor torna DIRECTAMENT a Rust (sense curses, sense límit de temps i la pàgina no es queda amb el títol esborrat); xarxa de seguretat per a pàgines sense `<pre><code>` (molts xats web renderitzen el codi en `<div class=language-…>` o en text entre clausilles), reintents (4 intents en 12 s) per a les pàgines que tarden a pintar, errors de l'script com a JSON (a Windows les exceptions no arriben al callback) i, quan no hi ha cap bloc, missatge útil (esperar que la IA acabi d'escriure, obrir «Veure codi» o prémer-ho de nou).
 
 ---
 
