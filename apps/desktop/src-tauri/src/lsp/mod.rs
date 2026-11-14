@@ -36,6 +36,7 @@ pub fn known_servers() -> Vec<LspServer> {
         ("typescript", "typescript-language-server"),
         ("python", "pylsp"),
         ("c", "clangd"),
+        ("go", "gopls"),
     ]
     .iter()
     .map(|(lang, bin)| LspServer {
@@ -59,6 +60,7 @@ fn server_for(ext: &str) -> Option<(&'static str, &'static str, &'static [&'stat
         "py" | "pyi" => Some(("python", "pylsp", &[])),
         "c" | "h" => Some(("c", "clangd", &[])),
         "cpp" | "cc" | "cxx" | "hpp" => Some(("cpp", "clangd", &[])),
+        "go" => Some(("go", "gopls", &[])),
         _ => None,
     }
 }

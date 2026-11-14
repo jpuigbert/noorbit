@@ -120,6 +120,7 @@ export default function MenuBar() {
       { label: t("menu.publishTheme"), action: act("ai.publishTheme") },
       { label: t("menu.remoteServer"), action: act("ai.remoteServer") },
       { label: t("plugins.title"), action: act("ai.plugins") },
+      { label: t("menu.vscodeImport"), action: act("ai.vscodeImport") },
       { sep: true, label: "" },
       { label: t("rightPanel.agent"), action: act("ai.agent") },
       { label: t("rightPanel.computer"), action: act("ai.computer") },

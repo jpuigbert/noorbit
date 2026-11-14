@@ -7,7 +7,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import * as ed from "./editor/editorApi";
 import { saveCurrentFile, useWorkspaceStore } from "./stores/workspaceStore";
 import { useUIStore } from "./stores/uiStore";
-import { toastSuccess, toastError } from "./stores/toastStore";
+import { toastSuccess, toastError, toastInfo } from "./stores/toastStore";
 import { usePreviewStore } from "./stores/previewStore";
 
 const rawActions = {
@@ -122,6 +122,17 @@ const rawActions = {
   // apareix a Ajuda ▸ … i també es pot cercar amb ⌘P («benvinguda»).
   "view.onboarding": () => useUIStore.getState().setShowOnboarding(true),
   "ai.plugins": () => useUIStore.getState().setShowPlugins(true),
+  // Importa les extensions instal·lades de VS Code (i variants) com a skills.
+  "ai.vscodeImport": async () => {
+    const rep = await invoke<{ scanned: number; imported: number; details: string[] }>(
+      "vscode_import_skills"
+    );
+    if (rep.imported > 0) {
+      toastSuccess("Importades " + rep.imported + " extensions de VS Code com a skills.");
+    } else {
+      toastInfo(rep.details.join(" · ") || "Cap extensió de VS Code trobada.");
+    }
+  },
   "ai.agent": () => usePreviewStore.getState().setRightTab("agent"),
   // Sub-pestanyes DINS de la pestanya Agent (les «Integracions» ja no són
   // una pestanya a part: sempre es veuen servides al costat del xat).
@@ -228,6 +239,7 @@ export const commandList: CommandDef[] = [
   { id: "ai.remoteServer", labelKey: "menu.remoteServer" },
   { id: "view.onboarding", labelKey: "menu.replayOnboarding" },
   { id: "ai.plugins", labelKey: "plugins.title" },
+  { id: "ai.vscodeImport", labelKey: "menu.vscodeImport" },
   { id: "ai.agent", labelKey: "rightPanel.agent" },
   { id: "ai.computer", labelKey: "rightPanel.computer" },
   { id: "ai.experts", labelKey: "rightPanel.experts" },
