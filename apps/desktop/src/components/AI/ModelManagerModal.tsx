@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
-import { X, Download, Trash2, RefreshCw, Check, Search, Cloud, Play, HardDrive, Zap, Globe, MemoryStick, Cpu, Film } from "lucide-react";
+import { X, Download, Trash2, RefreshCw, Check, Search, Cloud, Play, HardDrive, Zap, Globe, MemoryStick, Cpu, Film, Plus } from "lucide-react";
 import { useT } from "../../i18n";
 import { useUIStore } from "../../stores/uiStore";
-import { useAIStore, OLLAMA_CLOUD_MODELS, OLLAMA_CLOUD_URL } from "../../stores/aiStore";
+import { useAIStore, allCloudModels, addCustomCloudModel, OLLAMA_CLOUD_URL } from "../../stores/aiStore";
 import { useProviderStore, isOllamaCloudProvider } from "../../stores/providerStore";
 
 function fmtSize(bytes: number): string {
@@ -188,6 +188,7 @@ export default function ModelManagerModal() {
   // El catàleg del núvol és molt més llarg que la llista base: qualsevol nom
   // allotjat a ollama.com es pot usar sense baixar-lo res al disc.
   const [cloudCustom, setCloudCustom] = useState("");
+  const [cloudCustomAdd, setCloudCustomAdd] = useState("");
   const providers = useProviderStore((s) => s.providers);
   const activeProvider = useProviderStore((s) => s.active);
   const loadProviders = useProviderStore((s) => s.load);
@@ -282,6 +283,18 @@ export default function ModelManagerModal() {
 
   // Connecta/actualitza el proveïdor del núvol d'Ollama amb el model triat i
   // l'activa. Reutilitza el sistema de proveïdors (compatible amb OpenAI).
+  const handleAddCloudModel = () => {
+    const n = cloudCustomAdd.trim();
+    if (!n) return;
+    const added = addCustomCloudModel(n);
+    setCloudCustomAdd("");
+    if (added) {
+      // Força el refresc del llistat (el component es torna a renderitzar
+      // amb allCloudModels() que llegeix del localStorage).
+      setCloudCustomAdd("");
+    }
+  };
+
   const connectOllamaCloud = async (model: string) => {
     const existing = cloudProvider;
     const token = cloudKey.trim();
@@ -589,7 +602,7 @@ export default function ModelManagerModal() {
               </button>
             </div>
             <div className="mm-cloud-list">
-              {OLLAMA_CLOUD_MODELS.map((m) => {
+              {allCloudModels().map((m) => {
                 // Només actiu si el núvol està seleccionat I aquest n'és el
                 // model. Clicar-lo de nou el desactiva (torna a Ollama local).
                 const isActive =
@@ -614,6 +627,28 @@ export default function ModelManagerModal() {
                   </div>
                 );
               })}
+            </div>
+            {/* AFEGIR un model nou del núvol d'Ollama que no estigui a la
+                llista predefinida (p. ex. «inkling-2-small:cloud»): es desa
+                a la llista personal i queda disponible per sempre. */}
+            <div className="mm-custom" style={{ marginTop: 6 }}>
+              <input
+                placeholder={t("ai.cloudFreeCustomPh")}
+                value={cloudCustomAdd}
+                onChange={(e) => setCloudCustomAdd(e.target.value)}
+                onKeyDown={(e) =>
+                  e.key === "Enter" &&
+                  cloudCustomAdd.trim() &&
+                  handleAddCloudModel()
+                }
+              />
+              <button
+                className="btn sm"
+                disabled={!cloudCustomAdd.trim()}
+                onClick={handleAddCloudModel}
+              >
+                <Plus size={12} /> {t("ai.cloudFreeAdd")}
+              </button>
             </div>
             {cloudIsActive && (
               <p className="lp-hint" style={{ marginTop: 6 }}>

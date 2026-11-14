@@ -59,7 +59,57 @@ export const OLLAMA_CLOUD_MODELS: CloudModel[] = [
   { name: "llama-3.3:70b", description: "General de gran escala." },
   { name: "gemma-3:27b", description: "Multimodal lleuger de Google." },
   { name: "qwen3-coder:30b", description: "Especialista en codi." },
+  // Thinking Machines — Inkling 2 Small (594B MoE, 1M de context, ZDR).
+  { name: "inkling-2-small:cloud", description: "Thinking Machines: visió, OCR, agents, raonament financer (1M context, ZDR)." },
 ];
+
+/// Llista PERSISTENT dels models del núvol d'Ollama que l'usuari ha afegit a
+/// mà (perquè no estaven a la llista predefinida). Es desa al localStorage
+/// i es fusiona amb `OLLAMA_CLOUD_MODELS` a `allCloudModels()`.
+const LS_CUSTOM_CLOUD = "noorbit.ollamaCloud.custom";
+
+export function loadCustomCloudModels(): CloudModel[] {
+  try {
+    const raw = localStorage.getItem(LS_CUSTOM_CLOUD);
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as unknown;
+    return Array.isArray(arr) ? (arr as CloudModel[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCustomCloudModels(list: CloudModel[]): void {
+  try {
+    localStorage.setItem(LS_CUSTOM_CLOUD, JSON.stringify(list));
+  } catch {
+    /* sense persistència */
+  }
+}
+
+/// Tots els models del núvol d'Ollama disponibles: els predefinits més els
+/// que l'usuari ha afegit (sense duplicats).
+export function allCloudModels(): CloudModel[] {
+  const merged = [...OLLAMA_CLOUD_MODELS];
+  for (const c of loadCustomCloudModels()) {
+    if (!merged.some((m) => m.name === c.name)) merged.push(c);
+  }
+  return merged;
+}
+
+/// Afegeix un model del núvol d'Ollama a la llista personalitzada si no hi
+/// és ja. Retorna true si s'ha afegit (false si ja existia).
+export function addCustomCloudModel(name: string, description?: string): boolean {
+  const n = name.trim();
+  if (!n) return false;
+  const list = loadCustomCloudModels();
+  if (list.some((m) => m.name === n) || OLLAMA_CLOUD_MODELS.some((m) => m.name === n)) {
+    return false;
+  }
+  list.push({ name: n, description: description?.trim() || "Model del núvol d'Ollama afegit per l'usuari." });
+  saveCustomCloudModels(list);
+  return true;
+}
 
 /// Un model que Ollama té carregat a la memòria (RAM/VRAM) ara mateix.
 export interface LoadedModel {

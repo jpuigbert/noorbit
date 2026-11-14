@@ -819,6 +819,7 @@
     "cloudFreeCustomPh": "Un altre model del núvol pel nom (p. ex. qwen3-coder:48b)",
     "cloudKeyPh": "Clau d'API d'Ollama (opcional si ja la has posada)",
     "cloudFreeUse": "Usa",
+    "cloudFreeAdd": "Afegeix",
     "cloudFreeStop": "Desactiva",
     "cloudFreeActive": "Ollama Cloud és ara la IA activa.",
     "internetTitle": "Cerca a Internet (Hugging Face) — models que NO són a Ollama",

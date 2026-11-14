@@ -6,7 +6,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ListChecks, Zap, CheckCircle2, XCircle, Server, Download, RefreshCw, Cpu, UserCog, Send, Square, Brain, Boxes, X, Plus, Trash2, FolderPlus, FileDown, FolderTree, GitFork, Smartphone, Apple, Monitor, Copy, FolderOpen, ImageOff, Paperclip, ExternalLink, ChevronDown, Users, Gauge } from "lucide-react";
 import { useT } from "../../i18n";
 import { useAgentStore, useActiveChat, extractRecommendedPaths, extractChatImagePaths } from "../../stores/agentStore";
-import { useAIStore, OLLAMA_CLOUD_MODELS } from "../../stores/aiStore";
+import { useAIStore, allCloudModels } from "../../stores/aiStore";
 import { useExpertStore } from "../../stores/expertStore";
 import {
   useProviderStore,
@@ -637,10 +637,10 @@ export default function AgentPanel() {
                 <option value="">{t("agent.cloudModelNone")}</option>
               )}
               {cloudProvider?.model &&
-              !OLLAMA_CLOUD_MODELS.some((m) => m.name === cloudProvider.model) ? (
+              !allCloudModels().some((m) => m.name === cloudProvider.model) ? (
                 <option value={cloudProvider.model}>{cloudProvider.model}</option>
               ) : null}
-              {OLLAMA_CLOUD_MODELS.map((m) => (
+              {allCloudModels().map((m) => (
                 <option key={m.name} value={m.name}>
                   {m.name}
                 </option>

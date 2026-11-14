@@ -4,7 +4,7 @@ import { Plus, Trash2, Zap, Star, Pencil, Loader2, Power } from "lucide-react";
 import { useT } from "../../i18n";
 import HarnessSection from "./HarnessSection";
 import RemoteAiServerPanel from "./RemoteAiServerPanel";
-import { OLLAMA_CLOUD_MODELS } from "../../stores/aiStore";
+import { allCloudModels } from "../../stores/aiStore";
 import {
   useProviderStore,
   type ProviderInput,
@@ -298,7 +298,7 @@ export default function ProviderManager() {
             placeholder="gpt-4o-mini"
           />
           <datalist id="noorbit-cloud-models">
-            {OLLAMA_CLOUD_MODELS.map((m) => (
+            {allCloudModels().map((m) => (
               <option key={m.name} value={m.name} />
             ))}
           </datalist>
