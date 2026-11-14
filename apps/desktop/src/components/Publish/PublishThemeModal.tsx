@@ -61,6 +61,11 @@ export default function PublishThemeModal() {
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Fitxa del tema (preu i categoria; nom/versió/descripció venen del style.css).
+  const [price, setPrice] = useState("");
+  const [category, setCategory] = useState("");
+  const [productUrl, setProductUrl] = useState<string | null>(null);
+  const [editUrl, setEditUrl] = useState<string | null>(null);
 
   // Comptes de NoOrbit (el sistema de registre ja existent).
   const user = useAuthStore((s) => s.user);
@@ -128,19 +133,35 @@ export default function PublishThemeModal() {
       else await logIn(email, pass);
       setMsg(t("publish.accountVerified"));
     } catch (e) {
-      setErr(String(e));
+      // Els errors d'autenticació són claus i18n (p. ex.
+      // «account.errors.noAccount»): els traduïm, en lloc de mostrar la clau
+      // crua (que era el que passava abans).
+      setErr(t(String(e)));
     }
   };
 
   const upload = async () => {
     setErr(null);
     setMsg(null);
+    setProductUrl(null);
+    setEditUrl(null);
     if (!zip) {
       setErr(t("publish.needZip"));
       return;
     }
     setBusy("upload");
     try {
+      // Metadades de la fitxa: el nom/versió/descripció es treuen del style.css
+      // inspeccionat; el preu i la categoria els posa l'usuari.
+      const meta = {
+        name: info?.name ?? "",
+        price: parseFloat(price) || 0,
+        version: info?.version ?? "",
+        description: info?.description ?? "",
+        license: "GPL",
+        category: category.trim(),
+        productId: 0,
+      };
       // Amb credencials: API REST (autenticació bàsica). Sense: la SESSIÓ del
       // navegador (el que ha iniciat l'usuari al login del lloc).
       const res = await invoke<{
@@ -148,6 +169,9 @@ export default function PublishThemeModal() {
         message: string;
         attachmentId: number | null;
         url: string | null;
+        productId: number | null;
+        status: string | null;
+        editUrl: string | null;
       }>(
         wpUser.trim() && wpPass.trim() ? "theme_upload" : "theme_upload_session",
         {
@@ -155,9 +179,12 @@ export default function PublishThemeModal() {
           site,
           user: wpUser,
           appPassword: wpPass,
+          meta,
         }
       );
       setMsg(res.message);
+      if (res.url) setProductUrl(res.url);
+      if (res.editUrl) setEditUrl(res.editUrl);
       // Desa la connexió al compte per no tornar-ho a posar.
       if (wpUser.trim() && wpPass.trim()) {
         useAuthStore
@@ -273,6 +300,9 @@ export default function PublishThemeModal() {
           <section className="pb-step">
             <div className="pb-step-head">
               <span className="pb-num">2</span> {t("publish.step2")}
+              <span className="pb-hint-inline" style={{ fontSize: 10.5, color: "var(--text-3)", marginLeft: 8 }}>
+                {t("publish.step2Hint")}
+              </span>
               {user ? (
                 <span className="pb-user">
                   <CheckCircle2 size={12} /> {user.name} · {user.email}
@@ -347,6 +377,24 @@ export default function PublishThemeModal() {
                 value={wpPass}
                 onChange={(e) => setWpPass(e.target.value)}
               />
+              <input
+                className="pb-input"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder={t("publish.pricePh")}
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+              />
+              <input
+                className="pb-input"
+                placeholder={t("publish.categoryPh")}
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+              />
+            </div>
+            <div className="pb-note">
+              <Package size={11} /> {t("publish.directNote")}
             </div>
             <div className="pb-note">
               <Lock size={11} /> {t("publish.notePre")}<b>{t("publish.noteBold")}</b>{t("publish.notePost")}
@@ -369,7 +417,7 @@ export default function PublishThemeModal() {
                 ) : (
                   <CloudUpload size={12} />
                 )}
-                {busy === "upload" ? t("publish.uploading") : t("publish.uploadZip")}
+                {busy === "upload" ? t("publish.publishing") : t("publish.publishZip")}
               </button>
               <button className="btn sm" onClick={() => void openSales()}>
                 {t("publish.openSales")}
@@ -380,6 +428,24 @@ export default function PublishThemeModal() {
           {msg && (
             <div className="pb-msg ok">
               <CheckCircle2 size={13} /> {msg}
+            </div>
+          )}
+          {productUrl && (
+            <div className="pb-links">
+              <button
+                className="pb-link-btn"
+                onClick={() => void invoke("open_externally", { path: productUrl }).catch(() => undefined)}
+              >
+                {t("publish.publishedLink")}
+              </button>
+              {editUrl && (
+                <button
+                  className="pb-link-btn"
+                  onClick={() => void invoke("open_externally", { path: editUrl }).catch(() => undefined)}
+                >
+                  {t("publish.editLink")}
+                </button>
+              )}
             </div>
           )}
           {err && (

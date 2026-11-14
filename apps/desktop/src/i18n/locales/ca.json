@@ -348,6 +348,7 @@
     "zipReady": "ZIP a punt: {name}",
     "zipPrepared": "ZIP preparat: {name}",
     "step2": "El teu compte (opcional)",
+    "step2Hint": "Aquest és el compte de NoOrbit (al teu Mac), NO el de themes.thepuigberts.com. Serveix per recordar les credencials del lloc. Pots publicar sense ell: amb «Inicia sessió» (sessió del navegador).",
     "login": "Entrar",
     "signup": "Crear compte",
     "namePh": "Nom",
