@@ -38,6 +38,7 @@ import SetupCheckModal from "./components/SetupCheckModal";
 import HuggingBayModal from "./components/AI/HuggingBayModal";
 import PublishThemeModal from "./components/Publish/PublishThemeModal";
 const WordPressThemeModal = lazy(() => import("./components/WordPress/WordPressThemeModal"));
+const VsCodeExtensionsModal = lazy(() => import("./components/Extensions/VsCodeExtensionsModal"));
 import ComputerConfirmModal from "./components/Computer/ComputerConfirmModal";
 import CommandPalette from "./components/CommandPalette";
 import QuickOpen from "./components/QuickOpen";
@@ -386,6 +387,7 @@ export default function App() {
         {useUIStore((s) => s.showPublishTheme) && <PublishThemeModal />}
         {/* Menú «Crear tema de WordPress»: la IA en crea els fitxers inicials. */}
         {useUIStore((s) => s.showWpTheme) && <WordPressThemeModal />}
+        {useUIStore((s) => s.showVsCodeExtensions) && <VsCodeExtensionsModal />}
       </Suspense>
       <ComputerConfirmModal />
       {/* Detecció d'entorn a l'obrir: es mostra SOL si falta algun component

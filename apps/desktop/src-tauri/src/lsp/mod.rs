@@ -37,6 +37,11 @@ pub fn known_servers() -> Vec<LspServer> {
         ("python", "pylsp"),
         ("c", "clangd"),
         ("go", "gopls"),
+        ("java", "jdtls"),
+        ("ruby", "solargraph"),
+        ("php", "intelephense"),
+        ("lua", "lua-language-server"),
+        ("zig", "zls"),
     ]
     .iter()
     .map(|(lang, bin)| LspServer {
@@ -61,6 +66,11 @@ fn server_for(ext: &str) -> Option<(&'static str, &'static str, &'static [&'stat
         "c" | "h" => Some(("c", "clangd", &[])),
         "cpp" | "cc" | "cxx" | "hpp" => Some(("cpp", "clangd", &[])),
         "go" => Some(("go", "gopls", &[])),
+        "java" => Some(("java", "jdtls", &[])),
+        "rb" => Some(("ruby", "solargraph", &["stdio"])),
+        "php" => Some(("php", "intelephense", &["--stdio"])),
+        "lua" => Some(("lua", "lua-language-server", &["--stdio"])),
+        "zig" => Some(("zig", "zls", &[])),
         _ => None,
     }
 }

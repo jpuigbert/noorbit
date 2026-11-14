@@ -133,6 +133,7 @@ const rawActions = {
       toastInfo(rep.details.join(" · ") || "Cap extensió de VS Code trobada.");
     }
   },
+  "ai.vscodeExtensions": () => useUIStore.getState().setShowVsCodeExtensions(true),
   "ai.agent": () => usePreviewStore.getState().setRightTab("agent"),
   // Sub-pestanyes DINS de la pestanya Agent (les «Integracions» ja no són
   // una pestanya a part: sempre es veuen servides al costat del xat).
@@ -240,6 +241,7 @@ export const commandList: CommandDef[] = [
   { id: "view.onboarding", labelKey: "menu.replayOnboarding" },
   { id: "ai.plugins", labelKey: "plugins.title" },
   { id: "ai.vscodeImport", labelKey: "menu.vscodeImport" },
+  { id: "ai.vscodeExtensions", labelKey: "menu.vscodeExtensions" },
   { id: "ai.agent", labelKey: "rightPanel.agent" },
   { id: "ai.computer", labelKey: "rightPanel.computer" },
   { id: "ai.experts", labelKey: "rightPanel.experts" },

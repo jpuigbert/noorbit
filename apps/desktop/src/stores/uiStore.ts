@@ -34,6 +34,8 @@ interface UIState {
   showHuggingBay: boolean;
   /** Menú «Pujar»: publicació de temes WordPress al marketplace. */
   showPublishTheme: boolean;
+  /** Gestor d'extensions de VS Code instal·lades. */
+  showVsCodeExtensions: boolean;
   /** Menú «Crear tema de WordPress»: la IA en crea els fitxers inicials. */
   showWpTheme: boolean;
   showIaCatalog: boolean;
@@ -72,6 +74,7 @@ interface UIState {
   setShowModelManager: (v: boolean) => void;
   setShowHuggingBay: (v: boolean) => void;
   setShowPublishTheme: (v: boolean) => void;
+  setShowVsCodeExtensions: (v: boolean) => void;
   setShowWpTheme: (v: boolean) => void;
   setShowIaCatalog: (v: boolean) => void;
   setShowRemoteServer: (v: boolean) => void;
@@ -122,6 +125,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   showModelManager: false,
   showHuggingBay: false,
   showPublishTheme: false,
+  showVsCodeExtensions: false,
   showWpTheme: false,
   showIaCatalog: false,
   showRemoteServer: false,
@@ -152,6 +156,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setShowModelManager: (v) => set({ showModelManager: v }),
   setShowHuggingBay: (v) => set({ showHuggingBay: v }),
   setShowPublishTheme: (v) => set({ showPublishTheme: v }),
+  setShowVsCodeExtensions: (v) => set({ showVsCodeExtensions: v }),
   setShowWpTheme: (v) => set({ showWpTheme: v }),
   setShowIaCatalog: (v) => set({ showIaCatalog: v }),
   setShowRemoteServer: (v) => set({ showRemoteServer: v }),

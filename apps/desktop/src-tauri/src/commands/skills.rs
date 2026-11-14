@@ -46,7 +46,7 @@ struct VsCodeExt {
     snippets: Vec<(String, String)>, // (prefix, fragment)
 }
 
-fn sanitize_id(raw: &str) -> String {
+pub fn sanitize_id(raw: &str) -> String {
     raw.to_lowercase()
         .chars()
         .map(|c| {
@@ -61,7 +61,7 @@ fn sanitize_id(raw: &str) -> String {
 
 /// Llegeix un fitxer de snippets (pot tenir comentaries JSON, típic de VS Code):
 /// tolera `//` i `/* */` eliminant-los prèviament.
-fn parse_snippets_json(raw: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
+pub fn parse_snippets_json(raw: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
     let mut out = String::with_capacity(raw.len());
     let mut in_block = false;
     let mut in_line = false;

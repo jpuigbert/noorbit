@@ -13,6 +13,7 @@ pub mod plugins;
 pub mod portable;
 pub mod preview;
 pub mod skills;
+pub mod vscode_extensions;
 pub mod skills_store;
 pub mod system;
 pub mod term;

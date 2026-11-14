@@ -112,6 +112,7 @@
     "huggingBay": "Hugging Bay…",
     "publishTheme": "Pujar tema…",
     "vscodeImport": "Importa extensions de VS Code…",
+    "vscodeExtensions": "Extensions de VS Code…",
     "zip": "Zip",
     "zipWpTheme": "Empaqueta tema WordPress…"
   },
@@ -1076,6 +1077,13 @@
     "uninstall": "Desinstal·la",
     "enabled": "Actiu",
     "disabled": "Inactiu"
+  },
+  "vsc": {
+    "title": "Extensions de VS Code",
+    "intro": "Extensions instal·lades a VS Code (i Cursor, Qoder, Trae, Windsurf). NoOrbit en llegeix les contribucions (comandes, llenguatges, fragments, temes) i les importa com a skills per a la IA.",
+    "empty": "No s'ha trobat cap extensió de VS Code instal·lada.",
+    "importAll": "Importa-ho tot",
+    "imported": "importada"
   },
   "settings": {
     "title": "Configuració",
