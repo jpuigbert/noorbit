@@ -110,7 +110,9 @@
     "remoteServer": "Servidor d'IA remot…",
     "replayOnboarding": "Assistent de benvinguda (repeteix)",
     "huggingBay": "Hugging Bay…",
-    "publishTheme": "Pujar tema…"
+    "publishTheme": "Pujar tema…",
+    "zip": "Zip",
+    "zipWpTheme": "Empaqueta tema WordPress…"
   },
   "startup": {
     "title": "Benvingut a NoOrbit",
@@ -359,11 +361,11 @@
     "accountVerified": "Compte verificat.",
     "step3": "Publicació al marketplace",
     "sitePh": "Adreça del lloc",
-    "wpUserPh": "Usuari WordPress (opcional)",
+    "wpUserPh": "Usuari de themes.thepuigberts (opcional)",
     "wpPassPh": "Contrasenya d'aplicació (opcional)",
     "notePre": "Pots pujar amb la ",
     "noteBold": "sessió del navegador",
-    "notePost": " (prems «Inicia sessió», entra al lloc i torna): és el mànec més simple. Si prefereixes automàtic, posa l'USUARI de WordPress (no el correu) i una CONTRASENYA D'APLICACIÓ (WordPress ▸ «El teu perfil ▸ Contrasenyes d'aplicació» — NO la contrasenya normal d'entrada); prem «Comprova la connexió» per verificar-ho abans de pujar. Es desen al teu compte de NoOrbit, mai al servidor.",
+    "notePost": " (prems «Inicia sessió», entra al lloc i torna): és el mànec més simple. Si prefereixes automàtic, posa l'USUARI de themes.thepuigberts (no el correu) i una CONTRASENYA D'APLICACIÓ (WordPress ▸ «El teu perfil ▸ Contrasenyes d'aplicació» — NO la contrasenya normal d'entrada); prem «Comprova la connexió» per verificar-ho abans de pujar. Es desen al teu compte de NoOrbit, mai al servidor.",
     "openLogin": "Inicia sessió",
     "checkAuth": "Comprova la connexió",
     "uploading": "Pujant…",

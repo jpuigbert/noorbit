@@ -110,6 +110,9 @@ export default function MenuBar() {
       { sep: true, label: "" },
       { label: t("menu.gitPanel"), action: act("git.open") },
     ],
+    zip: [
+      { label: t("menu.zipWpTheme"), action: act("zip.wpTheme") },
+    ],
     ai: [
       { label: t("ai.manager"), action: act("ai.models") },
       { label: t("ai.catalog"), action: act("ai.catalog") },
@@ -142,6 +145,7 @@ export default function MenuBar() {
     run: t("menu.run"),
     terminal: t("menu.terminal"),
     ai: t("menu.ai"),
+    zip: t("menu.zip"),
     help: t("menu.help"),
   };
 

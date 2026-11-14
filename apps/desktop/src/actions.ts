@@ -3,15 +3,36 @@
 /// (⇧⌘P) i les dreceres de teclat.
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { open } from "@tauri-apps/plugin-dialog";
 import * as ed from "./editor/editorApi";
 import { saveCurrentFile, useWorkspaceStore } from "./stores/workspaceStore";
 import { useUIStore } from "./stores/uiStore";
+import { toastSuccess, toastError } from "./stores/toastStore";
 import { usePreviewStore } from "./stores/previewStore";
-import { toastError } from "./stores/toastStore";
 
 const rawActions = {
   // Fitxer
   "file.new": () => useWorkspaceStore.getState().newFile(),
+  // Zip — empaquetar temes WordPress per pujar-los al marketplace.
+  "zip.wpTheme": async () => {
+    const dir = await open({ directory: true, title: "Tria la carpeta del tema WordPress" });
+    if (typeof dir !== "string") return;
+    try {
+      const info = await invoke<{
+        name: string;
+        errors: string[];
+      }>("theme_inspect", { dir });
+      if (info.errors && info.errors.length > 0) {
+        toastError("El tema no està a punt: " + info.errors.join(" "));
+        return;
+      }
+      const [zip] = await invoke<[string, string]>("theme_build_zip", { dir });
+      await invoke("reveal_in_finder", { path: zip }).catch(() => undefined);
+      toastSuccess("ZIP creat: " + (zip.split("/").pop() ?? zip));
+    } catch (e) {
+      toastError("No s'ha pogut crear el ZIP", e);
+    }
+  },
   "file.newProject": () => useUIStore.getState().setShowNewProject(true),
   // Menú «Crear tema de WordPress»: la IA en crea els fitxers inicials.
   "file.newWpTheme": () => useUIStore.getState().setShowWpTheme(true),
@@ -203,6 +224,7 @@ export const commandList: CommandDef[] = [
   { id: "ai.catalog", labelKey: "ai.catalog" },
   { id: "ai.huggingBay", labelKey: "menu.huggingBay" },
   { id: "ai.publishTheme", labelKey: "menu.publishTheme" },
+  { id: "zip.wpTheme", labelKey: "menu.zipWpTheme" },
   { id: "ai.remoteServer", labelKey: "menu.remoteServer" },
   { id: "view.onboarding", labelKey: "menu.replayOnboarding" },
   { id: "ai.plugins", labelKey: "plugins.title" },
