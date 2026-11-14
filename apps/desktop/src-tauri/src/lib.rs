@@ -370,6 +370,7 @@ pub fn run() {
             commands::themes::theme_upload,
             commands::themes::theme_open_login,
             commands::themes::theme_upload_session,
+            commands::themes::theme_check_auth,
             commands::themes::theme_open_sales_page,
             // Proveïdors d'IA en línia (tokens)
             commands::api::ai_provider_list,

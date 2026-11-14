@@ -12,6 +12,7 @@ import {
   Package,
   UserPlus,
   X,
+  Zap,
 } from "lucide-react";
 import { useAuthStore } from "../../stores/authStore";
 import { useUIStore } from "../../stores/uiStore";
@@ -406,6 +407,37 @@ export default function PublishThemeModal() {
                 onClick={() => void openLogin()}
               >
                 <LogIn size={12} /> {t("publish.openLogin")}
+              </button>
+              {/* COMPROVA: verifica les credencials ABANS de pujar el ZIP, per
+                  saber si l'usuari i la contrasenya d'aplicació són correctes
+                  (i si el compte té permisos de venedor). */}
+              <button
+                className="btn sm"
+                disabled={busy !== null || !wpUser.trim() || !wpPass.trim()}
+                onClick={async () => {
+                  setErr(null);
+                  setMsg(null);
+                  setBusy("check");
+                  try {
+                    const r = await invoke<string>("theme_check_auth", {
+                      site,
+                      user: wpUser,
+                      appPassword: wpPass,
+                    });
+                    setMsg(r);
+                  } catch (e) {
+                    setErr(String(e));
+                  } finally {
+                    setBusy(null);
+                  }
+                }}
+              >
+                {busy === "check" ? (
+                  <Loader2 size={12} className="spin" />
+                ) : (
+                  <Zap size={12} />
+                )}
+                {t("publish.checkAuth")}
               </button>
               <button
                 className="btn primary sm"
