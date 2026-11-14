@@ -189,6 +189,7 @@ export default function ModelManagerModal() {
   // allotjat a ollama.com es pot usar sense baixar-lo res al disc.
   const [cloudCustom, setCloudCustom] = useState("");
   const [cloudCustomAdd, setCloudCustomAdd] = useState("");
+  const [cloudPreview, setCloudPreview] = useState(false);
   const providers = useProviderStore((s) => s.providers);
   const activeProvider = useProviderStore((s) => s.active);
   const loadProviders = useProviderStore((s) => s.load);
@@ -650,6 +651,61 @@ export default function ModelManagerModal() {
                 <Plus size={12} /> {t("ai.cloudFreeAdd")}
               </button>
             </div>
+            {/* PREVISUALITZACIÓ dels models més nous disponibles al núvol
+                d'Ollama: els cerca a ollama.com i els mostra amb un botó per
+                afegir-los a la llista personal. */}
+            <div className="mm-custom" style={{ marginTop: 8 }}>
+              <button
+                className="btn sm"
+                disabled={cloudLoading}
+                onClick={() => {
+                  setCloudPreview(true);
+                  void searchCloud("");
+                }}
+              >
+                <Search size={12} /> {t("ai.cloudPreviewBtn")}
+              </button>
+            </div>
+            {cloudPreview && (
+              <div className="mm-cloud-list" style={{ marginTop: 6 }}>
+                {cloudLoading ? (
+                  <div className="empty-hint">{t("common.loading")}</div>
+                ) : cloud.length === 0 ? (
+                  <div className="empty-hint">{t("ai.cloudEmpty")}</div>
+                ) : (
+                  cloud.map((c) => {
+                    const already = allCloudModels().some((m) => m.name === c.name);
+                    return (
+                      <div key={c.name} className="mm-row">
+                        <div className="mm-cloud-info">
+                          <div className="mm-name-static">{c.name}</div>
+                          {c.description && <div className="mm-desc">{c.description}</div>}
+                          {c.size ? (
+                            <div className="mm-desc" style={{ fontSize: 10 }}>
+                              {fmtSize(c.size)}
+                            </div>
+                          ) : null}
+                        </div>
+                        <button
+                          className={"btn sm" + (already ? "" : " primary")}
+                          disabled={already}
+                          onClick={() => {
+                            const added = addCustomCloudModel(c.name, c.description);
+                            if (added) {
+                              // Força re-render.
+                              setCloudPreview(true);
+                            }
+                          }}
+                        >
+                          {already ? <Check size={12} /> : <Plus size={12} />}{" "}
+                          {already ? t("ai.cloudFreeAdded") : t("ai.cloudFreeAdd")}
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
             {cloudIsActive && (
               <p className="lp-hint" style={{ marginTop: 6 }}>
                 {t("ai.cloudFreeActive")}
