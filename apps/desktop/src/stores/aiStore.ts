@@ -503,7 +503,7 @@ export const useAIStore = create<AIState>((set, get) => ({
     if (get().imageCpuProgress) return;
     set({ imageCpuProgress: "Iniciant la instal·lació del rodet d'imatges en CPU…" });
     const { listen } = await import("@tauri-apps/api/event");
-    const unlisten = await listen<{ message: string }>("ai://sd-model", (evt) =>
+    const unlisten = listen<{ message: string }>("ai://sd-model", (evt) =>
       set({ imageCpuProgress: evt.payload.message })
     );
     try {
