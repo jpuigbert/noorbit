@@ -99,6 +99,22 @@
 .hb-hint.err {
   color: var(--error);
 }
+.hb-hint.warn {
+  color: var(--warning);
+}
+.hb-badge-embed {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  color: var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+}
 
 /* ---- Paginació ---- */
 .hb-pager {

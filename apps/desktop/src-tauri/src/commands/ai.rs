@@ -1025,7 +1025,10 @@ fn register_local_provider(
             Some(item.base_url.clone()),
             Some(item.model.clone()),
             None,
-            None,
+            // L'autenticació S'HI POSA explícitament: és un servei LOCAL i no
+            // demana cap clau (amb «Bearer» buit alguns servidors hi responen
+            // amb 401 i el model sembla «que no es pot fer servir»).
+            Some(crate::api::AuthScheme::None),
             None,
             None,
             None,
@@ -1066,6 +1069,38 @@ pub async fn llamacpp_stop(state: State<'_, AppState>, port: u16) -> Result<bool
     let id = format!("llamacpp_{}", port);
     let _ = api.remove(&id);
     Ok(aturat)
+}
+
+/// ESBORRA un model GGUF instal·lat: atura el servidor que l'estigui
+/// servint (i en treu el proveïdor) i esborra el fitxer del disc. Sense
+/// això, un model baixat ocupava gigues per sempre i no hi havia manera
+/// de treure'l.
+#[command]
+pub async fn llamacpp_remove_model(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<String, String> {
+    // 1) Servidors que serveixen AQUEST model: s'aturen i el seu proveïdor
+    //    es treu de la llista (si no, quedaria apuntant a un servei mort).
+    let ports: Vec<u16> = crate::ai::llamacpp::servers()
+        .into_iter()
+        .filter(|s| s.path == path)
+        .map(|s| s.port)
+        .collect();
+    if !ports.is_empty() {
+        let mut api = state.api_manager.lock().map_err(|e| e.to_string())?;
+        for p in ports {
+            let _ = crate::ai::llamacpp::stop(p);
+            let _ = api.remove(&format!("llamacpp_{}", p));
+        }
+    }
+    // 2) El fitxer del disc.
+    crate::ai::llamacpp::remove_model_file(&path)?;
+    let nom = std::path::Path::new(&path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.clone());
+    Ok(format!("Model esborrat: {}", nom))
 }
 
 /// Cerca models GGUF a HUGGING BAY (huggingbay.xyz), el mirror verificat de
@@ -1158,6 +1193,16 @@ pub async fn hf_bay_install_native(
             serde_json::json!({ "model": format!("huggingbay:{}", id), "message": m }),
         );
     };
+    // Abans de baixar res: el model serveix per XATAR? Els d'embeddings
+    // ocupen centenars de MB i no serveixen per a res dins de NoOrbit.
+    {
+        let det = crate::ai::hf_bay::details(&http, &id, quant.as_deref())
+            .await
+            .map_err(|e| e.to_string())?;
+        if let Some(w) = crate::ai::hf_bay::avisa_si_no_xateja(&det.model) {
+            return Err(w);
+        }
+    }
     avisa("descarregant el model de Hugging Bay…");
     let (det, path) = crate::ai::hf_bay::fetch_gguf(&http, Some(&app), &id, quant.as_deref())
         .await
@@ -1175,7 +1220,7 @@ pub async fn hf_bay_install_native(
     // Engega el model i registra'l com a proveïdor del xat.
     avisa(&format!("engegant «{}»…", nom));
     let port = crate::ai::llamacpp::DEFAULT_PORT;
-    let (pid, name, base) = crate::ai::llamacpp::start(
+    let (prov_id, name, base) = crate::ai::llamacpp::start(
         &http,
         &path.to_string_lossy(),
         port,
@@ -1191,7 +1236,31 @@ pub async fn hf_bay_install_native(
         )
     })?;
     let model = name.rsplit("· ").next().unwrap_or("").trim().to_string();
-    register_local_provider(&state, &pid, &name, &base, &model)?;
+
+    // POT XATEJAR? Els models d'EMBEDDINGS (vectors) i altres tipus
+    // especialitzats s'engeuen igual, però tota petició de xat acaba amb
+    // «does not support logits computation»: l'usuari tria el model al
+    // selector i sembla que «no deixa fer-lo servir». Ho comprovem i, si no
+    // serveix, NO el registrem i ho expliquem.
+    avisa("comprovant que el model serveix per xatar…");
+    if let Some(false) = crate::ai::llamacpp::chat_capability(&http, port, &model).await {
+        // S'atura el servidor: no serveix per a res i ocupa memòria.
+        let _ = crate::ai::llamacpp::stop(port);
+        return Ok(BayDownloadResult {
+            ok: false,
+            model: None,
+            message: format!(
+                "«{}» és un model d'EMBEDDINGS: serveix per calcular vectors, no per xatejar. \
+                 L'he baixat al disc, però NO el registro com a IA (serva l'ha deixat aturat). \
+                 Per crear temes i altres tasques necessites un model DE XAT: baixa un de \
+                 text-generation (p. ex. «SmolLM2-135M-Instruct» o \
+                 «Qwen2.5-Coder-7B-Instruct-Q4_K_M»).",
+                nom
+            ),
+        });
+    }
+
+    register_local_provider(&state, &prov_id, &name, &base, &model)?;
 
     Ok(BayDownloadResult {
         ok: true,
@@ -1230,6 +1299,11 @@ pub async fn hf_bay_download(
     let det = crate::ai::hf_bay::details(&http, &id, quant.as_deref())
         .await
         .map_err(|e| e.to_string())?;
+    // Abans de baixar res: el model serveix per XATAR? (els d'embeddings
+    // ocupen centenars de MB i no serveixen per a res dins de NoOrbit).
+    if let Some(w) = crate::ai::hf_bay::avisa_si_no_xateja(&det.model) {
+        return Err(w);
+    }
     let file = det
         .recommended
         .clone()
@@ -1247,11 +1321,19 @@ pub async fn hf_bay_download(
         }),
     );
 
-    let dest_name = format!(
-        "{}-{}",
-        crate::ai::hf_bay::ollama_name(&det.model.repo),
-        file.path.rsplit('/').next().unwrap_or("model.gguf")
-    );
+    let base = crate::ai::hf_bay::ollama_name(&det.model.repo);
+    let file_name = file
+        .path
+        .rsplit('/')
+        .next()
+        .unwrap_or("model.gguf")
+        .to_string();
+    // Evitem el nom repetit («mxbai-embed-large-v1-mxbai-embed-large-v1-f16»).
+    let dest_name = if file_name.to_lowercase().starts_with(&base.to_lowercase()) {
+        file_name
+    } else {
+        format!("{}-{}", base, file_name)
+    };
     let path = crate::ai::hf_bay::download_file(
         &http,
         Some(&app),
@@ -1327,20 +1409,27 @@ pub async fn hf_bay_cancel(id: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Espai lliure al disc destí dels models GGUF (per avisar ABANS de baixar un
-/// model que no hi cap). `free_bytes` és null si el sistema no el pot donar.
+/// Espai al disc destí dels models GGUF: `free_bytes` (lliure, per avisar ABANS
+/// de baixar un model que no hi cap) i `total_bytes` (mida del disc/USB, per
+/// mostrar-la a la interfície). Tots dos són null si el sistema no els pot donar.
 #[derive(Debug, Clone, Serialize)]
 pub struct BayDiskSpace {
     pub dir: String,
     pub free_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
 }
 
 #[command]
 pub async fn hf_bay_disk_space() -> Result<BayDiskSpace, String> {
     let dir = crate::ai::hf_bay::models_dir();
+    let (free_bytes, total_bytes) = match crate::ai::hf_bay::disk_usage() {
+        Some((free, total)) => (Some(free), Some(total)),
+        None => (None, None),
+    };
     Ok(BayDiskSpace {
         dir: dir.to_string_lossy().to_string(),
-        free_bytes: crate::ai::hf_bay::free_space(),
+        free_bytes,
+        total_bytes,
     })
 }
 
@@ -1785,6 +1874,53 @@ pub async fn install_image_cpu() -> Result<String, String> {
 #[command]
 pub async fn image_cpu_info() -> Result<crate::imgen::SdInfo, String> {
     crate::imgen::sd_info()
+}
+
+/// ESTAL·LA I CONFIGURA EL RODET D'IMATGES EN CPU amb UN SOL BOTÓ:
+/// instal·la el motor (stable-diffusion.cpp) i baixa el model inicial
+/// (SD 1.5, ≈2 GB). L'usuari no ha de fer dos passos ni obrir cap Terminal:
+/// un clic i el xat ja pot generar imatges en local amb «IMG|».
+#[command]
+pub async fn image_cpu_setup(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    use tauri::Emitter;
+    let http = state.ai_manager.http_client();
+
+    // 1) El motor (binari «sd»).
+    if crate::imgen::sd_binary().is_none() {
+        let _ = app.emit(
+            "ai://sd-model",
+            serde_json::json!({ "message": "instal·lant el rodet d'imatges en CPU…" }),
+        );
+        crate::imgen::sd_install(&http, Some(&app))
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    // 2) El model inicial (si encara no n'hi ha cap).
+    if crate::imgen::sd_model_path().is_none() {
+        let _ = app.emit(
+            "ai://sd-model",
+            serde_json::json!({ "message": "baixant el model inicial (≈2 GB)…" }),
+        );
+        image_cpu_download_model(app.clone(), None, None)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    let info = crate::imgen::sd_info().map_err(|e| e.to_string())?;
+    Ok(format!(
+        "Rodet d'imatges en CPU a punt: {} (model: {}). El xat ja pot generar \
+         imatges en local amb «IMG|».",
+        if info.installed {
+            "instal·lat"
+        } else {
+            "sense instal·lar"
+        },
+        info.model.unwrap_or_else(|| "cap model".into())
+    ))
 }
 
 /// Model d'imatge per defecte per al rodet de CPU: SD 1.5 en safetensors.

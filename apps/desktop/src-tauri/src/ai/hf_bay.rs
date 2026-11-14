@@ -40,6 +40,32 @@ pub struct BayModel {
     pub downloads: Option<u64>,
     /// Enllaç de la fitxa al mirror.
     pub url: Option<String>,
+    /// Tipus del model segons el mirror («llm», «embedding», «vision»…).
+    pub kind: Option<String>,
+    /// Tasca del model («text-generation», «feature-extraction»…).
+    pub task: Option<String>,
+}
+
+impl BayModel {
+    /// El model serveix per XATAR? Els d'EMBEDDINGS (o de tasques
+    /// especialitzades) NO: el motor local els engega igual, però tota
+    /// petició de xat acaba amb «does not support logits computation» i
+    /// l'usuari acaba pensant que NoOrbit està trencat.
+    pub fn is_chat_model(&self) -> bool {
+        let k = self.kind.as_deref().unwrap_or("").trim().to_lowercase();
+        let t = self.task.as_deref().unwrap_or("").trim().to_lowercase();
+        if k == "embedding" || k == "embeddings" {
+            return false;
+        }
+        if t == "feature-extraction" || t == "embedding" || t == "embeddings" {
+            return false;
+        }
+        if k == "llm" || k == "text-generation" || t == "text-generation" {
+            return true;
+        }
+        // Sense dada del mirror: assumeix que sí (millor}x  no bloquejar).
+        true
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -146,31 +172,56 @@ pub async fn search_page(
     let _ = cur.take();
 
     // El mirror, en mode ordenat (sense text), retorna UN model per crida i un
-    // cursor numèric: per omplir la pàgina es fan diverses crides seguides.
+    // cursor numèric. A més, marca «downloadable» repositoris que NO tenen cap
+    // fitxer GGUF hostatjat (p. ex. Qwen3.8-…-NVFP4-MTP): abans apareixien al
+    // catàleg i fallaven en baixar-los («no té cap fitxer descargable»). Aquí
+    // es demanen candidats i NOMÉS es mostren els que `get_model` confirma que
+    // tenen un fitxer recomanat descarregable — la MATEIXA comprovació que fa
+    // la descàrrega. Es fan diverses crides seguides per omplir la pàgina.
     let mut models: Vec<BayModel> = Vec::new();
     let mut next: Option<String> = None;
     let mut total = 0u64;
-    for _ in 0..12 {
-        let sc = call_tool(http, "search_artifacts", args.clone()).await?;
-        total = sc.get("total").and_then(|v| v.as_u64()).unwrap_or(total);
-        let rows = parse_rows(&sc);
-        let got = rows.len();
-        models.extend(rows);
-        next = sc
-            .get("nextCursor")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string());
-        if models.len() >= limit {
+    let mut calls = 0usize;
+    while models.len() < limit && calls < 48 {
+        // Recull un lot de candidats (els que falten per omplir la pàgina).
+        let want = limit - models.len();
+        let mut batch: Vec<BayModel> = Vec::new();
+        while batch.len() < want && calls < 48 {
+            calls += 1;
+            let sc = call_tool(http, "search_artifacts", args.clone()).await?;
+            total = sc.get("total").and_then(|v| v.as_u64()).unwrap_or(total);
+            batch.extend(parse_rows(&sc));
+            next = sc
+                .get("nextCursor")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+            match &next {
+                Some(c) => args["cursor"] = serde_json::Value::String(c.clone()),
+                None => break,
+            }
+        }
+        if batch.is_empty() {
             break;
         }
-        match &next {
-            Some(c) => {
-                args["cursor"] = serde_json::Value::String(c.clone());
+        // Comprova EN PARAL·LEL quins candidats tenen fitxer descarregable.
+        let checks =
+            futures::future::join_all(batch.iter().map(|m| details(http, &m.id, None))).await;
+        for (m, d) in batch.iter().zip(checks) {
+            // Només s'amaga quan el mirror confirma que NO hi ha fitxer; un
+            // error transitori de xarxa no ha de buidar el catàleg.
+            let keep = match d {
+                Ok(det) => det.recommended.is_some(),
+                Err(_) => true,
+            };
+            if keep {
+                models.push(m.clone());
+                if models.len() >= limit {
+                    break;
+                }
             }
-            None => break,
         }
-        if got == 0 {
+        if next.is_none() {
             break;
         }
     }
@@ -240,9 +291,32 @@ fn parse_rows(sc: &Value) -> Vec<BayModel> {
             size,
             downloads,
             url,
+            kind: r
+                .get("type")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string()),
+            task: r
+                .get("task")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string()),
         });
     }
     out
+}
+
+/// Avís quan el model NO serveix per xatejar (embeddings i similars):
+/// `None` si el model és de xat.
+pub fn avisa_si_no_xateja(m: &BayModel) -> Option<String> {
+    if m.is_chat_model() {
+        return None;
+    }
+    Some(format!(
+        "«{}» NO és un model de xat: és d'EMBEDDINGS (serveix per calcular vectors, no per \
+         generar text). No serveix per crear temes ni per xatejar. Tria un model de \
+         text-generation (p. ex. «SmolLM2-135M-Instruct», «Qwen2.5-Coder-7B-Instruct» o \
+         «gemma-3-4b-it»).",
+        m.name
+    ))
 }
 
 /// Detalls d'un model: fitxer recomanat, quantitzacions i enllaç signat.
@@ -292,6 +366,14 @@ pub async fn details(
         size: sc.get("sizeBytes").and_then(|v| v.as_u64()),
         downloads: sc.get("downloadCount").and_then(|v| v.as_u64()),
         url: sc.get("url").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        kind: sc
+            .get("type")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string()),
+        task: sc
+            .get("task")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string()),
     };
 
     // El fitxer recomanat ve en «mainFile» (amb l'enllaç signat).
@@ -384,11 +466,21 @@ pub async fn fetch_gguf(
         .download_url
         .clone()
         .ok_or_else(|| anyhow!("El mirror no dona enllaç de descàrrega per a aquest model."))?;
-    let dest_name = format!(
-        "{}-{}",
-        ollama_name(&det.model.repo),
-        file.path.rsplit('/').next().unwrap_or("model.gguf")
-    );
+    let base = ollama_name(&det.model.repo);
+    let file_name = file
+        .path
+        .rsplit('/')
+        .next()
+        .unwrap_or("model.gguf")
+        .to_string();
+    // Evitem «mxbai-embed-large-v1-mxbai-embed-large-v1-f16.gguf»: si el
+    // fitxer ja comença pel nom del repositori, no l'hem de prefixar altre
+    // cop (el nom ha de ser llegible: és el que veu l'usuari a la llista).
+    let dest_name = if file_name.to_lowercase().starts_with(&base.to_lowercase()) {
+        file_name
+    } else {
+        format!("{}-{}", base, file_name)
+    };
     let path = download_file(http, app, id, &url, &dest_name, file.sha256.as_deref()).await?;
     Ok((det, path))
 }
@@ -471,9 +563,10 @@ pub fn request_cancel(id: &str) {
     cancel_token(id).store(true, Ordering::Relaxed);
 }
 
-/// Espai LLIURE (bytes) al disc on es desaran els models. Serveix per avisar
-/// ABANS de baixar un model enorme (p. ex. 247 GB) que no cap al disc/USB.
-pub fn free_space() -> Option<u64> {
+/// Espai (LLIURE, TOTAL) en bytes al disc on es desaran els models. El TOTAL
+/// serveix per mostrar la mida del disc/USB destí; el LLIURE, per avisar ABANS
+/// de baixar un model enorme (p. ex. 247 GB) que no hi cap.
+pub fn disk_usage() -> Option<(u64, u64)> {
     let dir = models_dir();
     // El directori pot no existir encara: pugem fins al pare que existeix.
     let mut p: &std::path::Path = dir.as_path();
@@ -483,18 +576,20 @@ pub fn free_space() -> Option<u64> {
             None => break,
         }
     }
-    disk_free(p)
+    disk_space(p)
 }
 
 #[cfg(unix)]
-fn disk_free(path: &std::path::Path) -> Option<u64> {
+fn disk_space(path: &std::path::Path) -> Option<(u64, u64)> {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
     let c = CString::new(path.as_os_str().as_bytes()).ok()?;
     unsafe {
         let mut st: libc::statvfs = std::mem::zeroed();
         if libc::statvfs(c.as_ptr(), &mut st) == 0 {
-            Some(st.f_bavail as u64 * st.f_frsize as u64)
+            let free = st.f_bavail as u64 * st.f_frsize as u64;
+            let total = st.f_blocks as u64 * st.f_frsize as u64;
+            Some((free, total))
         } else {
             None
         }
@@ -502,7 +597,7 @@ fn disk_free(path: &std::path::Path) -> Option<u64> {
 }
 
 #[cfg(windows)]
-fn disk_free(path: &std::path::Path) -> Option<u64> {
+fn disk_space(path: &std::path::Path) -> Option<(u64, u64)> {
     use std::os::windows::ffi::OsStrExt;
     #[link(name = "kernel32")]
     extern "system" {
@@ -521,14 +616,14 @@ fn disk_free(path: &std::path::Path) -> Option<u64> {
         GetDiskFreeSpaceExW(wide.as_ptr(), &mut free_avail, &mut total, &mut free_total)
     };
     if ok != 0 {
-        Some(free_avail)
+        Some((free_avail, total))
     } else {
         None
     }
 }
 
 #[cfg(not(any(unix, windows)))]
-fn disk_free(_path: &std::path::Path) -> Option<u64> {
+fn disk_space(_path: &std::path::Path) -> Option<(u64, u64)> {
     None
 }
 

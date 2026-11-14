@@ -13,6 +13,8 @@ const rawActions = {
   // Fitxer
   "file.new": () => useWorkspaceStore.getState().newFile(),
   "file.newProject": () => useUIStore.getState().setShowNewProject(true),
+  // Menú «Crear tema de WordPress»: la IA en crea els fitxers inicials.
+  "file.newWpTheme": () => useUIStore.getState().setShowWpTheme(true),
   "file.openFile": () => void useWorkspaceStore.getState().openFilePicker(),
   "file.openFolder": () => void useWorkspaceStore.getState().pickWorkspace(),
   "file.save": () => void saveCurrentFile(),
@@ -159,6 +161,7 @@ export interface CommandDef {
 export const commandList: CommandDef[] = [
   { id: "file.new", labelKey: "menu.newFile", kbd: "⌘N" },
   { id: "file.newProject", labelKey: "menu.newProject", kbd: "⇧⌘N" },
+  { id: "file.newWpTheme", labelKey: "menu.newWpTheme" },
   { id: "file.openFile", labelKey: "menu.openFile", kbd: "⌘O" },
   { id: "file.openFolder", labelKey: "menu.openFolder", kbd: "⌘K ⌘O" },
   { id: "file.save", labelKey: "menu.save", kbd: "⌘S" },

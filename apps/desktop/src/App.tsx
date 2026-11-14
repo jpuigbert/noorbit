@@ -37,6 +37,7 @@ const OnboardingModalComponent = lazy(() => import("./components/OnboardingModal
 import SetupCheckModal from "./components/SetupCheckModal";
 import HuggingBayModal from "./components/AI/HuggingBayModal";
 import PublishThemeModal from "./components/Publish/PublishThemeModal";
+const WordPressThemeModal = lazy(() => import("./components/WordPress/WordPressThemeModal"));
 import ComputerConfirmModal from "./components/Computer/ComputerConfirmModal";
 import CommandPalette from "./components/CommandPalette";
 import QuickOpen from "./components/QuickOpen";
@@ -383,6 +384,8 @@ export default function App() {
         <HuggingBayModal />
         {/* Menú «Pujar»: publicar temes WordPress al marketplace. */}
         {useUIStore((s) => s.showPublishTheme) && <PublishThemeModal />}
+        {/* Menú «Crear tema de WordPress»: la IA en crea els fitxers inicials. */}
+        {useUIStore((s) => s.showWpTheme) && <WordPressThemeModal />}
       </Suspense>
       <ComputerConfirmModal />
       {/* Detecció d'entorn a l'obrir: es mostra SOL si falta algun component

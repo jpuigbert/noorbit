@@ -137,6 +137,10 @@ interface AIState {
   /// el model inicial (per defecte SD 1.5, ≈2 GB) amb progrés a la UI.
   loadImageCpu: () => Promise<void>;
   installImageCpu: () => Promise<void>;
+  /// ESTAL·LA I CONFIGURA el rodet d'imatges en CPU amb UN SOL BOTÓ: instal·la
+  /// el motor (stable-diffusion.cpp) i baixa el model inicial (≈2 GB), amb
+  /// progrés en viu. L'usuari no ha de fer dos passos ni obrir cap Terminal.
+  setupImageCpu: () => Promise<void>;
   downloadCpuModel: (url?: string, name?: string) => Promise<void>;
   loadModelsDir: () => Promise<void>;
   setModelsDir: (path: string | null) => Promise<void>;
@@ -441,6 +445,27 @@ export const useAIStore = create<AIState>((set, get) => ({
     // Homebrew triga: tornem a consultar d'aquí uns segons per refrescar l'estat.
     await new Promise((r) => setTimeout(r, 5000));
     await get().loadImageCpu();
+  },
+  /// ESTAL·LA I CONFIGURA el rodet d'imatges en CPU amb UN SOL BOTÓ: instal·la
+  /// el motor (stable-diffusion.cpp) i baixa el model inicial (≈2 GB), amb
+  /// progrés en viu. L'usuari no ha de fer dos passos ni obrir cap Terminal.
+  setupImageCpu: async () => {
+    if (get().imageCpuProgress) return;
+    set({ imageCpuProgress: "Iniciant la instal·lació del rodet d'imatges en CPU…" });
+    const { listen } = await import("@tauri-apps/api/event");
+    const unlisten = await listen<{ message: string }>("ai://sd-model", (evt) =>
+      set({ imageCpuProgress: evt.payload.message })
+    );
+    try {
+      const msg = await invoke<string>("image_cpu_setup");
+      set({ lastMessage: msg });
+      await get().loadImageCpu();
+    } catch (e) {
+      set({ lastMessage: String(e) });
+    } finally {
+      (await unlisten)();
+      set({ imageCpuProgress: null });
+    }
   },
 
   /// Baixa el model inicial del rodet de CPU amb progrés a la UI.

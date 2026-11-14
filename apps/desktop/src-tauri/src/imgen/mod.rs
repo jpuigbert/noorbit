@@ -528,9 +528,210 @@ async fn edit_online(
 // Mac Intel (x86_64), on ComfyUI oficial no està publicat — i a Linux i
 // Windows. El model és un fitxer .gguf/.safetensors a «sd-models/».
 
-/// Binari `sd` (stable-diffusion.cpp) si està instal·lat (Homebrew o PATH).
+/// Carpeta on NoOrbit deixa el binari `sd` quan el baixa ell mateix
+/// (Linux i Windows: binaris oficials de GitHub).
+pub fn sd_install_dir() -> Option<PathBuf> {
+    AppConfig::data_dir().map(|d| d.join("sd"))
+}
+
+/// Binari `sd` (stable-diffusion.cpp) si està instal·lat: al PATH (Homebrew)
+/// o a les dades de NoOrbit (quan NoOrbit el mateix el baixa).
 pub fn sd_binary() -> Option<PathBuf> {
-    which::which("sd").ok()
+    if let Ok(p) = which::which("sd") {
+        return Some(p);
+    }
+    let dir = sd_install_dir()?;
+    let exe = if cfg!(windows) { "sd.exe" } else { "sd" };
+    let p = dir.join(exe);
+    if p.exists() {
+        return Some(p);
+    }
+    // Pot ser un nivell més avall (l'arquiu traeu una carpeta).
+    for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+        let p = e.path().join(exe);
+        if p.exists() {
+            return Some(p);
+        }
+        for s in std::fs::read_dir(e.path()).into_iter().flatten().flatten() {
+            let p = s.path().join(exe);
+            if p.exists() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+/// Instal·la el binari `sd` (stable-diffusion.cpp) i en DONEIX el model
+/// inicial: un sol botó i el rodet ja serveix.
+///
+/// - macOS: via Homebrew (al Mac Intel no hi ha binari oficial publicat:
+///   el formulae el compila). S'executa en segon pla i se'n reporta el
+///   progrés a l'usuari.
+/// - Linux i Windows: binaris oficials de GitHub, directament a les dades
+///   de NoOrbit (sense permisos d'administrador).
+pub async fn sd_install(
+    http: &reqwest::Client,
+    app: Option<&tauri::AppHandle>,
+) -> Result<String> {
+    let _ = http;
+    if let Some(b) = sd_binary() {
+        return Ok(format!("El rodet de CPU ja és a {}", b.to_string_lossy()));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if which::which("brew").is_ok() {
+            let mut cmd = std::process::Command::new("brew");
+            cmd.args(["install", "stable-diffusion.cpp"]);
+            cmd.stdout(std::process::Stdio::piped());
+            cmd.stderr(std::process::Stdio::piped());
+            let mut child = cmd
+                .spawn()
+                .map_err(|e| anyhow!("No s'ha pogut engegar Homebrew: {}", e))?;
+            // La sortida es llegeix en un fil i es reporta com a progrés:
+            // Homebrew compila el motor i pot trigar uns minuts.
+            let stdout = child.stdout.take();
+            let app2 = app.cloned();
+            std::thread::spawn(move || {
+                use std::io::{BufRead, BufReader};
+                let Some(h) = stdout else { return };
+                let reader = BufReader::new(h);
+                for line in reader.lines().map_while(Result::ok) {
+                    let l = line.trim();
+                    if l.is_empty() {
+                        continue;
+                    }
+                    emit_sd_progress(app2.as_ref(), l);
+                }
+            });
+            let status = tokio::task::spawn_blocking(move || child.wait())
+                .await
+                .map_err(|e| anyhow!("Error esperant Homebrew: {}", e))?
+                .map_err(|e| anyhow!("Error esperant Homebrew: {}", e))?;
+            if !status.success() {
+                return Err(anyhow!(
+                    "Homebrew no ha pogut instal·lar el rodet d'imatges en CPU \
+                     (stable-diffusion.cpp). pots-ho provar a mà: «brew install \
+                     stable-diffusion.cpp»."
+                ));
+            }
+            return match sd_binary() {
+                Some(b) => Ok(format!("Rodet d'imatges en CPU instal·lat a {}", b.to_string_lossy())),
+                None => Err(anyhow!(
+                    "Homebrew ha acabat, però el binari «sd» no s'ha trobat al PATH."
+                )),
+            };
+        }
+        // Sense Homebrew: s'obre la pàgina de descàrrega.
+        let _ = std::process::Command::new("open")
+            .arg("https://github.com/leejet/stable-diffusion.cpp/releases")
+            .spawn();
+        return Err(anyhow!(
+            "No hi ha Homebrew en aquest Mac, i el rodet d'imatges en CPU no té \
+             binari oficial per a Mac Intel. S'ha obert la pàgina de descàrrega: \
+             tria l'arquiu «Darwin» (si el teu Mac és Apple Silicon) o compila'l \
+             amb «brew install stable-diffusion.cpp»."
+        ));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Linux i Windows: binaris oficials de GitHub.
+        let dir = sd_install_dir().ok_or_else(|| anyhow!("No puc resoldre la carpeta de dades"))?;
+        std::fs::create_dir_all(&dir)?;
+        let releases = http
+            .get("https://api.github.com/repos/leejet/stable-diffusion.cpp/releases?per_page=8")
+            .header("User-Agent", "NoOrbit")
+            .timeout(std::time::Duration::from_secs(30))
+            .send()
+            .await
+            .map_err(|e| anyhow!("No s'ha pogut contactar amb GitHub: {}", e))?
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|e| anyhow!("Resposta de GitHub ill·legible: {}", e))?;
+        let want = if cfg!(windows) { "win-cpu-x64" } else { "Linux-Ubuntu" };
+        let mut url = None;
+        let mut nom = String::new();
+        if let Some(arr) = releases.as_array() {
+            for r in arr {
+                let Some(assets) = r.get("assets").and_then(|a| a.as_array()) else {
+                    continue;
+                };
+                for a in assets {
+                    let n = a.get("name").and_then(|v| v.as_str()).unwrap_or_default();
+                    if n.contains(want) && n.ends_with(".zip") {
+                        url = a
+                            .get("browser_download_url")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        nom = n.to_string();
+                        break;
+                    }
+                }
+                if url.is_some() {
+                    break;
+                }
+            }
+        }
+        let url = url.ok_or_else(|| {
+            anyhow!("No he trobat cap binari oficial del rodet d'imatges en CPU per a aquesta plataforma")
+        })?;
+        emit_sd_progress(app, &format!("descarregant {}…", nom));
+        let resp = http
+            .get(&url)
+            .header("User-Agent", "NoOrbit")
+            .timeout(std::time::Duration::from_secs(600))
+            .send()
+            .await
+            .map_err(|e| anyhow!("No s'ha pogut baixar {}: {}", nom, e))?;
+        let arxiu = dir.join(&nom);
+        let mut out = std::fs::File::create(&arxiu)?;
+        use futures::StreamExt;
+        use std::io::Write;
+        let mut stream = resp.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            out.write_all(&chunk)?;
+        }
+        let _ = out.flush();
+        drop(out);
+        // Descomprimeix.
+        let ok = std::process::Command::new("unzip")
+            .arg("-o")
+            .arg(&arxiu)
+            .arg("-d")
+            .arg(&dir)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        let _ = std::fs::remove_file(&arxiu);
+        if !ok {
+            return Err(format!("No s'ha pogut descomprimir {}", nom));
+        }
+        // Marca el binari com a executable.
+        if let Some(b) = sd_binary() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&b, std::fs::Permissions::from_mode(0o755));
+            }
+            return Ok(format!("Rodet d'imatges en CPU instal·lat a {}", b.to_string_lossy()));
+        }
+        Err("He descomprimit el binari, però no hi trobo l'executable «sd».".into())
+    }
+}
+
+/// Avís de progrés del rodet de CPU (el mateix canal que la baixada del
+/// model: «ai://sd-model»).
+pub fn emit_sd_progress(app: Option<&tauri::AppHandle>, message: &str) {
+    use tauri::Emitter;
+    if let Some(app) = app {
+        let _ = app.emit(
+            "ai://sd-model",
+            serde_json::json!({ "message": message }),
+        );
+    }
 }
 
 /// Carpeta on viuen els models del rodet de CPU («sd-models/» a les dades).

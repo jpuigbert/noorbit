@@ -37,6 +37,7 @@ export default function ModelManagerModal() {
     loadImageCpu,
     installImageCpu,
     downloadCpuModel,
+    setupImageCpu,
     selectedModel,
     pulling,
     lastMessage,
@@ -88,6 +89,7 @@ export default function ModelManagerModal() {
       loadImageCpu: st.loadImageCpu,
       installImageCpu: st.installImageCpu,
       downloadCpuModel: st.downloadCpuModel,
+      setupImageCpu: st.setupImageCpu,
       selectedModel: st.selectedModel,
       pulling: st.pulling,
       lastMessage: st.lastMessage,
@@ -368,6 +370,18 @@ export default function ModelManagerModal() {
               {t("ai.cpuTitle")}
             </label>
             <p className="lp-hint">{t("ai.cpuHint")}</p>
+            {/* UN SOL BOTÓ: instal·la el motor i baixa el model inicial, tot
+                amb un clic (sense Terminal ni passos intermedis). */}
+            <div className="mm-custom" style={{ marginBottom: 6 }}>
+              <button
+                className="btn primary sm"
+                disabled={!!imageCpuProgress}
+                onClick={() => void setupImageCpu()}
+                style={{ flex: 1 }}
+              >
+                <Download size={12} /> {imageCpuProgress || t("ai.cpuSetup")}
+              </button>
+            </div>
             <div className="mm-custom">
               <input
                 readOnly
@@ -886,6 +900,26 @@ export default function ModelManagerModal() {
                           }}
                         >
                           <Play size={12} /> {t("ai.llamacppRun")}
+                        </button>
+                        {/* ESBORRAR el model del disc: sense això, un model
+                            baixat ocupava centenars de MB per sempre i no hi
+                            havia cap manera de treure'l. */}
+                        <button
+                          className="btn sm danger"
+                          title={t("ai.llamacppDeleteHint")}
+                          onClick={async () => {
+                            if (!window.confirm(t("ai.llamacppDeleteConfirm", { name: path.split("/").pop() ?? "" })))
+                              return;
+                            setLlamaMsg(t("ai.llamacppDeleting"));
+                            const r = await invoke<string>("llamacpp_remove_model", { path }).catch(
+                              (e) => String(e),
+                            );
+                            setLlamaMsg(r);
+                            void loadLlama();
+                            void loadProviders();
+                          }}
+                        >
+                          <Trash2 size={12} /> {t("ai.llamacppDelete")}
                         </button>
                       </div>
                     ))}

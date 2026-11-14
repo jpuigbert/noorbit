@@ -190,7 +190,14 @@
   display: flex;
   gap: 8px;
 }
-.lp-btn {
+/* Llista curta d'instruccions dins d'un panell. */
+.lp-list {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  font-size: 11.5px;
+  color: var(--text-2);
+  line-height: 1.6;
+}.lp-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -297,6 +304,53 @@
 .about-block p {
   color: var(--text-1);
   margin-bottom: 6px;
+}
+
+/* ---- Crèdits: feina feta per al projecte de l'usuari ---- */
+.about-credits {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+}
+.about-credits h4 {
+  font-size: 12.5px;
+  margin-bottom: 4px;
+  color: var(--text-0);
+}
+.about-credits ul {
+  margin: 6px 0;
+  padding-left: 18px;
+  font-size: 11.5px;
+  color: var(--text-2);
+  line-height: 1.55;
+}
+.about-credits li {
+  margin-bottom: 4px;
+}
+.about-credits-foot {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-bottom: 0;
+}
+.about-credits-foot b {
+  color: var(--text-2);
+  font-weight: 600;
+}
+.about-credits-link {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.about-credits-link:hover {
+  color: var(--text-0);
 }
 
 /* ---- Peu de modal ---- */

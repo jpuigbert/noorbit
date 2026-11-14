@@ -142,6 +142,36 @@ pub fn run() {
             // motor local apareix ocupat per un servei que no existeix.
             crate::ai::llamacpp::cleanup_stale();
 
+            // PROVEÏDORS LOCALS MORTS: un «llamacpp_11435» desat quan el
+            // servidor ja no hi és (l'app es va tancar i el `llama-server`
+            // va morir amb ella) es treu de la llista. Sinó, el xat el
+            // ofereix al selector i no hi ha res al darrere: l'usuari tria
+            // el model i «no deixa fer-lo servir».
+            {
+                // El gestor de proveïdors es clona (Arc) per notenir el
+                // prestat del `State` viu més enllà del bloc.
+                let api_manager = {
+                    use tauri::Manager as _;
+                    app.state::<AppState>().api_manager.clone()
+                };
+                if let Ok(mut api) = api_manager.lock() {
+                    let ids: Vec<String> = crate::ai::llamacpp::servers()
+                        .into_iter()
+                        .filter(|s| crate::ai::llamacpp::is_alive(s.port))
+                        .map(|s| format!("llamacpp_{}", s.port))
+                        .collect();
+                    let morts: Vec<String> = api
+                        .list()
+                        .iter()
+                        .filter(|p| p.id.starts_with("llamacpp_") && !ids.contains(&p.id))
+                        .map(|p| p.id.clone())
+                        .collect();
+                    for id in morts {
+                        let _ = api.remove(&id);
+                    }
+                };
+            }
+
             // Descàrregues de models tallades (l'app es va tancar mentre una
             // IA baixava un model): el «.part» a mitges s'esborra en arrencar
             // perquè no ocupe disc ni es done per bo. Només toca «*.part».
@@ -272,6 +302,7 @@ pub fn run() {
             commands::ai::llamacpp_install,
             commands::ai::llamacpp_start,
             commands::ai::llamacpp_stop,
+            commands::ai::llamacpp_remove_model,
             commands::ai::hf_bay_details,
             commands::ai::hf_bay_download,
             commands::ai::hf_bay_install_native,
@@ -286,6 +317,7 @@ pub fn run() {
             commands::ai::install_comfyui,
             commands::ai::install_image_cpu,
             commands::ai::image_cpu_info,
+            commands::ai::image_cpu_setup,
             commands::ai::image_cpu_download_model,
             commands::ai::install_video_editor,
             commands::ai::civitai_search,

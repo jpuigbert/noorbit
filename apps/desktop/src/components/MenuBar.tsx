@@ -34,6 +34,7 @@ export default function MenuBar() {
   const menus: Record<string, Row[]> = {
     file: [
       { label: t("menu.newProject"), kbd: "⇧⌘N", action: act("file.newProject") },
+      { label: t("menu.newWpTheme"), action: act("file.newWpTheme") },
       { label: t("menu.newFile"), kbd: "⌘N", action: act("file.new") },
       { label: t("menu.openFile"), kbd: "⌘O", action: act("file.openFile") },
       { label: t("menu.openFolder"), kbd: "⌘K ⌘O", action: act("file.openFolder") },

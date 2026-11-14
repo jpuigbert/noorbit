@@ -84,6 +84,79 @@ export const PLATFORM_IOS =
   "  • No generes .ipa, .xcarchive ni binaris. NOMÉS .swift/.plist/.json/.md.\n" +
   "  • No usis Flutter, React Native, Capacitor, Ionic ni cap altre embolcall.";
 
+/// ── Tema de WordPress ───────────────────────────────────────────────────────
+/// Llistat canònic dels fitxers d'un tema WordPress. WordPress llegeix la
+/// capçalera de `style.css` per batejar el tema i sense `functions.php` el
+/// tema no engega cap funció; un model dèbil no inventa aquesta llista i el
+/// tema quedava buit o sense els fitxers essencials.
+export const WP_THEME_FILES = [
+  "style.css",
+  "functions.php",
+  "index.php",
+  "header.php",
+  "footer.php",
+  "single.php",
+  "page.php",
+  "archive.php",
+  "search.php",
+  "searchform.php",
+  "404.php",
+  "comments.php",
+  "sidebar.php",
+  "README.md",
+];
+
+/// Fitxers que NO es poden quedar fora de cap tema (WordPress els necessita per
+/// funcionar i per poder-se vendre al marketplace).
+export const WP_THEME_CORE = [
+  "style.css",
+  "functions.php",
+  "index.php",
+  "header.php",
+  "footer.php",
+];
+
+/// Sistema per demanar la LLISTA DE FITXERS del tema (una per línia): tasca
+/// molt més senzilla que escriure tot el tema, que un model dèbil sí que pot.
+export const WP_THEME_MANIFEST_SYSTEM =
+  "Respon NOMÉS amb una llista de rutes de fitxers d'un TEMA de WordPress, " +
+  "una per línia, sense números, guions ni explicacions.\n" +
+  "Les rutes són RELATIVES a la carpeta del tema (p. ex. template-parts/header.php).\n" +
+  "Els fitxers possibles d'un tema són: style.css, functions.php, index.php, " +
+  "header.php, footer.php, single.php, page.php, archive.php, search.php, " +
+  "searchform.php, 404.php, comments.php, sidebar.php, front-page.php, " +
+  "home.php, author.php, inc/… i template-parts/… (aquests darrers, només si " +
+  "el tema els fa servir).\n" +
+  "Inclou SEMPRE: style.css, functions.php, index.php, header.php, footer.php " +
+  "i README.md.\n" +
+  "Exemple:\n" +
+  "style.css\nfunctions.php\nindex.php\nheader.php\nfooter.php\n" +
+  "single.php\npage.php\narchive.php\n404.php\ncomments.php\nREADME.md";
+
+/// Sistema per escriure el contingut d'UN SOL fitxer del tema. Com que hi ha
+/// eines connectades al xat, aquí no n'hi ha: el model no pot llançar cap
+/// ordre «RUN|» ni escriure res al projecte pel camí.
+export const WP_THEME_FILE_SYSTEM =
+  "ETS UN PROGRAMADOR WORDPRESS. Escriu el fitxer demanat COMPLET, dins un " +
+  "sol bloc de codi, i NO escriguis cap text al voltant (ni «Aquí tens», ni " +
+  "«Millora:», ni cap explicació): només el codi.\n" +
+  "Regles de WordPress:\n" +
+  "• PHP vàlid: el fitxer comença amb «<?php» (i acaba amb ?> si hi ha codi " +
+  "de plantilla); cap error de sintaxi.\n" +
+  "• Les plantilles usen els «tags» de plantilla: get_header(), get_footer(), " +
+  "the_title(), the_content(), the_post_thumbnail(), have_posts(), " +
+  "the_post()… i les funcions de wp_head() / wp_footer().\n" +
+  "• «style.css» és la capçalera del tema: ha de COMENÇAR pel comentari " +
+  "/* Theme Name: … */ amb Theme Name, Theme URI, Author, Description, " +
+  "Version, Requires at least, Tested up to, Requires PHP, License, License " +
+  "URI i Text Domain. Després, les regles CSS del tema.\n" +
+  "• «functions.php»: enganxa els «hooks» (after_setup_theme, " +
+  "enqueue_scripts, enqueue_style, register_nav_menus, widgets_init…) " +
+  "declarats correctament.\n" +
+  "• Tot ha de ser executable de veritat: sense «...», sense «(implementa " +
+  "aquí)» i sense placeholders.\n" +
+  "• Escriu NOMÉS el fitxer demanat, ni un més.";
+
 /// ORDRES CLARes D'ORDINADOR, en llenguatge natural (català d'aquest Mac):
 /// comencen amb un verb del sistema, no tenen cap signe de pregunta i no
 /// s'enfilan massa. Tota altra frase segueix al model de text com sempre.

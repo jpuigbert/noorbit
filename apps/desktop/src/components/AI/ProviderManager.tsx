@@ -30,7 +30,7 @@ const isLocal = (url: string): boolean =>
 
 /// Preconfiguracions d'un sol clic: omplin el formulari amb la URL i el
 /// model adequats perquè l'usuari només hi enganxe el token.
-const PRESETS: { key: string; label: string; data: Partial<ProviderInput> }[] = [
+export const PRESETS: { key: string; label: string; data: Partial<ProviderInput> }[] = [
   {
     key: "openai",
     label: "OpenAI",

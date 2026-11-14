@@ -215,6 +215,33 @@ export default function SettingsModal() {
               <p className="lp-hint">
                 Editor creatiu amb IA local (Ollama), connectors, Blender i Unreal Engine 5.
               </p>
+              {/* FEINA FETA PER A JOAN PUIGBERT CARRERAS (thepuigberts.com):
+                  el projecte de l'usuari — el marketplace de temes WordPress —
+                  i el que s'hi ha fet dins de NoOrbit. */}
+              <div className="about-credits">
+                <h4>{t("about.creditsTitle")}</h4>
+                <p className="lp-hint">{t("about.creditsIntro")}</p>
+                <ul>
+                  <li>{t("about.credit1")}</li>
+                  <li>{t("about.credit2")}</li>
+                  <li>{t("about.credit3")}</li>
+                  <li>{t("about.credit4")}</li>
+                </ul>
+                <p className="about-credits-foot">
+                  {t("about.creditAuthor")} <b>Joan Puigbert Carreras</b> · {t("about.creditSite")}{" "}
+                  <b>thepuigberts.com</b>{" "}
+                  <button
+                    className="about-credits-link"
+                    onClick={() =>
+                      void invoke("open_externally", {
+                        path: "https://thepuigberts.com",
+                      }).catch(() => undefined)
+                    }
+                  >
+                    {t("about.creditLink")}
+                  </button>
+                </p>
+              </div>
               <UpdateSection />
             </div>
           )}

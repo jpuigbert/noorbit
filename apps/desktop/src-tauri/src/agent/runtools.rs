@@ -23,6 +23,9 @@ use tauri::{AppHandle, Emitter};
 /// navegador): ensenya les directrius d'execució al model. Breu i explícit
 /// perquè fins i tot els models locals menuts les entenguen.
 pub const RUN_PROMPT: &str = "— TERMINAL I IMATGES (eines de NoOrbit) —\n\
+L'USUARI PARLA CATALÀ: respon SEMPRE en català. Tots els textos que escrius —\
+resposta, resum del que has fet, comentari del codi, descripció de la imatge i\
+missatge d'error— han d'estar en català natural (no traducció literal).\n\
 Tens accés REAL al terminal del projecte i al generador d'imatges. Quan cal \
 compilar, instal·lar, llançar, provar o esborrar NO ho finges en prosa: emet \
 UNA directriu sola en una línia i ATURA el torn. NoOrbit l'executa (l'usuari \

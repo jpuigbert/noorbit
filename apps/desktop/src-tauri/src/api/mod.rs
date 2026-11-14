@@ -78,6 +78,19 @@ pub fn normalize_base(url: &str) -> String {
     b
 }
 
+/// El servei és LOCAL (la mateixa màquina)? Aquests serveis — LM Studio,
+/// llama.cpp, vLLM, DeepInfer a 127.0.0.1… — no demanen cap clau: hi ha
+/// d'enviar la petició SENSE capçalera d'autenticació (o amb una de buida,
+/// que alguns rebutjen amb 401).
+pub fn is_local_url(url: &str) -> bool {
+    let low = url.trim().to_lowercase();
+    low.contains("localhost")
+        || low.contains("127.0.0.1")
+        || low.contains("0.0.0.0")
+        || low.contains("::1")
+        || low.starts_with("http://[::1]")
+}
+
 /// Versió sense el secret, per enviar a la UI (token emmascarat).
 #[derive(Debug, Clone, Serialize)]
 pub struct AiProviderPublic {
@@ -369,8 +382,13 @@ impl ApiManager {
             item.kind = "openai".into();
         }
         if matches!(item.auth, AuthScheme::None) && item.token.is_empty() {
-            // per defecte,Bearer si no s'indica el contrari
-            item.auth = AuthScheme::Bearer;
+            // Per defecte, Bearer si no s'indica el contrari — PERÒ un servei
+            // LOCAL (llama.cpp, LM Studio, vLLM…) no demana cap clau: enviar-li
+            // «Authorization: Bearer » (buit) l'amoïria i alguns serveis hi
+            // responen amb 401. Aquestes es queden sense capçalera.
+            if !is_local_url(&item.base_url) {
+                item.auth = AuthScheme::Bearer;
+            }
         }
         let pub_item = item.to_public();
         self.providers.push(item);
@@ -446,10 +464,7 @@ impl ApiManager {
         // llama.cpp…) no demanen cap clau, així que ells sí que passen.
         if !item.has_token() {
             let low = item.base().to_lowercase();
-            let local = low.contains("localhost")
-                || low.contains("127.0.0.1")
-                || low.contains("0.0.0.0")
-                || low.contains("::1");
+            let local = is_local_url(&low);
             if !local {
                 return Err(anyhow!(
                     "Aquest proveïdor no té cap clau API guardada. Obre el menú \

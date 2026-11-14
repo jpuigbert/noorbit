@@ -44,7 +44,21 @@ interface BayModel {
   size: number | null;
   downloads: number | null;
   url: string | null;
+  /// Tipus segons el mirror («llm», «embedding», «vision»…).
+  kind?: string | null;
+  /// Tasca del model («text-generation», «feature-extraction»…).
+  task?: string | null;
 }
+
+/// El model serveix per XATAR? Els d'EMBEDDINGS (vectors) s'engeuen igual
+/// però no generen text: NoOrbit ho diu abans de baixar-los.
+const esDeXat = (m: { kind?: string | null; task?: string | null }): boolean => {
+  const k = (m.kind ?? "").trim().toLowerCase();
+  const t = (m.task ?? "").trim().toLowerCase();
+  if (k === "embedding" || k === "embeddings") return false;
+  if (t === "feature-extraction" || t === "embedding" || t === "embeddings") return false;
+  return true;
+};
 
 interface BayFile {
   path: string;
@@ -134,8 +148,10 @@ export default function HuggingBayModal() {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // On es desen els models GGUF (pot ser un disc extern triat pel usuari).
   const [ggufDir, setGgufDir] = useState("");
-  // Espai lliure al disc destí: per avisar ABANS de baixar un model enorme.
+  // Espai al disc destí: lliure (per avisar ABANS de baixar un model enorme)
+  // i total (la mida del disc/USB, per mostrar-la).
   const [freeBytes, setFreeBytes] = useState<number | null>(null);
+  const [totalBytes, setTotalBytes] = useState<number | null>(null);
   /// Comptadors de generació: eviten que una resposta VELLA (pàgina
   /// anterior, model anterior) sobreEscrigui la nova (cursa clàssica en
   /// cerques ràpides: es canvia de pàgina/filtre i el llistat mostra el
@@ -187,10 +203,19 @@ export default function HuggingBayModal() {
     void invoke<{ modelsDir: string }>("llamacpp_status")
       .then((st) => setGgufDir(st?.modelsDir ?? ""))
       .catch(() => undefined);
-    // Espai lliure al disc destí (per avisar si el model no hi cap).
-    void invoke<{ dir: string; free_bytes: number | null }>("hf_bay_disk_space")
-      .then((r) => setFreeBytes(r?.free_bytes ?? null))
-      .catch(() => setFreeBytes(null));
+    // Espai al disc destí (lliure + total): per avisar si el model no hi cap
+    // i per mostrar la mida del disc.
+    void invoke<{ dir: string; free_bytes: number | null; total_bytes: number | null }>(
+      "hf_bay_disk_space"
+    )
+      .then((r) => {
+        setFreeBytes(r?.free_bytes ?? null);
+        setTotalBytes(r?.total_bytes ?? null);
+      })
+      .catch(() => {
+        setFreeBytes(null);
+        setTotalBytes(null);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showMenu]);
 
@@ -240,9 +265,17 @@ export default function HuggingBayModal() {
   // Espai lliure al disc destí: es refresca en obrir, en canviar de carpeta
   // i en acabar cada descàrrega (el disc es va omplint).
   const refreshSpace = useCallback(() => {
-    void invoke<{ dir: string; free_bytes: number | null }>("hf_bay_disk_space")
-      .then((r) => setFreeBytes(r?.free_bytes ?? null))
-      .catch(() => setFreeBytes(null));
+    void invoke<{ dir: string; free_bytes: number | null; total_bytes: number | null }>(
+      "hf_bay_disk_space"
+    )
+      .then((r) => {
+        setFreeBytes(r?.free_bytes ?? null);
+        setTotalBytes(r?.total_bytes ?? null);
+      })
+      .catch(() => {
+        setFreeBytes(null);
+        setTotalBytes(null);
+      });
   }, []);
 
   /// Mutació autoritària de la cua: actualitza el ref I l'estat (render).
@@ -485,6 +518,9 @@ export default function HuggingBayModal() {
                     <span>{bytes(m.size)}</span>
                     {m.downloads ? <span>⬇ {num(m.downloads)}</span> : null}
                     {m.license ? <span className="hb-lic">{m.license}</span> : null}
+                    {/* Els models d'EMBEDDINGS no serveixen per xatejar:
+                        s'ho diem abans que l'usuari baixi 600 MB. */}
+                    {!esDeXat(m) && <span className="hb-badge-embed">embeddings</span>}
                   </div>
                 </div>
               </button>
@@ -580,7 +616,7 @@ export default function HuggingBayModal() {
                   <div className="hb-actions">
                     <button
                       className="btn primary sm hb-download"
-                      disabled={isQueued("ollama")}
+                      disabled={isQueued("ollama") || !esDeXat(details.model)}
                       onClick={() => enqueue("ollama")}
                       title={t("hfBay.downloadOllama")}
                     >
@@ -594,7 +630,7 @@ export default function HuggingBayModal() {
                         es registra com a proveïdor i es pot triar al xat. */}
                     <button
                       className="btn sm hb-download"
-                      disabled={isQueued("native")}
+                      disabled={isQueued("native") || !esDeXat(details.model)}
                       onClick={() => enqueue("native")}
                       title={t("hfBay.nativeHint")}
                     >
@@ -604,6 +640,12 @@ export default function HuggingBayModal() {
                         : t("hfBay.installNative")}
                     </button>
                   </div>
+                  {/* AVÍS: model d'embeddings (no serveix per xatejar). */}
+                  {!esDeXat(details.model) && (
+                    <div className="hb-hint warn">
+                      <AlertTriangle size={12} /> {t("hfBay.embeddingsWarn")}
+                    </div>
+                  )}
                   {/* ON ES DESA: l'usuari pot triar AQUÍ MATEIX una carpeta
                       d'un disc extern; les descàrregues hi van directament. */}
                   <div className="hb-where">
@@ -612,9 +654,14 @@ export default function HuggingBayModal() {
                       {t("hfBay.savedTo")}{" "}
                       <b>{ggufDir || t("hfBay.defaultDir")}</b>
                     </span>
-                    {freeBytes != null && (
+                    {(freeBytes != null || totalBytes != null) && (
                       <span className="hb-free">
-                        {t("hfBay.freeSpace", { size: bytes(freeBytes) })}
+                        {totalBytes != null
+                          ? t("hfBay.diskSpace", {
+                              free: bytes(freeBytes),
+                              total: bytes(totalBytes),
+                            })
+                          : t("hfBay.freeSpace", { size: bytes(freeBytes) })}
                       </span>
                     )}
                     <button

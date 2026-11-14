@@ -34,6 +34,8 @@ interface UIState {
   showHuggingBay: boolean;
   /** Menú «Pujar»: publicació de temes WordPress al marketplace. */
   showPublishTheme: boolean;
+  /** Menú «Crear tema de WordPress»: la IA en crea els fitxers inicials. */
+  showWpTheme: boolean;
   showIaCatalog: boolean;
   showRemoteServer: boolean;
   showSettings: boolean;
@@ -70,6 +72,7 @@ interface UIState {
   setShowModelManager: (v: boolean) => void;
   setShowHuggingBay: (v: boolean) => void;
   setShowPublishTheme: (v: boolean) => void;
+  setShowWpTheme: (v: boolean) => void;
   setShowIaCatalog: (v: boolean) => void;
   setShowRemoteServer: (v: boolean) => void;
   setShowSettings: (v: boolean) => void;
@@ -119,6 +122,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   showModelManager: false,
   showHuggingBay: false,
   showPublishTheme: false,
+  showWpTheme: false,
   showIaCatalog: false,
   showRemoteServer: false,
   showSettings: false,
@@ -148,6 +152,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setShowModelManager: (v) => set({ showModelManager: v }),
   setShowHuggingBay: (v) => set({ showHuggingBay: v }),
   setShowPublishTheme: (v) => set({ showPublishTheme: v }),
+  setShowWpTheme: (v) => set({ showWpTheme: v }),
   setShowIaCatalog: (v) => set({ showIaCatalog: v }),
   setShowRemoteServer: (v) => set({ showRemoteServer: v }),
   setShowSettings: (v) => set({ showSettings: v }),

@@ -505,6 +505,54 @@ fn is_our_server(pid: u32) -> bool {
     }
 }
 
+/// El model serveix per XATAR? Els models d'EMBEDDINGS (vectors) i altres
+/// tipus especialitzats tenen el servidor en marxa, però tota petició de
+/// xat acaba amb «the current context does not support logits computation»:
+/// l'usuari tria el model al selector i «no deixa fer-lo servir».
+///
+/// `Some(true)` = sí xateja · `Some(false)` = no serveix per xatar ·
+/// `None` = no s'ha pogut saber (temps esgotat, error de xarxa…).
+pub async fn chat_capability(
+    http: &reqwest::Client,
+    port: u16,
+    model: &str,
+) -> Option<bool> {
+    let url = format!("http://127.0.0.1:{}/v1/chat/completions", port);
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 1,
+    });
+    let resp = http
+        .post(&url)
+        .timeout(std::time::Duration::from_secs(120))
+        .json(&body)
+        .send()
+        .await
+        .ok()?;
+    let txt = resp.text().await.unwrap_or_default();
+    let low = txt.to_lowercase();
+    if low.contains("logits") || low.contains("does not support") || low.contains("not supported") {
+        return Some(false);
+    }
+    if low.contains("\"error\"") {
+        // Un altre error (model mal anomenat, etc.) no permet dir res.
+        return None;
+    }
+    Some(true)
+}
+
+/// Esborra un model GGUF instal·lat del disc. El servidor que l'estigui
+/// serveint s'ha d'aturar ABANS (sinó el fitxer queda obert i l'aturada
+/// pot fallar); això ho fa el qui crida el comandament.
+pub fn remove_model_file(path: &str) -> Result<(), String> {
+    let p = PathBuf::from(path);
+    if !p.exists() {
+        return Err(format!("El model ja no hi és: {}", path));
+    }
+    std::fs::remove_file(&p).map_err(|e| format!("No s'ha pogut esborrar «{}»: {}", path, e))
+}
+
 /// Atura TOTS els servidors locals que NoOrbit hagi engegat. S'crida en
 /// sortir de l'app: sense això, els `llama-server` queviuen com a processos
 /// orfes (i el port quedava ocupat per a la sessió següent).
