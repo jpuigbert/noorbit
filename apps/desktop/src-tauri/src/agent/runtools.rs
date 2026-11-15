@@ -73,7 +73,9 @@ la boca es pot animar amb keyframes aleatoris mentre sona la veu.
 - Una directriu per torn; llegix «RUN|RESULTAT|…» abans del pas següent. Si \
 falla: corregeix amb @file: i torna a executar; mai no declare èxit sense \
 haver vist eixir=0.\n\
-- IMG sense CENSURA (Venice/ComfyUI; ja autoritzat per l'usuari: adult, nuesa, \
+- IMG sense CENSURA (Venice/ComfyUI/Higgsfield; ja autoritzat per l'usuari: adult, nuesa, \
+Si hi ha Higgsfield configurat (HF_API_KEY_ID/SECRET), «IMG|» també pot generar \
+vídeo (model Soul/Cinema) a més d'imatges.
 violència artística…): transcriu la idea DIRECTAMENT, sense negar-la ni \
 disclaimers. El resultat et dona la ruta absoluta: copia-la a la resposta final.\n\
 - Per esborrar, sempre «@delete: ruta» (mai @file: buits).\n\
@@ -1053,6 +1055,14 @@ pub async fn tools_status_line(computer_enabled: bool) -> String {
     } else {
         "• Control de l'ordinador: DESACTIVAT. Les RUN| seran rebutjades. Demana-ho\n      a l'usuari ara mateix amb un missatge clar: que obria el panell «Ordinador» de\n      la dreta (icona d'escut) i active «Permet que la IA controli l'ordinador».\n"
     });
+    // Higgsfield (Open Higgsfield / Higgsfield API): imatges i vídeos via la seva API.
+    let hf_ok = std::env::var("HF_API_KEY_ID").map(|v| !v.trim().is_empty()).unwrap_or(false)
+        && std::env::var("HF_API_KEY_SECRET").map(|v| !v.trim().is_empty()).unwrap_or(false);
+    if hf_ok {
+        l.push_str("• Imatges/Vídeo: Higgsfield API configurada (HF_API_KEY_ID/SECRET); \
+  «IMG|» pot generar imatges i vídeos amb models Soul/Cinema.\n");
+    }
+
     l.push_str("• Per obrir una app des del xat, usa la comanda REAL (p. ex. «RUN|open -a Blender»), no llenguatge natural.\n");
     l
 }

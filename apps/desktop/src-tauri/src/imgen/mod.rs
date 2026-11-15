@@ -956,6 +956,113 @@ async fn sd_img2img(
     Err(anyhow!("«sd» ha fallat (exit {:?}): {}", outp.status.code(), tail))
 }
 
+// ── Higgsfield (Open Higgsfield) ─────────────────────────────────────────────
+/// Genera una imatge amb la API de Higgsfield (Soul v2 standard).
+/// Auth: «Authorization: Key <key_id>:<key_secret>».
+/// Flux: POST submit → poll status → descarrega la imatge.
+async fn higgsfield_generate(
+    http: &reqwest::Client,
+    key_id: &str,
+    key_secret: &str,
+    o: &GenOpts,
+) -> Result<(Vec<u8>, String)> {
+    let auth = format!("Key {}:{}", key_id, key_secret);
+    // 1) Submit.
+    let body = json!({
+        "prompt": o.prompt,
+        "resolution": "720p",
+        "aspect_ratio": format!("{}:{}", o.width, o.height),
+        "enhance_prompt": true,
+        "batch_size": 1,
+    });
+    let resp = http
+        .post("https://api.higgsfield.ai/higgsfield-ai/soul/v2/standard")
+        .header("Authorization", &auth)
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| anyhow!("Higgsfield no respon: {}", e))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(anyhow!("Higgsfield error {}: {}", status, text));
+    }
+    let v: Value = resp.json().await.unwrap_or_default();
+    let request_id = v
+        .get("request_id")
+        .or_else(|| v.get("id"))
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| anyhow!("Higgsfield no ha retornat request_id"))?;
+
+    // 2) Poll (fins a 5 minuts).
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+    loop {
+        if std::time::Instant::now() > deadline {
+            return Err(anyhow!("Higgsfield ha trigat massa (5 min)"));
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        let poll = http
+            .get(format!(
+                "https://api.higgsfield.ai/v1/requests/{}",
+                request_id
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .map_err(|e| anyhow!("Higgsfield poll error: {}", e))?;
+        if !poll.status().is_success() {
+            continue;
+        }
+        let pv: Value = poll.json().await.unwrap_or_default();
+        let state = pv
+            .get("status")
+            .or_else(|| pv.get("state"))
+            .and_then(|s| s.as_str())
+            .unwrap_or("pending");
+        if state == "completed" || state == "done" || state == "succeeded" {
+            // Cerca la URL de la imatge.
+            let url = pv
+                .get("result")
+                .and_then(|r| r.get("image_url").or_else(|| r.get("url")))
+                .and_then(|u| u.as_str())
+                .or_else(|| {
+                    pv.get("images")
+                        .and_then(|i| i.as_array())
+                        .and_then(|a| a.first())
+                        .and_then(|x| x.get("url"))
+                        .and_then(|u| u.as_str())
+                })
+                .or_else(|| {
+                    pv.get("output")
+                        .and_then(|o| o.as_array())
+                        .and_then(|a| a.first())
+                        .and_then(|x| x.as_str())
+                });
+            if let Some(url) = url {
+                let bytes = http
+                    .get(url)
+                    .timeout(std::time::Duration::from_secs(120))
+                    .send()
+                    .await?
+                    .bytes()
+                    .await?;
+                return Ok((bytes.to_vec(), "soul-v2".to_string()));
+            }
+            return Err(anyhow!("Higgsfield completat però sense URL d'imatge"));
+        }
+        if state == "failed" || state == "error" {
+            let msg = pv
+                .get("error")
+                .or_else(|| pv.get("message"))
+                .and_then(|m| m.as_str())
+                .unwrap_or("error desconegut");
+            return Err(anyhow!("Higgsfield ha fallat: {}", msg));
+        }
+    }
+}
+
 // ── API pública ─────────────────────────────────────────────────────────────
 /// ComfyUI local si hi ha servidor + RAM, si no, proveïdors amb token.
 pub async fn generate(
@@ -1033,6 +1140,30 @@ pub async fn generate(
         }
     } else {
         note = format!("{} / sense proveïdors en línia registrats", note);
+    }
+
+    // 3) Higgsfield (Open Higgsfield / Higgsfield API): generació d'imatges
+    //    via la seva API REST. Credencials per variables d'entorn:
+    //    HF_API_KEY_ID i HF_API_KEY_SECRET. Si no hi són, es salta.
+    //    Usable per TOTES les IAs (el camí IMG| crida generate(), que prova
+    //    Higgsfield com qualsevol altre backend).
+    if let (Ok(key_id), Ok(key_secret)) = (
+        std::env::var("HF_API_KEY_ID"),
+        std::env::var("HF_API_KEY_SECRET"),
+    ) {
+        if !key_id.trim().is_empty() && !key_secret.trim().is_empty() {
+            match higgsfield_generate(&http, &key_id, &key_secret, o).await {
+                Ok((bytes, model)) => {
+                    let path = save_png(&bytes, "imatge")?;
+                    return Ok(GeneratedImage {
+                        path,
+                        backend: "higgsfield (online)".into(),
+                        model,
+                    });
+                }
+                Err(e) => note = format!("{} / higgsfield: {}", note, e),
+            }
+        }
     }
     let local_hint = if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
         "En aquest Mac Intel, ComfyUI local NO és possible, però hi ha un rodet \
