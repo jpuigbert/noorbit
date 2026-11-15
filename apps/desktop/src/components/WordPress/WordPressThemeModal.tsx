@@ -252,13 +252,9 @@ export default function WordPressThemeModal() {
           setFiles([...made]);
           continue;
         }
+        // write_file crea la carpeta de destinació si no hi és (create_dir
+        // exigiria el projecte obert, que encara no ho està en aquest punt).
         const abs = `${path.replace(/\/+$/, "")}/${rel}`;
-        const dir = abs.split("/").slice(0, -1).join("/");
-        try {
-          await invoke("create_dir", { path: dir });
-        } catch {
-          /* la carpeta ja hi era */
-        }
         await invoke("write_file", { path: abs, content });
         made.push(rel);
         setFiles([...made]);

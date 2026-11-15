@@ -1,0 +1,1258 @@
+<!doctype html>
+<html lang="ca">
+<head>
+<meta charset="utf-8" />
+<title>NoOrbit · Spot 53 s</title>
+<style>
+/* ══════════════════════════════════════════════════════════════════════════
+   NoOrbit · spot publicitari · guió amb personatges
+   ─────────────────────────────────────────────────────────────────────────
+   Sistema visual: l'ÒRBITA (el nucli = la teva idea) + dos personatges
+   originals en estil kawaii/anime: PIP (la persona) i ORBI (la companya
+   IA de NoOrbit). Tots els colors són els tokens reals de l'app.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root{
+  --void:#04060e; --panel:#0f0f15; --panel2:#14141c; --panel3:#1b1b25;
+  --line:#1e1e29; --line2:#2b2b3a;
+  --txt:#f0f0f7; --txt1:#b8b8cb; --txt2:#8686a2; --txt3:#606080;
+  --violet:#7c5cff; --blue:#5ea2ef; --cyan:#22d3ee; --gold:#e8c465; --green:#8fbf6a;
+  --amber:#fbbf24; --ok:#4ade80; --pink:#ff7f9e;
+  --grad:linear-gradient(135deg,#7c5cff 0%,#5ea2ef 100%);
+  --ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  --mono:"SF Mono",Menlo,Monaco,"Cascadia Code",monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{background:#000;overflow:hidden}
+body{width:1920px;height:1080px;font-family:var(--ui);-webkit-font-smoothing:antialiased;
+  color:var(--txt);position:relative;transform-origin:0 0}
+
+.stage{position:absolute;inset:0;overflow:hidden;background:
+  radial-gradient(1500px 950px at 50% 40%,#0d1428 0%,#070b16 46%,#04060e 100%)}
+.vign{position:absolute;inset:0;pointer-events:none;z-index:88;
+  background:radial-gradient(125% 98% at 50% 44%,transparent 42%,rgba(0,0,0,.58) 100%)}
+.c-grad{background:linear-gradient(120deg,#d3c6ff,#8fb9ff 58%,#6fe4f5);-webkit-background-clip:text;
+  background-clip:text;color:transparent}
+
+/* ══ PERSONATGES ═════════════════════════════════════════════════════════ */
+.chr{display:block;overflow:visible}
+.chr .eye,.chr .mouth{transform-box:fill-box;transform-origin:50% 50%}
+.chr .eye{transform:scaleY(1)}
+.chr .mouth{transform:scaleY(1)}
+.chr .halo{transform-box:fill-box;transform-origin:50% 50%}
+.chr .arm-r,.chr .hand-r{transform-box:fill-box;transform-origin:0% 0%}
+.chr .arm-l,.chr .hand-l{transform-box:fill-box;transform-origin:100% 0%}
+
+.slot{position:absolute;left:0;top:0;transform-origin:50% 100%;will-change:transform}
+.shadow{position:absolute;left:50%;bottom:-6px;width:260px;height:34px;margin-left:-130px;
+  border-radius:50%;background:radial-gradient(ellipse at center,rgba(0,0,0,.55),transparent 70%)}
+
+/* escena de diàleg: decorat d'anime */
+#s4{position:absolute;inset:0;z-index:30;overflow:hidden}
+.ctabg{position:absolute;inset:0;background:
+  radial-gradient(1200px 800px at 50% 52%,#1b1740 0%,#120f2b 40%,#07060f 100%)}
+.bokeh{position:absolute;border-radius:50%;filter:blur(2px);opacity:.5}
+.bokeh.b1{width:300px;height:300px;left:80px;top:90px;background:radial-gradient(circle,#7c5cff44,transparent 70%)}
+.bokeh.b2{width:220px;height:220px;right:140px;top:40px;background:radial-gradient(circle,#22d3ee33,transparent 70%)}
+.bokeh.b3{width:420px;height:420px;right:-80px;bottom:-120px;background:radial-gradient(circle,#5ea2ef2a,transparent 70%)}
+.bokeh.b4{width:170px;height:170px;left:420px;bottom:40px;background:radial-gradient(circle,#e8c46522,transparent 70%)}
+.focus{position:absolute;width:900px;height:900px;margin-left:-450px;margin-top:-450px;
+  border-radius:50%;pointer-events:none;opacity:0;
+  background:radial-gradient(circle,rgba(150,120,255,.30) 0%,rgba(150,120,255,.10) 38%,transparent 62%)}
+.speed{position:absolute;left:50%;top:50%;width:2200px;height:2200px;margin:-1100px 0 0 -1100px;
+  pointer-events:none;opacity:0;mix-blend-mode:screen;
+  background:repeating-conic-gradient(from 0deg at 50% 50%,
+    rgba(255,255,255,.30) 0deg 0.9deg, transparent 0.9deg 7.5deg);
+  -webkit-mask-image:radial-gradient(circle at 50% 50%,#000 12%,transparent 40%);
+  mask-image:radial-gradient(circle at 50% 50%,#000 12%,transparent 40%)}
+.spark{position:absolute;width:100%;height:100%;pointer-events:none}
+.spark svg{position:absolute;overflow:visible}
+
+/* bombolles de diàleg */
+.bub{position:absolute;width:540px;padding:18px 26px 22px;border-radius:26px;background:#fffdf9;
+  color:#2b2440;font-size:24px;font-weight:650;line-height:1.36;letter-spacing:-.012em;
+  box-shadow:0 22px 48px rgba(0,0,0,.45),0 0 0 3px rgba(255,255,255,.9);
+  opacity:0;transform-origin:50% 100%}
+.bub .tail{position:absolute;bottom:-16px;width:0;height:0;
+  border-left:19px solid transparent;border-right:19px solid transparent;
+  border-top:18px solid #fffdf9;filter:drop-shadow(0 4px 2px rgba(0,0,0,.18))}
+.bub.pip{background:#fff8ec}
+.bub.pip .tail{border-top-color:#fff8ec;left:30%}
+.bub.orbi{background:#f2f4ff}
+.bub.orbi .tail{border-top-color:#f2f4ff;right:30%}
+.bub .txt{display:block}
+.bub .who{display:block;font-size:14px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;
+  margin-bottom:7px;color:#7c5cff}
+.bub.orbi .who{color:#5ea2ef}
+
+/* ══ S1 · HOOK ══════════════════════════════════════════════════════════ */
+#s1{position:absolute;inset:0}
+.orb{position:absolute;left:50%;top:38%;width:0;height:0}
+.core{position:absolute;left:-52px;top:-52px;width:104px;height:104px;border-radius:50%;
+  background:radial-gradient(circle at 38% 34%,#ffffff 0%,#a9d8ff 16%,#5ea2ef 34%,#7c5cff 62%,rgba(124,92,255,0) 74%);
+  box-shadow:0 0 80px 26px rgba(94,162,239,.30),0 0 160px 60px rgba(124,92,255,.16)}
+.ring{position:absolute;left:-330px;top:-118px;width:660px;height:236px;border-radius:50%;
+  border:1.5px solid rgba(124,92,255,.42);
+  box-shadow:0 0 26px rgba(124,92,255,.16),inset 0 0 26px rgba(124,92,255,.08)}
+.ring2{position:absolute;left:-250px;top:-86px;width:500px;height:172px;border-radius:50%;
+  border:1px solid rgba(34,211,238,.26)}
+.sat{position:absolute;left:-7px;top:-7px;width:14px;height:14px;border-radius:50%;
+  background:var(--cyan);box-shadow:0 0 16px 4px rgba(34,211,238,.85)}
+.hook-list{position:absolute;left:0;right:0;top:600px;display:flex;flex-direction:column;
+  align-items:center;gap:17px;z-index:3}
+.hook-line{font-size:63px;font-weight:800;letter-spacing:-.035em;line-height:1;
+  color:var(--txt);opacity:0;filter:blur(9px);transform:translateY(16px);white-space:nowrap}
+.hook-line.hot{color:#fff;text-shadow:0 0 46px rgba(124,92,255,.5)}
+.caret{display:inline-block;width:4px;height:.9em;background:var(--violet);margin-left:7px;
+  vertical-align:-.08em;border-radius:2px;animation:blink 1.05s steps(2,end) infinite}
+@keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+
+/* ══ S2 · FRICCIÓ ════════════════════════════════════════════════════════ */
+#s2{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+.clutter{position:absolute;inset:0;filter:blur(2.4px)}
+.win{position:absolute;background:#171722;border:1px solid #33334a;border-radius:12px;
+  box-shadow:0 26px 60px rgba(0,0,0,.6)}
+.win-bar{height:26px;border-bottom:1px solid #2b2b3a;display:flex;align-items:center;gap:6px;padding:0 10px;
+  background:#1c1c28}
+.dot{width:9px;height:9px;border-radius:50%}
+.mdlist{font-family:var(--mono);font-size:15.5px;line-height:2.0;color:#8e8ea8;padding:14px 20px}
+.mdlist b{color:#b6b6cc;font-weight:600}
+.folder-card{position:relative;z-index:4;width:660px;border-radius:18px;
+  background:linear-gradient(180deg,#171722,#0f0f18);border:1px solid #33334a;
+  box-shadow:0 40px 90px rgba(0,0,0,.7),0 0 0 1px rgba(124,92,255,.12),0 0 70px rgba(124,92,255,.12)}
+.fc-head{display:flex;align-items:center;gap:10px;padding:15px 20px;border-bottom:1px solid #2b2b3a;
+  background:#1b1b27;border-radius:18px 18px 0 0}
+.fc-title{font-size:15.5px;font-weight:600;color:var(--txt)}
+.fc-title small{color:var(--txt3);font-weight:400;margin-left:8px}
+.fc-list{font-family:var(--mono);font-size:17.5px;line-height:2.05;padding:18px 26px;color:#7a7a95;
+  border-radius:0 0 18px 18px}
+.fc-list span{color:#4b4b63;margin-right:10px}
+.stamp{position:absolute;right:-58px;top:50%;transform:translateY(-50%) rotate(-7deg);
+  font-family:var(--mono);font-size:22px;font-weight:700;color:var(--amber);
+  border:2.5px dashed rgba(251,191,36,.68);border-radius:12px;padding:13px 22px;
+  background:rgba(28,22,6,.92);white-space:nowrap;box-shadow:0 0 60px rgba(251,191,36,.22)}
+
+/* ══ S3 · REVELACIÓ ═════════════════════════════════════════════════════ */
+#s3{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;z-index:20}
+.flash{position:absolute;inset:0;background:radial-gradient(58% 52% at 50% 46%,rgba(150,120,255,.5),transparent 72%)}
+.wordmark{display:flex;align-items:center;gap:21px;opacity:0}
+.wordmark img{width:106px;height:106px;border-radius:25px;box-shadow:0 0 78px rgba(94,162,239,.5)}
+.wordmark .wm-t{font-size:84px;font-weight:800;letter-spacing:-.045em;line-height:1}
+.wordmark .wm-s{font-size:19px;color:var(--txt2);font-weight:500;margin-top:11px}
+.reveal-line{position:absolute;top:calc(50% + 128px);font-size:26px;font-weight:600;color:var(--txt1);
+  letter-spacing:-.012em}
+
+/* ══ APP NOORBIT ═══════════════════════════════════════════════════════ */
+#app{position:absolute;left:70px;top:30px;width:1780px;height:976px;border-radius:16px;overflow:hidden;
+  background:var(--panel);border:1px solid #23232f;
+  box-shadow:0 60px 130px rgba(0,0,0,.78),0 0 0 1px rgba(124,92,255,.10),0 0 120px rgba(124,92,255,.10);
+  transform-origin:50% 50%}
+.menubar{height:40px;display:flex;align-items:center;padding:0 10px;background:var(--panel);
+  border-bottom:1px solid var(--line);gap:2px;position:relative;z-index:20}
+.brand{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;padding:0 12px 0 4px}
+.brand .logo{width:17px;height:17px;border-radius:5px;background:var(--grad)}
+.mi{padding:6px 10px;border-radius:5px;font-size:13px;color:var(--txt1)}
+.publish-btn{margin-left:auto;display:flex;align-items:center;gap:7px;padding:6px 13px;border-radius:7px;
+  background:var(--grad);color:#fff;font-size:12.5px;font-weight:650;position:relative}
+.appbody{display:flex;height:calc(100% - 40px - 28px)}
+.actbar{width:50px;background:var(--panel);border-right:1px solid var(--line);padding:10px 0;
+  display:flex;flex-direction:column;align-items:center;gap:3px}
+.ai{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+  color:var(--txt3);position:relative}
+.ai svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round}
+.ai.on{color:var(--txt);background:var(--panel3)}
+.sidebar{width:266px;background:var(--panel);border-right:1px solid var(--line);padding:10px 0;overflow:hidden}
+.sb-h{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--txt3);
+  padding:6px 16px 10px}
+.tree{font-size:13.5px}
+.tnode{display:flex;align-items:center;gap:7px;height:25px;padding:0 12px 0 14px;color:var(--txt1);
+  white-space:nowrap}
+.tnode.proj{color:var(--txt);font-weight:600}
+.tnode.f{color:var(--txt1);padding-left:30px}
+.tnode.f .ck{margin-left:auto;color:var(--ok);font-size:12px;opacity:0}
+.tnode .ico{width:16px;text-align:center;opacity:.8}
+.editor{flex:1;display:flex;flex-direction:column;min-width:0;background:#0d0d13}
+.tabs{height:38px;display:flex;align-items:stretch;background:var(--panel);border-bottom:1px solid var(--line)}
+.tab{display:flex;align-items:center;gap:7px;padding:0 15px;font-size:13px;color:var(--txt2);
+  border-right:1px solid var(--line);position:relative}
+.tab.on{color:var(--txt);background:#0d0d13}
+.tab.on::after{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--grad)}
+.tab .dotp{width:7px;height:7px;border-radius:50%;background:var(--txt3)}
+.code{flex:1;padding:16px 0;overflow:hidden}
+.cl{display:flex;padding:0 18px;white-space:pre;font-family:var(--mono);font-size:14.5px;line-height:1.74}
+.cl::before{content:attr(data-n);width:38px;flex:none;color:#33334a;text-align:right;margin-right:20px;
+  user-select:none}
+.tx{color:#c9c9dc}
+.k{color:#c586c0}.s{color:#a5d6a7}.f{color:#82aaff}.c{color:#5d5d74;font-style:italic}.p{color:#c586c0}
+.agentside{width:468px;background:var(--panel);border-left:1px solid var(--line);display:flex;
+  flex-direction:column;overflow:hidden}
+.tabsrow{height:40px;display:flex;align-items:flex-end;padding:0 12px;gap:2px;
+  border-bottom:1px solid var(--line);background:var(--panel)}
+.atab{padding:8px 11px;font-size:12.5px;color:var(--txt3);border-bottom:2px solid transparent}
+.atab.on{color:var(--txt);border-bottom-color:var(--violet)}
+.achip{margin-left:auto;margin-bottom:8px;font-size:11px;color:var(--ok);display:flex;align-items:center;gap:5px;
+  border:1px solid rgba(74,222,128,.3);background:rgba(74,222,128,.09);padding:3px 8px;border-radius:20px}
+.chat{flex:1;padding:16px;overflow:hidden;display:flex;flex-direction:column;gap:12px}
+.bub2{max-width:92%;padding:11px 14px;border-radius:13px;font-size:14px;line-height:1.55}
+.bub2.u{align-self:flex-end;background:linear-gradient(135deg,rgba(124,92,255,.26),rgba(94,162,239,.18));
+  border:1px solid rgba(124,92,255,.34);border-bottom-right-radius:5px;color:#eceafd}
+.bub2.a{align-self:flex-start;background:var(--panel2);border:1px solid var(--line2);border-bottom-left-radius:5px;
+  color:var(--txt1)}
+.bub2 .who2{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px;
+  color:var(--green)}
+.codebub{padding:10px 12px}
+.mini{margin-top:8px;font-family:var(--mono);font-size:12.5px;line-height:1.62;color:#c9c9dc;
+  white-space:pre;overflow:hidden}
+.mini .k{color:#c586c0}.mini .s{color:#a5d6a7}.mini .f{color:#82aaff}
+.thinking{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--txt2)}
+.spin{width:13px;height:13px;border-radius:50%;border:2px solid rgba(124,92,255,.25);
+  border-top-color:var(--violet);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ctxbar{margin:0 16px 10px;border:1px solid var(--line2);border-radius:10px;padding:9px 12px;
+  background:var(--panel2);opacity:0}
+.ctxbar .lbl{display:flex;justify-content:space-between;font-size:11px;color:var(--txt2);margin-bottom:7px;
+  letter-spacing:.04em}
+.ctxbar .tr{height:5px;border-radius:4px;background:var(--panel3);overflow:hidden}
+.ctxbar .fl{height:100%;width:0;border-radius:4px;background:linear-gradient(90deg,#fbbf24,#f87171)}
+.tasks{margin:0 16px 12px;border-top:1px solid var(--line);padding-top:11px;opacity:0}
+.tasks .th{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--txt3);margin-bottom:7px}
+.trow{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--txt3);height:22px}
+.trow .bx{width:14px;height:14px;border-radius:4px;border:1.5px solid var(--line2);display:flex;
+  align-items:center;justify-content:center;font-size:10px;color:transparent;flex:none}
+.trow.done{color:var(--txt1)}
+.trow.done .bx{border-color:rgba(74,222,128,.45);background:rgba(74,222,128,.12);color:var(--ok)}
+.trow.now{color:var(--txt1)}
+.trow.now .bx{border-color:var(--violet);border-right-color:transparent;animation:spin .8s linear infinite}
+.statusbar{height:28px;background:var(--violet);color:#fff;display:flex;align-items:center;
+  padding:0 12px;font-size:12px;gap:16px;position:relative;z-index:20}
+.statusbar .sb-i{display:flex;align-items:center;gap:5px;opacity:.95}
+.statusbar .right{margin-left:auto;display:flex;gap:16px}
+.pulse{width:7px;height:7px;border-radius:50%;background:var(--ok);
+  box-shadow:0 0 0 0 rgba(74,222,128,.6);animation:pulse 1.6s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(74,222,128,.55)}70%{box-shadow:0 0 0 9px rgba(74,222,128,0)}
+  100%{box-shadow:0 0 0 0 rgba(74,222,128,0)}}
+.toast{position:absolute;left:50%;top:58px;transform:translateX(-50%);z-index:70;display:flex;
+  align-items:center;gap:10px;padding:12px 18px;border-radius:12px;background:rgba(10,18,14,.95);
+  border:1px solid rgba(74,222,128,.45);box-shadow:0 20px 50px rgba(0,0,0,.6),0 0 44px rgba(74,222,128,.22);
+  font-size:14.5px;font-weight:600;color:#d8ffe4;opacity:0;white-space:nowrap}
+.toast .ck{color:var(--ok);font-size:16px}
+.floatbadge{position:absolute;left:96px;bottom:78px;z-index:70;display:flex;align-items:center;gap:11px;
+  padding:12px 17px;border-radius:13px;background:rgba(9,13,22,.95);
+  border:1px solid rgba(74,222,128,.42);box-shadow:0 22px 50px rgba(0,0,0,.6),0 0 44px rgba(74,222,128,.16);
+  opacity:0}
+.floatbadge .tx{font-size:15px;font-weight:650;letter-spacing:-.01em}
+.floatbadge .sub{font-size:12.5px;color:var(--txt2);margin-top:2px;font-weight:400}
+.lock{width:19px;height:19px;color:var(--ok);flex:none}
+.modalwrap{position:absolute;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;
+  background:rgba(4,6,14,.64);backdrop-filter:blur(3px);opacity:0}
+.modal{width:830px;border-radius:18px;overflow:hidden;background:#12121c;border:1px solid var(--line2);
+  box-shadow:0 50px 120px rgba(0,0,0,.78)}
+.modal .mh{display:flex;align-items:center;gap:10px;padding:16px 22px;border-bottom:1px solid var(--line);
+  background:#0f0f16}
+.modal .mh h3{font-size:17px;font-weight:700;letter-spacing:-.01em}
+.modal .mh .url{font-size:12.5px;color:var(--txt2);margin-left:auto;font-family:var(--mono)}
+.mbody{padding:16px 22px}
+.step{display:flex;gap:14px;padding:12px 0;border-bottom:1px solid var(--line)}
+.step:last-child{border-bottom:none}
+.step .num{width:26px;height:26px;flex:none;border-radius:50%;border:1.5px solid var(--line2);
+  display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--txt3)}
+.step.ok .num{border-color:rgba(74,222,128,.5);background:rgba(74,222,128,.13);color:var(--ok)}
+.step .sx{flex:1}
+.step .st{font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt3);margin-bottom:5px}
+.step .sv{font-size:14.5px;color:var(--txt1);display:flex;align-items:center;gap:9px}
+.step .sv .tag{font-size:12px;padding:2.5px 8px;border-radius:6px;background:var(--panel3);color:var(--txt1);
+  font-family:var(--mono)}
+.step .sv .good{color:var(--ok);font-size:13px}
+.mfoot{padding:16px 22px;border-top:1px solid var(--line);display:flex;align-items:center;gap:14px;
+  background:#0f0f16}
+.mfoot .price{margin-left:auto;display:flex;align-items:center;gap:9px;font-size:14px;color:var(--txt2)}
+.mfoot .price b{color:var(--txt);font-size:19px}
+.btn{padding:10px 20px;border-radius:9px;font-size:14px;font-weight:650;border:none;
+  background:var(--grad);color:#fff;box-shadow:0 8px 26px rgba(124,92,255,.34)}
+.prog{height:4px;border-radius:4px;background:var(--panel3);overflow:hidden;flex:1;max-width:250px}
+.prog .pf{height:100%;width:0;background:linear-gradient(90deg,var(--violet),var(--cyan))}
+
+/* ══ S8 · MARKETPLACE ════════════════════════════════════════════════════ */
+#s8{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:90}
+.browser{width:1440px;border-radius:14px;overflow:hidden;background:#0b0f0a;border:1px solid #2a3324;
+  box-shadow:0 60px 130px rgba(0,0,0,.82)}
+.bchrome{height:52px;display:flex;align-items:center;gap:12px;padding:0 16px;background:#12180f;
+  border-bottom:1px solid #26301f}
+.bchrome .dots{display:flex;gap:7px}
+.bchrome .dots i{width:12px;height:12px;border-radius:50%;display:block}
+.urlbar{flex:1;height:32px;border-radius:8px;background:#1a2214;border:1px solid #2d3a23;display:flex;
+  align-items:center;gap:9px;padding:0 13px;font-size:13.5px;color:#cfe0bf;font-family:var(--mono)}
+.urlbar .lock{color:var(--green);font-size:12px}
+.bpage{height:642px;overflow:hidden;position:relative;background:#0b0f0a}
+.bpage img{position:absolute;top:0;left:0;width:100%;display:block}
+.newcard{position:absolute;left:50%;top:296px;width:570px;border-radius:16px;overflow:hidden;
+  background:#fff;border:1px solid #dfe4d8;box-shadow:0 44px 96px rgba(0,0,0,.62)}
+.newcard .shot{height:252px;position:relative;overflow:hidden;
+  background:linear-gradient(135deg,#e9dece,#cdb89f 46%,#a8846a)}
+.newcard .shot .word{position:absolute;left:28px;top:26px;font-family:Georgia,serif;font-size:35px;
+  color:#3a2b22;line-height:1.12}
+.badge-new{position:absolute;left:18px;top:18px;background:#4f7a2f;color:#fff;font-size:11px;
+  font-weight:700;letter-spacing:.09em;text-transform:uppercase;padding:5px 11px;border-radius:20px;
+  box-shadow:0 6px 18px rgba(0,0,0,.28)}
+.vase{position:absolute;right:74px;bottom:-18px;width:176px;height:196px;
+  border-radius:46% 46% 40% 40% / 34% 34% 66% 66%;
+  background:linear-gradient(160deg,#d09a74,#9c5f43)}
+.vase::before{content:"";position:absolute;left:50%;top:-16px;transform:translateX(-50%);
+  width:96px;height:34px;border-radius:50%;background:#7d4a34;
+  box-shadow:inset 0 4px 8px rgba(0,0,0,.35)}
+.newcard .meta{padding:16px 20px;display:flex;align-items:flex-start;gap:14px}
+.newcard .meta .l{flex:1}
+.newcard .meta h4{font-size:19px;font-weight:700;color:#1d2418;letter-spacing:-.012em}
+.newcard .meta p{font-size:13px;color:#6b7460;margin-top:5px}
+.newcard .meta .pr{font-size:24px;font-weight:800;color:#4f7a2f;letter-spacing:-.02em}
+
+/* ══ S9 · END CARD ═══════════════════════════════════════════════════════ */
+#s9{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  z-index:95}
+.end-wrap{display:flex;flex-direction:column;align-items:center;gap:21px}
+.end-logo{display:flex;align-items:center;gap:19px}
+.end-logo img{width:94px;height:94px;border-radius:23px;box-shadow:0 0 86px rgba(94,162,239,.45)}
+.end-logo .t{font-size:74px;font-weight:800;letter-spacing:-.045em;line-height:1}
+.end-tag{font-size:25px;color:var(--txt1);font-weight:500;letter-spacing:-.012em;text-align:center}
+.end-cta{display:flex;flex-direction:column;align-items:center;gap:13px;margin-top:2px}
+.end-url{position:relative;display:inline-block}
+.end-url .u{background:linear-gradient(135deg,#f6e0a2,#e8c465 55%,#c9a04a);-webkit-background-clip:text;
+  background-clip:text;color:transparent;font-size:53px;font-weight:800;letter-spacing:-.032em}
+.end-url::after{content:"";position:absolute;left:0;right:0;bottom:-9px;height:3px;border-radius:3px;
+  background:linear-gradient(90deg,#f6e0a2,#e8c465);transform:scaleX(var(--w,0));transform-origin:0 50%}
+.end-sub{font-size:19px;color:var(--txt2)}
+.end-chips{display:flex;gap:11px;margin-top:4px}
+.chip{font-size:13px;padding:7px 14px;border-radius:20px;border:1px solid var(--line2);
+  background:rgba(255,255,255,.03);color:var(--txt1);display:flex;align-items:center;gap:7px}
+.chip i{width:6px;height:6px;border-radius:50%;background:var(--green);display:block}
+.chip.v i{background:var(--violet)} .chip.y i{background:var(--gold)} .chip.c i{background:var(--cyan)}
+.end-chars{position:absolute;left:0;right:0;bottom:92px;display:flex;justify-content:center;gap:40px;
+  z-index:2}
+
+/* ══ SUBTÍTOLS ══════════════════════════════════════════════════════════ */
+.subtitle{position:absolute;left:0;right:0;bottom:14px;z-index:96;display:flex;justify-content:center;
+  pointer-events:none}
+.subtitle span{display:inline-block;max-width:1560px;text-align:center;font-size:25px;font-weight:600;
+  letter-spacing:-.012em;color:#fff;padding:9px 22px;border-radius:12px;opacity:0;
+  background:rgba(4,6,14,.68);backdrop-filter:blur(8px);
+  text-shadow:0 2px 18px rgba(0,0,0,.8);border:1px solid rgba(255,255,255,.06)}
+
+/* ══ FORMAT VERTICAL 9:16 ══════════════════════════════════════════════ */
+html[data-fmt="v"],html[data-fmt="v"] body{width:1080px;height:1920px}
+html[data-fmt="v"] .hook-list{top:1150px;gap:20px}
+html[data-fmt="v"] .hook-line{font-size:57px}
+html[data-fmt="v"] .orb{top:31%}
+html[data-fmt="v"] .core{width:132px;height:132px;left:-66px;top:-66px}
+html[data-fmt="v"] .ring{width:760px;height:272px;left:-380px;top:-136px}
+html[data-fmt="v"] .ring2{width:580px;height:200px;left:-290px;top:-100px}
+html[data-fmt="v"] .sat{width:16px;height:16px;left:-8px;top:-8px}
+html[data-fmt="v"] #clutter .win:nth-child(1){left:14px!important;top:210px!important;
+  width:320px!important;height:190px!important}
+html[data-fmt="v"] #clutter .win:nth-child(2){right:14px!important;top:300px!important;
+  width:300px!important;height:220px!important}
+html[data-fmt="v"] #clutter .win:nth-child(3){left:40px!important;bottom:240px!important;
+  width:340px!important;height:170px!important}
+html[data-fmt="v"] .folder-card{width:600px}
+html[data-fmt="v"] .fc-list{font-size:16px;line-height:1.95;padding:14px 22px}
+html[data-fmt="v"] .stamp{right:auto;left:50%;top:auto;bottom:-46px;transform:translateX(-50%) rotate(-5deg);
+  font-size:19px;padding:11px 18px}
+html[data-fmt="v"] .wordmark{gap:16px}
+html[data-fmt="v"] .wordmark img{width:84px;height:84px;border-radius:20px}
+html[data-fmt="v"] .wordmark .wm-t{font-size:62px}
+html[data-fmt="v"] .wordmark .wm-s{font-size:16px;margin-top:9px}
+html[data-fmt="v"] .reveal-line{top:calc(50% + 108px);font-size:22px;text-align:center;width:90%}
+html[data-fmt="v"] #app{left:24px;top:274px;width:1032px;height:1372px}
+html[data-fmt="v"] .appbody{flex-direction:column}
+html[data-fmt="v"] .actbar{width:100%;height:44px;flex-direction:row;border-right:none;
+  border-bottom:1px solid var(--line);padding:0 10px;gap:4px}
+html[data-fmt="v"] .sidebar{width:100%;height:365px;border-right:none;border-bottom:1px solid var(--line);
+  padding:8px 0}
+html[data-fmt="v"] .editor{flex:1;min-height:0;height:420px}
+html[data-fmt="v"] .tnode{height:22px;font-size:12.5px}
+html[data-fmt="v"] .sb-h{padding:5px 16px 7px}
+html[data-fmt="v"] .agentside{width:100%;height:475px;border-left:none;border-top:1px solid var(--line)}
+html[data-fmt="v"] .cl{font-size:13px;padding:0 14px}
+html[data-fmt="v"] .cl::before{width:30px;margin-right:14px}
+html[data-fmt="v"] .tasks{display:none}
+html[data-fmt="v"] .chat{gap:11px;padding:14px}
+html[data-fmt="v"] .bub2{font-size:13.5px}
+html[data-fmt="v"] .mini{font-size:12px}
+html[data-fmt="v"] .toast{top:54px;font-size:13.5px;padding:10px 15px}
+html[data-fmt="v"] .floatbadge{left:44px;bottom:48px}
+html[data-fmt="v"] .modal{width:940px}
+html[data-fmt="v"] .browser{width:1032px}
+html[data-fmt="v"] .bpage{height:760px}
+html[data-fmt="v"] .newcard{top:330px;width:520px}
+html[data-fmt="v"] .newcard .shot{height:236px}
+html[data-fmt="v"] .end-wrap{gap:26px}
+html[data-fmt="v"] .end-logo img{width:78px;height:78px;border-radius:19px}
+html[data-fmt="v"] .end-logo .t{font-size:58px}
+html[data-fmt="v"] .end-tag{font-size:24px;max-width:900px}
+html[data-fmt="v"] .end-url .u{font-size:43px}
+html[data-fmt="v"] .end-sub{font-size:19px;text-align:center;max-width:900px}
+html[data-fmt="v"] .end-chips{flex-wrap:wrap;justify-content:center;max-width:900px}
+html[data-fmt="v"] .end-chars{bottom:170px;gap:20px}
+html[data-fmt="v"] .subtitle span{font-size:22px;max-width:960px;padding:8px 18px}
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+
+  <!-- ══ S1 · HOOK ══ -->
+  <div id="s1">
+    <div class="orb">
+      <div class="core" id="s1core"></div>
+      <div class="ring" id="s1ring"></div>
+      <div class="ring2" id="s1ring2"></div>
+      <div class="sat" id="s1sat"></div>
+    </div>
+    <div class="hook-list">
+      <div class="hook-line" id="h1">Una idea<span class="caret"></span></div>
+      <div class="hook-line" id="h2">Un termini<span class="caret"></span></div>
+      <div class="hook-line hot" id="h3">I una carpeta buida<span class="caret"></span></div>
+    </div>
+  </div>
+
+  <!-- ══ S2 · FRICCIÓ ══ -->
+  <div id="s2">
+    <div class="clutter" id="clutter">
+      <div class="win" style="left:60px;top:110px;width:430px;height:262px">
+        <div class="win-bar"><i class="dot" style="background:#f87171"></i><i class="dot" style="background:#fbbf24"></i><i class="dot" style="background:#4ade80"></i></div>
+        <div class="mdlist"><b>chat.openai.com</b><br>— res pots fer<br>— sí, aquí el codi<br>— no, el PHP<br><b>claude.ai</b><br>— torna a provar<br><b>stackoverflow</b><br>— com es fa un CPT?</div>
+      </div>
+      <div class="win" style="right:70px;top:170px;width:410px;height:310px">
+        <div class="win-bar"><i class="dot" style="background:#f87171"></i><i class="dot" style="background:#fbbf24"></i><i class="dot" style="background:#4ade80"></i></div>
+        <div class="mdlist"><b>Figma — taller</b><br>· v12<br>· v12 FINAL<br>· v12 FINAL2<br>· v12 FINAL3<br>· v12 FINAL4<br><b>Notion</b><br>· preus 2026<br>· TODO</div>
+      </div>
+      <div class="win" style="left:230px;bottom:80px;width:470px;height:200px">
+        <div class="win-bar"><i class="dot" style="background:#f87171"></i><i class="dot" style="background:#fbbf24"></i><i class="dot" style="background:#4ade80"></i></div>
+        <div class="mdlist"><b>Notes.txt</b><br>recorda preguntar pel preu<br>recorda el client torna dimarts<br>recorda que el verd no és el bon</div>
+      </div>
+    </div>
+    <div class="folder-card" id="folder">
+      <div class="fc-head">
+        <span style="font-size:17px">📁</span>
+        <span class="fc-title">tema-ceramica<small>projecte nou · buit</small></span>
+      </div>
+      <div class="fc-list">
+        <div><span>└</span>bloc_1.md</div>
+        <div><span>└</span>bloc_2.md</div>
+        <div><span>└</span>bloc_3.md</div>
+        <div><span>└</span>notes.md</div>
+        <div><span>└</span>README.md</div>
+        <div><span>└</span>TODO.md</div>
+      </div>
+      <div class="stamp" id="stamp">0 línies de codi</div>
+    </div>
+  </div>
+
+  <!-- ══ S3 · REVELACIÓ ══ -->
+  <div id="s3">
+    <div class="flash" id="flash"></div>
+    <div class="wordmark" id="wordmark">
+      <img src="assets/appicon.png" alt="" />
+      <div>
+        <div class="wm-t c-grad">NoOrbit</div>
+        <div class="wm-s">L'IDE que construeix amb tu</div>
+      </div>
+      <svg class="chr" id="revealOrb" viewBox="0 0 280 320" width="190" height="217"
+        style="opacity:0;margin-left:-8px">
+        <defs>
+          <radialGradient id="orbBody3" cx="38%" cy="30%" r="78%">
+            <stop offset="0%" stop-color="#ffffff"/><stop offset="16%" stop-color="#d5e9ff"/>
+            <stop offset="40%" stop-color="#78b6f7"/><stop offset="72%" stop-color="#7c5cff"/>
+            <stop offset="100%" stop-color="#4b2fd6"/></radialGradient>
+          <linearGradient id="orbRing3" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#22d3ee"/><stop offset="55%" stop-color="#7c5cff"/>
+            <stop offset="100%" stop-color="#5ea2ef"/></linearGradient>
+          <filter id="orbGlow3" x="-70%" y="-70%" width="240%" height="240%">
+            <feGaussianBlur stdDeviation="11" result="b"/>
+            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        </defs>
+        <ellipse class="halo" cx="140" cy="150" rx="120" ry="38" fill="none"
+          stroke="url(#orbRing3)" stroke-width="7" opacity=".95" filter="url(#orbGlow3)"/>
+        <circle cx="140" cy="158" r="78" fill="url(#orbBody3)" filter="url(#orbGlow3)"/>
+        <ellipse cx="92" cy="178" rx="14" ry="8" fill="#ff7f9e" opacity=".5"/>
+        <ellipse cx="188" cy="178" rx="14" ry="8" fill="#ff7f9e" opacity=".5"/>
+        <g class="eye">
+          <ellipse cx="112" cy="146" rx="16" ry="20" fill="#241f45"/>
+          <ellipse cx="168" cy="146" rx="16" ry="20" fill="#241f45"/>
+          <circle cx="106" cy="138" r="7" fill="#fff"/><circle cx="162" cy="138" r="7" fill="#fff"/>
+          <circle cx="118" cy="157" r="3.4" fill="#fff" opacity=".75"/>
+          <circle cx="174" cy="157" r="3.4" fill="#fff" opacity=".75"/>
+        </g>
+        <path class="mouth" d="M125 179 q15 16 30 0" stroke="#241f45" stroke-width="5" fill="none" stroke-linecap="round"/>
+        <ellipse class="hand-l" cx="66" cy="172" rx="14" ry="11" fill="#9ec6ff"/>
+        <ellipse class="hand-r" cx="214" cy="172" rx="14" ry="11" fill="#9ec6ff"/>
+      </svg>
+    </div>
+    <div class="reveal-line" id="revealLine">Tot el projecte, en una sola finestra.</div>
+  </div>
+
+  <!-- ══ S4 · ELS PERSONATGES EXPLIQUEN ══ -->
+  <div id="s4">
+    <div class="ctabg"></div>
+    <div class="bokeh b1"></div><div class="bokeh b2"></div>
+    <div class="bokeh b3"></div><div class="bokeh b4"></div>
+    <div class="speed" id="speed"></div>
+    <div class="focus" id="focus"></div>
+
+    <!-- PIP -->
+    <div class="slot" id="pipSlot" style="left:420px;top:330px">
+      <div class="shadow"></div>
+      <svg class="chr" id="pipSvg" viewBox="0 0 230 320" width="300" height="418">
+        <defs>
+          <linearGradient id="pipHair" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#96674a"/><stop offset="100%" stop-color="#6b4632"/>
+          </linearGradient>
+          <linearGradient id="pipDress" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#ffce6b"/><stop offset="100%" stop-color="#eda22a"/>
+          </linearGradient>
+        </defs>
+        <path d="M52 100 q0 -62 63 -62 q63 0 63 62 q0 44 -15 62 q-10 -47 -48 -47 q-38 0 -48 47 q-15 -18 -15 -62z" fill="url(#pipHair)"/>
+        <path d="M78 198 q37 -15 74 0 l15 110 q-52 16 -104 0 z" fill="url(#pipDress)"/>
+        <path d="M99 190 q16 17 32 0 q-5 -15 -16 -15 q-11 0 -16 15z" fill="#fff"/>
+        <path class="arm-l" d="M84 206 q-30 26 -24 58" stroke="#ffe2ca" stroke-width="16" fill="none" stroke-linecap="round"/>
+        <path class="arm-r" d="M148 208 q38 -8 40 -46" stroke="#ffe2ca" stroke-width="16" fill="none" stroke-linecap="round"/>
+        <g class="pencil" transform="translate(176 110) rotate(26)">
+          <rect x="0" y="0" width="12" height="56" rx="3.5" fill="#5ea2ef"/>
+          <rect x="0" y="0" width="12" height="13" rx="3.5" fill="#ff9bb0"/>
+          <path d="M0 56 l6 14 l6 -14 z" fill="#ffe9c4"/>
+        </g>
+        <ellipse cx="115" cy="106" rx="55" ry="53" fill="#ffe2ca"/>
+        <path d="M60 98 q2 -60 55 -60 q53 0 55 60 q-16 -23 -33 -21 q-8 -19 -24 -19 q-16 0 -22 20 q-19 -4 -31 20z" fill="url(#pipHair)"/>
+        <path d="M61 94 q-9 35 3 58 q-15 -6 -17 -31 q-2 -19 14 -27z" fill="url(#pipHair)"/>
+        <path d="M169 94 q9 35 -3 58 q15 -6 17 -31 q2 -19 -14 -27z" fill="url(#pipHair)"/>
+        <ellipse cx="82" cy="127" rx="13" ry="7" fill="#ff8fa3" opacity=".45"/>
+        <ellipse cx="148" cy="127" rx="13" ry="7" fill="#ff8fa3" opacity=".45"/>
+        <g class="eye">
+          <ellipse cx="97" cy="110" rx="11.5" ry="14.5" fill="#2b2440"/>
+          <ellipse cx="133" cy="110" rx="11.5" ry="14.5" fill="#2b2440"/>
+          <circle cx="93" cy="104" r="4.6" fill="#fff"/>
+          <circle cx="129" cy="104" r="4.6" fill="#fff"/>
+          <circle cx="101" cy="117" r="2.4" fill="#fff" opacity=".7"/>
+          <circle cx="137" cy="117" r="2.4" fill="#fff" opacity=".7"/>
+        </g>
+        <path class="mouth" d="M106 134 q9 10 18 0" stroke="#b45a62" stroke-width="4.2" fill="none" stroke-linecap="round"/>
+      </svg>
+    </div>
+
+    <!-- ORBI -->
+    <div class="slot" id="orbSlot" style="left:1090px;top:360px">
+      <div class="shadow"></div>
+      <svg class="chr" id="orbSvg" viewBox="0 0 280 320" width="330" height="377">
+        <defs>
+          <radialGradient id="orbBody" cx="38%" cy="30%" r="78%">
+            <stop offset="0%" stop-color="#ffffff"/><stop offset="16%" stop-color="#d5e9ff"/>
+            <stop offset="40%" stop-color="#78b6f7"/><stop offset="72%" stop-color="#7c5cff"/>
+            <stop offset="100%" stop-color="#4b2fd6"/>
+          </radialGradient>
+          <linearGradient id="orbRing" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#22d3ee"/><stop offset="55%" stop-color="#7c5cff"/>
+            <stop offset="100%" stop-color="#5ea2ef"/>
+          </linearGradient>
+          <filter id="orbGlow" x="-70%" y="-70%" width="240%" height="240%">
+            <feGaussianBlur stdDeviation="13" result="b"/>
+            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <ellipse class="halo" cx="140" cy="150" rx="120" ry="38" fill="none"
+          stroke="url(#orbRing)" stroke-width="6" opacity=".9" filter="url(#orbGlow)"/>
+        <circle cx="140" cy="158" r="78" fill="url(#orbBody)" filter="url(#orbGlow)"/>
+        <ellipse cx="92" cy="178" rx="14" ry="8" fill="#ff7f9e" opacity=".5"/>
+        <ellipse cx="188" cy="178" rx="14" ry="8" fill="#ff7f9e" opacity=".5"/>
+        <g class="eye">
+          <ellipse cx="112" cy="146" rx="16" ry="20" fill="#241f45"/>
+          <ellipse cx="168" cy="146" rx="16" ry="20" fill="#241f45"/>
+          <circle cx="106" cy="138" r="7" fill="#fff"/>
+          <circle cx="162" cy="138" r="7" fill="#fff"/>
+          <circle cx="118" cy="157" r="3.4" fill="#fff" opacity=".75"/>
+          <circle cx="174" cy="157" r="3.4" fill="#fff" opacity=".75"/>
+        </g>
+        <path class="mouth" d="M125 179 q15 16 30 0" stroke="#241f45" stroke-width="5" fill="none" stroke-linecap="round"/>
+        <ellipse class="hand-l" cx="66" cy="172" rx="14" ry="11" fill="#9ec6ff"/>
+        <ellipse class="hand-r" cx="214" cy="172" rx="14" ry="11" fill="#9ec6ff"/>
+      </svg>
+    </div>
+
+    <!-- bombolles -->
+    <div class="bub pip" id="bubPip"><span class="who">Pip</span><span class="txt" id="bubPipText"></span><i class="tail"></i></div>
+    <div class="bub orbi" id="bubOrb"><span class="who">Orbi</span><span class="txt" id="bubOrbText"></span><i class="tail"></i></div>
+
+    <!-- brillants -->
+    <div class="spark" id="spark">
+      <svg id="sparkSvg" viewBox="0 0 1920 1080" width="1920" height="1080">
+        <defs><filter id="spGlow" x="-90%" y="-90%" width="280%" height="280%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+        <g fill="#fff" filter="url(#spGlow)">
+          <path class="sp" data-i="0" d="M0 -22 L6 -6 L22 0 L6 6 L0 22 L-6 6 L-22 0 L-6 -6 Z"/>
+          <path class="sp" data-i="1" d="M0 -16 L4.5 -4.5 L16 0 L4.5 4.5 L0 16 L-4.5 4.5 L-16 0 L-4.5 -4.5 Z"/>
+          <path class="sp" data-i="2" d="M0 -12 L3.4 -3.4 L12 0 L3.4 3.4 L0 12 L-3.4 3.4 L-12 0 L-3.4 -3.4 Z"/>
+          <path class="sp" data-i="3" d="M0 -26 L7 -7 L26 0 L7 7 L0 26 L-7 7 L-26 0 L-7 -7 Z"/>
+          <path class="sp" data-i="4" d="M0 -14 L3.8 -3.8 L14 0 L3.8 3.8 L0 14 L-3.8 3.8 L-14 0 L-3.8 -3.8 Z"/>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  <!-- ══ APP ══ -->
+  <div id="app">
+    <div class="menubar">
+      <div class="brand"><div class="logo"></div><span>NoOrbit</span></div>
+      <div class="mi">Fitxer</div><div class="mi">Edició</div><div class="mi">Selecció</div>
+      <div class="mi">Vista</div><div class="mi">Ves</div><div class="mi">Executa</div>
+      <div class="mi">Terminal</div><div class="mi">IA</div><div class="mi">Ajuda</div>
+      <div class="publish-btn" id="publishBtn"><span class="up">⇧</span><span>Pujar tema…</span></div>
+    </div>
+    <div class="appbody">
+      <div class="actbar">
+        <div class="ai on"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
+        <div class="ai"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></div>
+        <div class="ai"><svg viewBox="0 0 24 24"><circle cx="7" cy="6" r="2"/><circle cx="7" cy="18" r="2"/><path d="M7 8v8"/><path d="M11 7h5a3 3 0 0 1 0 6h-3a3 3 0 0 0 0 6h5"/></svg></div>
+        <div class="ai"><svg viewBox="0 0 24 24"><path d="M12 2 21 7v10l-9 5-9-5V7z"/><path d="m3 7 9 5 9-5"/><path d="M12 12v10"/></svg></div>
+        <div class="ai"><svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="11" rx="4"/><path d="M7 11v3M5.5 12.5h3"/><circle cx="16" cy="12" r="1"/><circle cx="18.5" cy="13.5" r="1"/></svg></div>
+        <div class="ai"><svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18.5h2"/></svg></div>
+        <div class="ai"><svg viewBox="0 0 24 24"><path d="M12 3a4 4 0 0 1 4 4v1h1a3 3 0 0 1 0 6h-1v3a3 3 0 0 1-6 0v-3H8a3 3 0 0 1 0-6h1V7a4 4 0 0 1 3-4z"/><path d="M12 3v4"/></svg></div>
+        <div class="ai"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2 2 2 0 1 1-4 0 1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 4.6 15a2 2 0 1 1 0-4 1.7 1.7 0 0 0 1.2-2.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 11.5 4a2 2 0 1 1 4 0 1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 19.4 11a2 2 0 1 1 0 4z"/></svg></div>
+      </div>
+      <div class="sidebar">
+        <div class="sb-h">Explorador</div>
+        <div class="tree" id="tree">
+          <div class="tnode proj"><span class="ico">▾</span><span>⌄ atelier-ceramica</span></div>
+          <div class="tnode f" data-f="style.css"><span class="ico">◆</span><span>style.css</span><span class="ck">✓</span></div>
+          <div class="tnode f" data-f="functions.php"><span class="ico">◆</span><span>functions.php</span><span class="ck">✓</span></div>
+          <div class="tnode f" data-f="index.php"><span class="ico">◆</span><span>index.php</span><span class="ck">✓</span></div>
+          <div class="tnode f" data-f="header.php"><span class="ico">◆</span><span>header.php</span><span class="ck">✓</span></div>
+          <div class="tnode f" data-f="footer.php"><span class="ico">◆</span><span>footer.php</span><span class="ck">✓</span></div>
+          <div class="tnode f" data-f="page.php"><span class="ico">◆</span><span>page.php</span><span class="ck">✓</span></div>
+          <div class="tnode f" data-f="single.php"><span class="ico">◆</span><span>single.php</span><span class="ck">✓</span></div>
+          <div class="tnode f" data-f="archive.php"><span class="ico">◆</span><span>archive.php</span><span class="ck">✓</span></div>
+          <div class="tnode f" data-f="404.php"><span class="ico">◆</span><span>404.php</span><span class="ck">✓</span></div>
+          <div class="tnode f" data-f="comments.php"><span class="ico">◆</span><span>comments.php</span><span class="ck">✓</span></div>
+          <div class="tnode f" data-f="sidebar.php"><span class="ico">◆</span><span>sidebar.php</span><span class="ck">✓</span></div>
+          <div class="tnode f" data-f="admin.php"><span class="ico">◆</span><span>admin.php</span><span class="ck">✓</span></div>
+          <div class="tnode f" data-f="screenshot.png"><span class="ico">▣</span><span>screenshot.png</span><span class="ck">✓</span></div>
+          <div class="tnode f" data-f="theme.json"><span class="ico">◆</span><span>theme.json</span><span class="ck">✓</span></div>
+        </div>
+      </div>
+      <div class="editor">
+        <div class="tabs">
+          <div class="tab" id="tabPhp"><span class="dotp" style="background:#7c5cff"></span>functions.php</div>
+          <div class="tab" id="tabCss"><span class="dotp" style="background:#5ea2ef"></span>style.css</div>
+        </div>
+        <div class="code" id="code"></div>
+      </div>
+      <div class="agentside">
+        <div class="tabsrow">
+          <div class="atab on">Xat</div><div class="atab">Equip</div><div class="atab">Ordinador</div>
+          <div class="atab">Unreal</div><div class="atab">Blender</div><div class="atab">Mòbil</div>
+          <div class="achip">● IA local</div>
+        </div>
+        <div class="chat" id="chat">
+          <div class="bub2 u" id="bubU" style="opacity:0"></div>
+          <div class="bub2 a" id="bubA" style="opacity:0">
+            <div class="who2">NoOrbit</div>
+            <div id="bubAText"></div>
+          </div>
+          <div class="bub2 a codebub" id="bubCode" style="opacity:0">
+            <div class="who2">NoOrbit · escriu el fitxer</div>
+            <pre class="mini" id="miniCode"></pre>
+          </div>
+          <div class="thinking" id="thinking" style="opacity:0"><span class="spin"></span><span id="thinkingTxt">Treballant… 3s · RAM 34%</span></div>
+        </div>
+        <div class="ctxbar" id="ctxbar">
+          <div class="lbl"><span id="ctxLbl">Context</span><span id="ctxVal">100%</span></div>
+          <div class="tr"><div class="fl" id="ctxFill"></div></div>
+        </div>
+        <div class="tasks" id="tasks">
+          <div class="th">Llista de tasques</div>
+          <div id="taskRows"></div>
+        </div>
+      </div>
+    </div>
+    <div class="statusbar">
+      <div class="sb-i"><span class="pulse"></span><span id="sbWork">La IA està treballant…</span></div>
+      <div class="sb-i">⌄ atelier-ceramica</div>
+      <div class="right">
+        <div class="sb-i">⑂ main</div><div class="sb-i">◉ 0</div><div class="sb-i">RAM 34%</div>
+        <div class="sb-i">IA local · 2 models</div>
+      </div>
+    </div>
+    <div class="toast" id="toast"><span class="ck">✓</span><span id="toastTxt">Context compactat · 8,4k → 1,2k tokens. Continuo.</span></div>
+    <div class="floatbadge" id="badgeLocal">
+      <svg class="lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+        stroke-linecap="round" stroke-linejoin="round">
+        <rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>
+      </svg>
+      <div><div class="tx">IA local</div><div class="sub">Res surt del teu ordinador</div></div>
+    </div>
+    <div class="modalwrap" id="modalWrap">
+      <div class="modal" id="modal">
+        <div class="mh">
+          <span style="font-size:19px">⇧</span>
+          <h3>Pujar tema a themes.thepuigberts.com</h3>
+          <div class="url">WordPress · REST API</div>
+        </div>
+        <div class="mbody">
+          <div class="step" id="st1">
+            <div class="num">1</div>
+            <div class="sx"><div class="st">Tema</div>
+              <div class="sv"><span>atelier-ceramica</span><span class="tag">14 fitxers</span>
+                <span class="good" id="zipOk" style="opacity:0">✓ ZIP a punt</span></div>
+            </div>
+          </div>
+          <div class="step" id="st2">
+            <div class="num">2</div>
+            <div class="sx"><div class="st">El teu compte</div>
+              <div class="sv"><span>Identificat com a joan@thepuigberts.com</span>
+                <span class="good" id="accOk" style="opacity:0">✓</span></div>
+            </div>
+          </div>
+          <div class="step" id="st3">
+            <div class="num">3</div>
+            <div class="sx"><div class="st">Publicació al marketplace</div>
+              <div class="sv"><span>Preu</span><span class="tag">49,00 €</span>
+                <span class="tag">Categoria · arts i ofici</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="mfoot">
+          <button class="btn" id="pubBtn">Publica el tema</button>
+          <div class="prog" id="prog" style="opacity:0"><div class="pf" id="progFill"></div></div>
+          <div class="price" id="priceBox"><span>Preu</span><b>49,00 €</b></div>
+          <div id="pubDone" style="opacity:0;color:#4ade80;font-size:14px;font-weight:650">✓ Tema publicat</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ S8 · MARKETPLACE ══ -->
+  <div id="s8">
+    <div class="browser" id="browser">
+      <div class="bchrome">
+        <div class="dots"><i style="background:#f87171"></i><i style="background:#fbbf24"></i><i style="background:#4ade80"></i></div>
+        <div class="urlbar"><span class="lock">🔒</span><span>themes.thepuigberts.com</span></div>
+      </div>
+      <div class="bpage">
+        <img src="assets/market-home.png" id="marketImg" alt="" />
+        <div class="newcard" id="newcard">
+          <div class="shot"><div class="badge-new">Nou</div>
+            <div class="word">Farg,<br/>ceràmica<br/>i foc</div><div class="vase"></div>
+          </div>
+          <div class="meta">
+            <div class="l"><h4>atelier Ceràmica</h4><p>Tema WordPress per a tallers d'art · v1.0.0 · Destacat</p></div>
+            <div class="pr">49,00 €</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ S9 · END CARD ══ -->
+  <div id="s9">
+    <div class="orb" style="top:50%">
+      <div class="core" id="s9core" style="opacity:0"></div>
+      <div class="ring" id="s9ring" style="opacity:0"></div>
+    </div>
+    <div class="end-wrap">
+      <div class="end-logo" id="endLogo">
+        <img src="assets/appicon.png" alt="" />
+        <div class="t c-grad">NoOrbit</div>
+      </div>
+      <div class="end-tag" id="endTag">Tot gira al voltant de la teva idea.</div>
+      <div class="end-cta">
+        <div class="end-url" id="endUrl"><span class="u">themes.thepuigberts.com</span></div>
+        <div class="end-sub" id="endSub">Descriu el teu tema. NoOrbit l'escriu i el puja a la venda.</div>
+        <div class="end-chips" id="endChips">
+          <div class="chip"><i></i>Gratuït i de codi obert</div>
+          <div class="chip v"><i></i>IA local</div>
+          <div class="chip y"><i></i>Publica en un clic</div>
+          <div class="chip c"><i></i>Blender · Unreal · Mòbil</div>
+        </div>
+      </div>
+    </div>
+    <div class="end-chars" id="endChars">
+      <div class="slot" id="endPip" style="position:relative;left:auto;top:auto;width:190px">
+        <svg class="chr" viewBox="0 0 230 320" width="190" height="264">
+          <defs>
+            <linearGradient id="pipHair2" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#96674a"/><stop offset="100%" stop-color="#6b4632"/></linearGradient>
+            <linearGradient id="pipDress2" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#ffce6b"/><stop offset="100%" stop-color="#eda22a"/></linearGradient>
+          </defs>
+          <path d="M52 100 q0 -62 63 -62 q63 0 63 62 q0 44 -15 62 q-10 -47 -48 -47 q-38 0 -48 47 q-15 -18 -15 -62z" fill="url(#pipHair2)"/>
+          <path d="M78 198 q37 -15 74 0 l15 110 q-52 16 -104 0 z" fill="url(#pipDress2)"/>
+          <path class="arm-l" d="M81 207 q-26 20 -22 52" stroke="#ffe2ca" stroke-width="16" fill="none" stroke-linecap="round"/>
+          <path class="arm-r" d="M149 207 q28 18 26 50" stroke="#ffe2ca" stroke-width="16" fill="none" stroke-linecap="round"/>
+          <ellipse cx="115" cy="106" rx="55" ry="53" fill="#ffe2ca"/>
+          <path d="M60 98 q2 -60 55 -60 q53 0 55 60 q-16 -23 -33 -21 q-8 -19 -24 -19 q-16 0 -22 20 q-19 -4 -31 20z" fill="url(#pipHair2)"/>
+          <path d="M61 94 q-9 35 3 58 q-15 -6 -17 -31 q-2 -19 14 -27z" fill="url(#pipHair2)"/>
+          <path d="M169 94 q9 35 -3 58 q15 -6 17 -31 q2 -19 -14 -27z" fill="url(#pipHair2)"/>
+          <ellipse cx="82" cy="127" rx="13" ry="7" fill="#ff8fa3" opacity=".45"/>
+          <ellipse cx="148" cy="127" rx="13" ry="7" fill="#ff8fa3" opacity=".45"/>
+          <g class="eye">
+            <ellipse cx="97" cy="110" rx="11.5" ry="14.5" fill="#2b2440"/>
+            <ellipse cx="133" cy="110" rx="11.5" ry="14.5" fill="#2b2440"/>
+            <circle cx="93" cy="104" r="4.6" fill="#fff"/><circle cx="129" cy="104" r="4.6" fill="#fff"/>
+          </g>
+          <path class="mouth" d="M106 134 q9 10 18 0" stroke="#b45a62" stroke-width="4.2" fill="none" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="slot" id="endOrb" style="position:relative;left:auto;top:auto;width:205px">
+        <svg class="chr" viewBox="0 0 280 320" width="205" height="234">
+          <defs>
+            <radialGradient id="orbBody2" cx="38%" cy="30%" r="78%">
+              <stop offset="0%" stop-color="#ffffff"/><stop offset="16%" stop-color="#d5e9ff"/>
+              <stop offset="40%" stop-color="#78b6f7"/><stop offset="72%" stop-color="#7c5cff"/>
+              <stop offset="100%" stop-color="#4b2fd6"/></radialGradient>
+            <linearGradient id="orbRing2" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#22d3ee"/><stop offset="55%" stop-color="#7c5cff"/>
+              <stop offset="100%" stop-color="#5ea2ef"/></linearGradient>
+          </defs>
+          <ellipse class="halo" cx="140" cy="150" rx="120" ry="38" fill="none"
+            stroke="url(#orbRing2)" stroke-width="7" opacity=".9"/>
+          <circle cx="140" cy="158" r="78" fill="url(#orbBody2)"/>
+          <ellipse cx="92" cy="178" rx="14" ry="8" fill="#ff7f9e" opacity=".5"/>
+          <ellipse cx="188" cy="178" rx="14" ry="8" fill="#ff7f9e" opacity=".5"/>
+          <g class="eye">
+            <ellipse cx="112" cy="146" rx="16" ry="20" fill="#241f45"/>
+            <ellipse cx="168" cy="146" rx="16" ry="20" fill="#241f45"/>
+            <circle cx="106" cy="138" r="7" fill="#fff"/><circle cx="162" cy="138" r="7" fill="#fff"/>
+          </g>
+          <path class="mouth" d="M125 179 q15 16 30 0" stroke="#241f45" stroke-width="5" fill="none" stroke-linecap="round"/>
+          <ellipse class="hand-l" cx="66" cy="172" rx="14" ry="11" fill="#9ec6ff"/>
+          <ellipse class="hand-r" cx="214" cy="172" rx="14" ry="11" fill="#9ec6ff"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="subtitle"><span id="subText"></span></div>
+  <div class="vign"></div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════════════
+   DIRECTOR · tota l'animació és funció del temps t → render(t) és determinista
+   ══════════════════════════════════════════════════════════════════════════ */
+const clamp=(v,a=0,b=1)=>Math.min(b,Math.max(a,v));
+const seg=(t,a,b)=>clamp((t-a)/(b-a));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const eOut=x=>1-Math.pow(1-x,3);
+const eIO=x=>x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;
+const eBack=x=>{const c1=1.9,c3=c1+1;return 1+c3*Math.pow(x-1,3)+c1*Math.pow(x-1,2)};
+const $=(s,r=document)=>r.querySelector(s);
+const $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const show=(el,v)=>{el.style.opacity=v;el.style.visibility=v>0.001?"visible":"hidden"};
+
+const PHP=[
+  [["<?php","p"]],[["/*","c"]],[[" * atelier-ceramica — tema WordPress","c"]],
+  [[" * Fet amb NoOrbit · fitxer a fitxer","c"]],[[" */","c"]],[["" ,"c"]],
+  [["add_action(","f"],["'after_setup_theme', 'atelier_setup' );","s"]],
+  [["function ","k"],["atelier_setup","f"],["() {","tx"]],
+  [["    add_theme_support(","f"],["'title-tag'","s"],[");","tx"]],
+  [["    add_theme_support(","f"],["'post-thumbnails'","s"],[");","tx"]],
+  [["    add_theme_support(","f"],["'html5'","s"],[", [ 'search-form', 'gallery' ] );","tx"]],
+  [["    register_nav_menus(","f"],["'principal'","s"],[", __( 'Menú principal', 'atelier' ) );","tx"]],
+  [["}","tx"]],[["" ,"c"]],
+  [["add_filter(","f"],["'body_class'","s"],[", function( $classes ) {","tx"]],
+  [["    $classes[] = ","tx"],["'atelier-taller'","s"],[";","tx"]],
+  [["    return $classes;","tx"]],[["} );","tx"]]
+];
+const CSS=[
+  [["/*","c"]],[[" * Theme Name: Atelier Ceràmica","c"]],[[" * Version: 1.0.0","c"]],
+  [[" * Text Domain: atelier-ceramica","c"]],[[" */","c"]],[["" ,"c"]],[[":root {","k"]],
+  [["    --ceramic-bg: ","tx"],["#f6f2ec","s"],[";","tx"]],
+  [["    --ceramic-ink: ","tx"],["#2b2622","s"],[";","tx"]],
+  [["    --ceramic-clay: ","tx"],["#b4674a","s"],[";","tx"]],
+  [["    --ceramic-radius: ","tx"],["14px","n"],[";","tx"]],[["}","tx"]],[["" ,"c"]],
+  [["body { background: var(--ceramic-bg); color: var(--ceramic-ink); }","tx"]]
+];
+const MINI=[
+  [["add_action(","f"],["'after_setup_theme'","s"],[", ","tx"],["'atelier_setup'","s"],[");","tx"]],
+  [["function ","k"],["atelier_setup","f"],["() {","tx"]],
+  [["    add_theme_support(","f"],["'post-thumbnails'","s"],[");","tx"]],
+  [["    add_theme_support(","f"],["'html5'","s"],[", [ 'gallery' ] );","tx"]],[["}","tx"]]
+];
+const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const totalChars=l=>l.reduce((a,t)=>a+t.reduce((b,[s])=>b+s.length,0),0);
+const PHP_N=totalChars(PHP), CSS_N=totalChars(CSS), MINI_N=totalChars(MINI);
+
+function renderLines(el,lines,chars){
+  let left=chars,out="",n=0;
+  for(const toks of lines){
+    let html="",done=true;
+    for(const [txt,cls] of toks){
+      if(left<=0){done=false;break}
+      if(left>=txt.length){html+=`<span class="${cls}">${esc(txt)}</span>`;left-=txt.length}
+      else{html+=`<span class="${cls}">${esc(txt.slice(0,left))}</span>`;left=0;done=false;break}
+    }
+    out+=`<div class="cl" data-n="${++n}" style="opacity:${done?1:0}"><span class="tx">${html||"&nbsp;"}</span></div>`;
+  }
+  el.innerHTML=out;
+}
+function renderMini(el,lines,chars){
+  let left=chars,out="";
+  for(const toks of lines){
+    let html="",done=true;
+    for(const [txt,cls] of toks){
+      if(left<=0){done=false;break}
+      if(left>=txt.length){html+=`<span class="${cls}">${esc(txt)}</span>`;left-=txt.length}
+      else{html+=`<span class="${cls}">${esc(txt.slice(0,left))}</span>`;left=0;done=false;break}
+    }
+    out+=html||"";
+    if(!done) break;
+    out+="\n";
+  }
+  el.innerHTML=out;
+}
+
+const FILES=["style.css","functions.php","index.php","header.php","footer.php","page.php",
+  "single.php","archive.php","404.php","comments.php","sidebar.php","admin.php",
+  "screenshot.png","theme.json"];
+const REQ="Fes-me un tema WordPress per a un taller de ceràmica. Net, càlid, amb pàgina de taller i botiga. Tot en català.";
+const ANS="D'acord. Comencem pel capçalera del tema i la funció de configuració.";
+/* moments d'aparició dels fitxers: 8 al primer bloc, 6 després de la compactació */
+const FILE_T=[...Array(8)].map((_,i)=>37.6+i*0.62).concat([41.8,42.4,43.0,43.6,44.2,44.8]);
+
+const el={
+  s1:$("#s1"),s2:$("#s2"),s3:$("#s3"),s4:$("#s4"),app:$("#app"),s8:$("#s8"),s9:$("#s9"),
+  h1:$("#h1"),h2:$("#h2"),h3:$("#h3"),clutter:$("#clutter"),folder:$("#folder"),stamp:$("#stamp"),
+  flash:$("#flash"),wordmark:$("#wordmark"),revealLine:$("#revealLine"),
+  code:$("#code"),tabPhp:$("#tabPhp"),tabCss:$("#tabCss"),
+  bubU:$("#bubU"),bubA:$("#bubA"),bubAText:$("#bubAText"),bubCode:$("#bubCode"),miniCode:$("#miniCode"),
+  thinking:$("#thinking"),thinkingTxt:$("#thinkingTxt"),
+  ctxbar:$("#ctxbar"),ctxFill:$("#ctxFill"),ctxLbl:$("#ctxLbl"),ctxVal:$("#ctxVal"),
+  tasks:$("#tasks"),taskRows:$("#taskRows"),sbWork:$("#sbWork"),toast:$("#toast"),
+  badgeLocal:$("#badgeLocal"),
+  publishBtn:$("#publishBtn"),modalWrap:$("#modalWrap"),modal:$("#modal"),
+  st1:$("#st1"),st2:$("#st2"),st3:$("#st3"),zipOk:$("#zipOk"),accOk:$("#accOk"),
+  pubBtn:$("#pubBtn"),prog:$("#prog"),progFill:$("#progFill"),pubDone:$("#pubDone"),priceBox:$("#priceBox"),
+  browser:$("#browser"),marketImg:$("#marketImg"),newcard:$("#newcard"),
+  endLogo:$("#endLogo"),endTag:$("#endTag"),endUrl:$("#endUrl"),endSub:$("#endSub"),endChips:$("#endChips"),
+  endChars:$("#endChars"),endPip:$("#endPip"),endOrb:$("#endOrb"),
+  s1core:$("#s1core"),s1ring:$("#s1ring"),s1ring2:$("#s1ring2"),s1sat:$("#s1sat"),
+  revealOrb:$("#revealOrb"),
+  s9core:$("#s9core"),s9ring:$("#s9ring"),subText:$("#subText"),
+  pipSlot:$("#pipSlot"),orbSlot:$("#orbSlot"),pipSvg:$("#pipSvg"),orbSvg:$("#orbSvg"),
+  bubPip:$("#bubPip"),bubOrb:$("#bubOrb"),bubPipText:$("#bubPipText"),bubOrbText:$("#bubOrbText"),
+  focus:$("#focus"),speed:$("#speed"),spark:$("#spark"),sparkSvg:$("#sparkSvg")
+};
+const HOOKS=[[el.h1,"Una idea"],[el.h2,"Un termini"],[el.h3,"I una carpeta buida"]];
+
+/* ── diàleg dels personatges (temps de la veu, text i qui parla) ───────── */
+const TALK=[
+  {id:"n4", who:"pip", in:13.70, dur:2.66, text:"Li pots dir exactament què vols fer."},
+  {id:"n5", who:"orb", in:17.00, dur:2.77, text:"I jo escric el codi. Fitxer a fitxer!"},
+  {id:"n6", who:"pip", in:20.80, dur:1.74, text:"I quan la memòria s'acaba?"},
+  {id:"n7", who:"orb", in:23.40, dur:3.04, text:"Condenso el context i continuo! De debò!"},
+  {id:"n8", who:"pip", in:27.90, dur:2.04, text:"I el codi surt del meu ordinador?"},
+  {id:"n9", who:"orb", in:31.10, dur:3.82, text:"Amb un model local, no! Res surt de la teua màquina."}
+];
+let CAPTIONS=[];
+window.__setCaptions=a=>{CAPTIONS=a};
+
+/* ── animació dels personatges (determinista, a temps del compàs) ──────── */
+const BEAT=60/96;
+function chrState(svg, t, speaking, cheer, phase){
+  const bob=Math.sin((t/BEAT)*Math.PI*2+phase)*4;
+  const tilt=Math.sin(t*0.8+phase)*1.4;
+  svg.style.transform=`translateY(${bob}px) rotate(${tilt}deg)`;
+  // parpelleig determinista
+  const bt=(t+phase*3)%4.3;
+  const open=bt<0.16?1-Math.abs((bt-0.08)/0.08):1;
+  const eye=svg.querySelector(".eye");
+  if(eye) eye.style.transform=`scaleY(${clamp(open,0.06,1)})`;
+  // boca
+  const m=svg.querySelector(".mouth");
+  if(m) m.style.transform=`scaleY(${speaking?1+0.45*Math.abs(Math.sin(t*19)):1})`;
+  // brac
+  const arm=svg.querySelector(".arm-r");
+  if(arm) arm.style.transform=`rotate(${cheer?Math.sin(t*7)*22:0}deg)`;
+  const hl=svg.querySelector(".hand-r");
+  if(hl) hl.style.transform=`rotate(${cheer?Math.sin(t*7)*22:0}deg)`;
+}
+
+function render(t){
+  /* ───────── S1 · HOOK ───────── */
+  const s1o=1-seg(t,5.1,5.6);
+  show(el.s1,s1o);
+  if(s1o>0){
+    el.s1.style.transform=`scale(${1+seg(t,0,5.0)*0.05})`;
+    const c=seg(t,0.15,1.1);
+    el.s1core.style.transform=`scale(${eOut(c)*1.25})`;
+    el.s1core.style.opacity=eOut(c);
+    const r=seg(t,0.5,1.6);
+    el.s1ring.style.opacity=eOut(r)*.95;
+    el.s1ring.style.transform=`rotate(${t*9}deg) scale(${eBack(r)})`;
+    el.s1ring2.style.opacity=eOut(seg(t,0.8,1.9))*.85;
+    el.s1ring2.style.transform=`rotate(${-t*14}deg) scale(${eOut(seg(t,0.8,1.9))})`;
+    el.s1sat.style.opacity=eOut(seg(t,1.1,2.0));
+    const starts=[0.35,1.25,2.15];
+    HOOKS.forEach(([node,txt],i)=>{
+      const p=seg(t,starts[i],starts[i]+0.72);
+      node.style.opacity=eOut(p);
+      node.style.filter=`blur(${(1-eOut(p))*9}px)`;
+      node.style.transform=`translateY(${(1-eOut(p))*16}px)`;
+      node.firstChild.textContent=txt.slice(0,Math.floor(clamp(p*1.4)*txt.length));
+    });
+  }
+
+  /* ───────── S2 · FRICCIÓ ───────── */
+  const s2o=seg(t,5.3,5.8)*(1-seg(t,10.5,11.1));
+  show(el.s2,s2o);
+  if(s2o>0){
+    el.clutter.style.opacity=0.72*eOut(seg(t,5.4,5.9));
+    el.clutter.style.transform=`scale(${1.07-eOut(seg(t,5.4,10.6))*0.03})`;
+    const f=eBack(seg(t,5.6,6.3));
+    el.folder.style.opacity=eOut(seg(t,5.6,6.3));
+    el.folder.style.transform=`translateY(${(1-f)*34}px) scale(${0.96+f*0.04})`;
+    const st=seg(t,6.6,7.1);
+    el.stamp.style.opacity=eOut(st);
+    el.stamp.style.transform=`translateY(-50%) rotate(-7deg) scale(${0.7+eBack(st)*0.3})`;
+    el.folder.style.filter=`blur(${seg(t,10.5,11.1)*9}px)`;
+  }
+
+  /* ───────── S3 · REVELACIÓ ───────── */
+  const s3o=seg(t,10.6,10.95)*(1-seg(t,13.1,14.0));
+  show(el.s3,s3o);
+  if(s3o>0){
+    const fl=seg(t,10.7,10.9);
+    el.flash.style.opacity=(1-fl)*0.95;
+    const w=eBack(seg(t,10.95,11.9));
+    el.wordmark.style.opacity=eOut(seg(t,10.95,11.6));
+    el.wordmark.style.transform=`scale(${0.86+w*0.14}) translateY(${(1-w)*8}px)`;
+    el.wordmark.style.filter=`blur(${(1-eOut(seg(t,10.95,11.75)))*11}px)`;
+    const rl=seg(t,12.6,13.05);
+    el.revealLine.style.opacity=eOut(rl);
+    el.revealLine.style.transform=`translateY(${(1-eOut(rl))*12}px)`;
+    const ro=seg(t,11.25,11.75);
+    el.revealOrb.style.opacity=eOut(ro);
+    el.revealOrb.style.transform=`translateY(${(1-eBack(ro))*40}px) rotate(${(1-eBack(ro))*22}deg)`;
+    chrState(el.revealOrb, t, t>10.6&&t<11.6, false, 1.7);
+  }
+
+  /* ───────── S4 · ELS PERSONATGES EXPLIQUEN ───────── */
+  const s4o=seg(t,13.5,14.1)*(1-seg(t,35.05,35.45));
+  show(el.s4,s4o);
+  if(s4o>0){
+    // qui parla ara?
+    let cur=null;
+    for(const line of TALK){ if(t>=line.in-0.18 && t<=line.in+line.dur+0.30){ cur=line; break; } }
+    const inS=seg(t,13.6,14.6);
+    const pipTalking = cur && cur.who==="pip" && t>=cur.in-0.12 && t<=cur.in+cur.dur+0.15;
+    const orbTalking = cur && cur.who==="orb" && t>=cur.in-0.12 && t<=cur.in+cur.dur+0.15;
+
+    // convenció anime: el qui parla AVANÇA i creix; l'altre es queda enrere
+    const pScale=pipTalking?1.13:0.93, oScale=orbTalking?1.13:0.93;
+    const pDx=pipTalking?74:-46, oDx=orbTalking?-74:46;
+    el.pipSlot.style.transform=`translate(${pDx}px,0) scale(${pScale})`;
+    el.orbSlot.style.transform=`translate(${oDx}px,0) scale(${oScale})`;
+    el.pipSlot.style.opacity=inS*(pipTalking?1:0.72);
+    el.orbSlot.style.opacity=inS*(orbTalking?1:0.72);
+
+    // focus + línies de velocitat sobre el qui parla
+    const fx=orbTalking?1255:(pipTalking?570:960);
+    el.focus.style.left=fx+"px"; el.focus.style.top=470+"px";
+    el.focus.style.opacity=(cur?0.85:0.25)*(s4o);
+    el.speed.style.left=fx+"px"; el.speed.style.top=470+"px";
+    el.speed.style.opacity=(cur?0.20:0.05);
+    el.speed.style.transform=`rotate(${-t*4}deg)`;
+
+    // bombolles
+    const showPip=(cur&&cur.who==="pip"&&t>=cur.in-0.25);
+    const showOrb=(cur&&cur.who==="orb"&&t>=cur.in-0.25);
+    const bubIn=(line)=>{
+      if(!line) return 0;
+      return eOut(seg(t,line.in-0.18,line.in+0.10))*(1-seg(t,line.in+line.dur+0.18,line.in+line.dur+0.40));
+    };
+    el.bubPip.style.opacity=showPip?bubIn(cur):0;
+    el.bubOrb.style.opacity=showOrb?bubIn(cur):0;
+    el.bubPip.style.left="570px"; el.bubPip.style.top="222px";
+    el.bubOrb.style.left="1255px"; el.bubOrb.style.top="272px";
+    const bOff=(node,line)=>{
+      const o=line?eOut(seg(t,line.in-0.18,line.in+0.10)):0;
+      node.style.transform=`translateX(-50%) translateY(${(1-o)*16}px) scale(${0.9+o*0.1})`;
+    };
+    bOff(el.bubPip,showPip?cur:null); bOff(el.bubOrb,showOrb?cur:null);
+    const txt=(cur&&(t>=cur.in-0.05))?cur.text:"";
+    const shown=cur?Math.floor(clamp((t-(cur.in-0.05))/cur.dur)*txt.length):0;
+    el.bubPipText.textContent=(cur&&cur.who==="pip")?txt.slice(0,shown):"";
+    el.bubOrbText.textContent=(cur&&cur.who==="orb")?txt.slice(0,shown):"";
+
+    // personatges
+    el.pipSlot.style.opacity=inS;
+    el.orbSlot.style.opacity=inS;
+    const cheer=t>24.6&&t<25.6;
+    const cheer2=t>46.3&&t<48.2;
+    chrState(el.pipSvg, t, !!pipTalking, cheer||cheer2, 0);
+    chrState(el.orbSvg, t, !!orbTalking, cheer||cheer2, 1.7);
+
+    // brillants al voltant del qui parla
+    const sp=el.sparkSvg.querySelectorAll(".sp");
+    const base=[[1180,180,1],[1620,300,.8],[1300,620,.7],[520,120,.9],[260,420,.6],[740,700,.5]];
+    sp.forEach((s,i)=>{
+      const b=base[i%base.length];
+      const on=cur&&((cur.who==="orb"&&b[0]>1000)||(cur.who==="pip"&&b[0]<1000));
+      s.setAttribute("transform",`translate(${b[0]} ${b[1]}) scale(${(b[2]||1)*(on?1:0)})`);
+      s.style.opacity=on?(0.35+0.65*Math.abs(Math.sin(t*4+i))):0;
+    });
+  }
+
+  /* ───────── APP ───────── */
+  const appIn=eBack(seg(t,35.45,36.4));
+  const appOut=seg(t,46.7,47.3);
+  const appVis=seg(t,35.45,35.85)*(1-appOut);
+  el.app.style.opacity=appVis;
+  el.app.style.visibility=appVis>0.002?"visible":"hidden";
+  if(appIn<0.999||appVis<0.999){
+    el.app.style.transform=`scale(${lerp(0.9,1,appIn)}) translateY(${lerp(46,0,appIn)}px)`;
+    el.app.style.filter=`blur(${(1-appIn)*9}px)`;
+  } else if(el.app.style.filter){
+    el.app.style.transform=""; el.app.style.filter="";
+  }
+  if(appVis>0.002){
+    const showCss=t>43.4;
+    const phpT=seg(t,37.4,41.6), cssT=seg(t,43.6,45.3);
+    el.tabPhp.classList.toggle("on",!showCss);
+    el.tabCss.classList.toggle("on",showCss);
+    if(showCss) renderLines(el.code,CSS,Math.floor(cssT*CSS_N));
+    else renderLines(el.code,PHP,Math.floor(phpT*PHP_N));
+
+    $$(".tnode.f").forEach((n,i)=>{
+      const t0=FILE_T[i];
+      const p=eOut(seg(t,t0,t0+0.42));
+      n.style.opacity=p;
+      n.style.transform=`translateX(${(1-p)*-18}px)`;
+      n.querySelector(".ck").style.opacity=eOut(seg(t,t0+0.26,t0+0.58));
+    });
+
+    const uT=seg(t,36.3,37.3);
+    el.bubU.style.opacity=eOut(uT);
+    el.bubU.style.transform=`translateY(${(1-eOut(uT))*10}px)`;
+    el.bubU.textContent=REQ.slice(0,Math.floor(clamp((uT-0.04)/0.96)*REQ.length));
+    const aT=seg(t,37.45,37.9);
+    el.bubA.style.opacity=eOut(aT);
+    el.bubA.style.transform=`translateY(${(1-eOut(aT))*10}px)`;
+    el.bubAText.textContent=ANS.slice(0,Math.floor(clamp((aT-0.04)/0.96)*ANS.length));
+    const cT=seg(t,38.1,40.4);
+    el.bubCode.style.opacity=eOut(cT);
+    el.bubCode.style.transform=`translateY(${(1-eOut(cT))*10}px)`;
+    if(cT>0) renderMini(el.miniCode,MINI,Math.floor(clamp((cT-0.05)/0.95)*MINI_N));
+    el.thinking.style.opacity=seg(t,37.95,38.2)*(1-seg(t,41.5,41.8));
+    el.thinkingTxt.textContent=`Treballant… ${Math.max(1,Math.floor(t-37.4))}s · RAM ${34+Math.floor(Math.sin(t*3)*3)}%`;
+
+    const ctxIn=seg(t,40.45,40.7);
+    el.ctxbar.style.opacity=ctxIn;
+    const compact=seg(t,41.15,41.75);
+    el.ctxLbl.textContent=compact>0.12?"Context compactat":"Context";
+    el.ctxVal.textContent=compact>0.12?"8,4k → 1,2k":"100%";
+    el.ctxFill.style.width=(lerp(100,20,eIO(compact)))+"%";
+    el.ctxFill.style.background=compact>0.12
+      ?"linear-gradient(90deg,#4ade80,#22d3ee)":"linear-gradient(90deg,#fbbf24,#f87171)";
+    el.ctxbar.style.borderColor=compact>0.12?"rgba(74,222,128,.45)":"rgba(251,191,36,.35)";
+    el.sbWork.textContent=compact>0.12?"Context compactat · la IA continua":"La IA està treballant…";
+
+    const toastIn=seg(t,41.2,41.5), toastOut=seg(t,43.1,43.4);
+    el.toast.style.opacity=eOut(toastIn)*(1-toastOut);
+    el.toast.style.transform=`translateX(-50%) translateY(${(1-eOut(toastIn))*-14}px)`;
+
+    const lbIn=seg(t,41.9,42.2), lbOut=seg(t,43.3,43.6);
+    el.badgeLocal.style.opacity=eOut(lbIn)*(1-lbOut);
+    el.badgeLocal.style.transform=`translateY(${(1-eOut(lbIn))*16}px)`;
+
+    el.tasks.style.opacity=seg(t,37.2,37.6);
+    if(!el.taskRows.children.length){
+      FILES.forEach(f=>{const d=document.createElement("div");d.className="trow";d.dataset.f=f;
+        d.innerHTML='<span class="bx">✓</span><span>'+f+'</span>';el.taskRows.appendChild(d)});
+    }
+    $$(".trow").forEach((r,i)=>{
+      const t0=FILE_T[i];
+      const d=seg(t,t0+0.3,t0+0.62);
+      r.classList.toggle("done",d>0.5);
+      r.classList.toggle("now",d<=0.5&&d>0);
+      r.querySelector(".bx").style.opacity=d>0.5?1:(d>0?1:0.28);
+    });
+
+    const hl=seg(t,44.0,44.4);
+    el.publishBtn.style.boxShadow=hl>0?`0 0 0 ${3+Math.sin(t*9)*1.8}px rgba(124,92,255,${0.16+hl*0.3})`:"";
+    el.publishBtn.style.transform=hl>0?`scale(${1+Math.sin(t*9)*0.02})`:"";
+  }
+
+  /* ───────── MODAL ───────── */
+  const mIn=seg(t,44.35,44.85), mOut=seg(t,46.6,47.0);
+  const mVis=mIn*(1-mOut);
+  el.modalWrap.style.opacity=mVis;
+  el.modalWrap.style.visibility=mVis>0.002?"visible":"hidden";
+  if(mVis>0.002){
+    el.modal.style.transform=`scale(${lerp(0.93,1,eBack(mIn))}) translateY(${(1-eBack(mIn))*22}px)`;
+    el.st1.classList.toggle("ok",t>44.95);
+    el.st2.classList.toggle("ok",t>45.25);
+    el.st3.classList.toggle("ok",t>45.55);
+    el.zipOk.style.opacity=seg(t,44.95,45.2);
+    el.accOk.style.opacity=seg(t,45.25,45.5);
+    const press=seg(t,45.75,45.95);
+    el.pubBtn.textContent=press>0.5?"Publicant…":"Publica el tema";
+    el.pubBtn.style.background=press>0.5?"#5b5b70":"";
+    el.prog.style.opacity=press>0?1:0;
+    el.progFill.style.width=(clamp(seg(t,45.8,46.5))*100)+"%";
+    el.pubDone.style.opacity=seg(t,46.45,46.7);
+    el.priceBox.style.opacity=1-seg(t,46.3,46.6);
+  }
+
+  /* ───────── S8 · MARKETPLACE ───────── */
+  const s8o=seg(t,46.9,47.5)*(1-seg(t,49.3,49.8));
+  show(el.s8,s8o);
+  if(s8o>0){
+    const b=eBack(seg(t,46.9,47.6));
+    el.browser.style.transform=`translateY(${(1-b)*56}px) scale(${lerp(0.9,1,b)})`;
+    el.browser.style.filter=`blur(${(1-eOut(seg(t,46.9,47.6)))*11}px)`;
+    const ci=seg(t,47.6,48.2);
+    const zi=seg(t,48.3,49.3);
+    el.newcard.style.opacity=eOut(ci);
+    el.marketImg.style.transform=`translateY(${-zi*16}px) scale(${1+zi*0.05})`;
+    el.newcard.style.transform=
+      `translateX(-50%) translateY(${(1-eOut(ci))*42-zi*8}px) scale(${lerp(0.94,1,eOut(ci))*(1+zi*0.05)})`;
+  }
+
+  /* ───────── S9 · END CARD ───────── */
+  const s9o=seg(t,49.3,49.9);
+  show(el.s9,s9o);
+  if(s9o>0){
+    const g=eOut(seg(t,49.3,50.0));
+    el.s9core.style.opacity=0;
+    el.s9ring.style.opacity=g*.2;
+    el.s9ring.style.transform=`rotate(${t*7}deg) scale(${lerp(1.1,1.95,g)})`;
+    el.endLogo.style.opacity=eOut(seg(t,49.4,50.0));
+    el.endLogo.style.transform=`translateY(${(1-eOut(seg(t,49.4,50.0)))*16}px)`;
+    el.endTag.style.opacity=eOut(seg(t,49.75,50.25));
+    el.endTag.style.transform=`translateY(${(1-eOut(seg(t,49.75,50.25)))*10}px)`;
+    el.endUrl.style.opacity=eOut(seg(t,50.1,50.55));
+    el.endUrl.style.transform=`translateY(${(1-eOut(seg(t,50.1,50.55)))*12}px)`;
+    el.endUrl.style.setProperty("--w",seg(t,50.4,51.1));
+    el.endSub.style.opacity=eOut(seg(t,50.4,50.85));
+    el.endChips.style.opacity=eOut(seg(t,50.65,51.15));
+    const ci=seg(t,49.9,50.8);
+    el.endChars.style.opacity=eOut(ci);
+    el.endChars.style.transform=`translateY(${(1-eOut(ci))*26}px)`;
+    chrState(el.endPip.querySelector("svg"), t, false, true, 0.4);
+    chrState(el.endOrb.querySelector("svg"), t, false, true, 2.1);
+  }
+
+  /* ───────── SUBTÍTOLS ───────── */
+  let cur=null;
+  for(const c of CAPTIONS){ if(t>=c.in && t<=c.in+c.dur+0.45){ cur=c; break; } }
+  if(cur){
+    const fin=seg(t,cur.in+cur.dur+0.12,cur.in+cur.dur+0.45);
+    el.subText.textContent=cur.text;
+    el.subText.style.opacity=eOut(seg(t,cur.in,cur.in+0.18))*(1-fin);
+    el.subText.style.transform=`translateY(${(1-eOut(seg(t,cur.in,cur.in+0.18)))*8}px)`;
+  } else {
+    el.subText.style.opacity=0;
+  }
+}
+window.__render=render;
+window.__ready=true;
+</script>
+</body>
+</html>

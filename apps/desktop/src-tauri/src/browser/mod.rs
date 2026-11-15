@@ -45,11 +45,37 @@ fn window(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(LABEL)
 }
 
+/// Última URL que vam enviar al navegador intern. Es recorda en navegar: el
+/// getter del webview (`WebviewWindow::url()`) només té sentit una vegada que el
+/// `WKWebView` ha confirmat una navegació (abans no hi ha URL vàlida).
+static LAST_URL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// URL actual del navegador intern: la del webview si ja hi ha una navegació
+/// confirmada, o la última URL enviada (encara està carregant).
+///
+/// No es deixa depèn de `WebviewWindow::url()` en un moment en què el webview
+/// encara no en ha fet servir: un getter que es resol via l'event loop és un
+/// punt de fet que un `None` del `WKWebView` pot convertir en un panic
+/// (SIGABRT) que tanca l'app sencer.
+fn current_url(win: &WebviewWindow) -> String {
+    if let Ok(u) = win.url() {
+        return u.to_string();
+    }
+    LAST_URL
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .unwrap_or_default()
+}
+
 /// Obre (o reutilitza) la finestra del navegador amb la URL donada.
 /// `hidden = true` l'obre en segon pla: la IA la pot llegir sense que
 /// la persona la veja fins que calgui una acció.
 pub fn open(app: &AppHandle, url: &str, hidden: bool) -> Result<()> {
     let target = safe_http(url)?;
+    if let Ok(mut g) = LAST_URL.lock() {
+        *g = Some(target.to_string());
+    }
     if let Some(win) = window(app) {
         win.navigate(target)?;
         if !hidden {
@@ -72,6 +98,9 @@ pub fn open(app: &AppHandle, url: &str, hidden: bool) -> Result<()> {
 /// Navega la finestra existent (o l'obre si encara no n'hi ha).
 pub fn navigate(app: &AppHandle, url: &str) -> Result<()> {
     let target = safe_http(url)?;
+    if let Ok(mut g) = LAST_URL.lock() {
+        *g = Some(target.to_string());
+    }
     match window(app) {
         Some(win) => win.navigate(target).map_err(|e| anyhow!("{}", e)),
         None => {
@@ -118,7 +147,7 @@ pub fn status(app: &AppHandle) -> BrowserStatus {
         Some(win) => BrowserStatus {
             open: true,
             visible: win.is_visible().unwrap_or(false),
-            url: win.url().map(|u| u.to_string()).unwrap_or_default(),
+            url: current_url(&win),
             title: win.title().unwrap_or_default(),
         },
         None => BrowserStatus {
@@ -256,7 +285,7 @@ return JSON.stringify({has_input:ok,login_needed:need,url:location.href,
         .get("url")
         .and_then(|x| x.as_str())
         .map(|s| s.to_string())
-        .unwrap_or_else(|| win.url().map(|u| u.to_string()).unwrap_or_default());
+        .unwrap_or_else(|| current_url(&win));
     Ok(ChatProbe {
         has_input: v.get("has_input").and_then(|x| x.as_bool()).unwrap_or(false),
         login_needed: v.get("login_needed").and_then(|x| x.as_bool()).unwrap_or(false),

@@ -390,6 +390,7 @@ pub fn run() {
             commands::skills::list_skills,
             commands::skills::reload_skills,
             commands::skills::vscode_import_skills,
+            commands::vscode_extensions::vscode_list_extensions,
             commands::skills_store::skills_store_list,
             commands::skills_store::skills_install_github,
             commands::skills_store::skills_install_url,

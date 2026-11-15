@@ -146,7 +146,7 @@ pub async fn theme_open_sales_page(site: String) -> Result<String, String> {
     if base.is_empty() {
         return Err("Indica l'adreça del lloc.".into());
     }
-    let url = format!("{}/wp-admin/admin.php?tab=sales&selltab=my-upload", base);
+    let url = format!("{}/dashboard/?tab=sales&selltab=my-upload", base);
     crate::commands::system::open_externally(url.clone()).await?;
     Ok(format!("He obert «Vendes ▸ Pujar Tema» a {}.", url))
 }

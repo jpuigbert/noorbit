@@ -207,6 +207,26 @@
   color: var(--error);
 }
 
+.pb-links {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.pb-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.pb-link-btn:hover {
+  color: var(--text-0);
+}
+
 .pb-credit {
   padding-top: 8px;
   border-top: 1px solid var(--border);

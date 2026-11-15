@@ -268,16 +268,43 @@ mod proves {
     }
 }
 
-/// Resultat de la pujada al lloc.
+/// Metadades de la fitxa del tema que NoOrbit envia al marketplace.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeMeta {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub price: f64,
+    #[serde(default)]
+    pub version: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub license: String,
+    #[serde(default)]
+    pub category: String,
+    /// Si és > 0, actualitza un tema propi existent en lloc de crear-ne un.
+    #[serde(default)]
+    pub product_id: u64,
+}
+
+/// Resultat de la publicació al marketplace.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadResult {
     pub ok: bool,
     pub message: String,
-    /// Id del fitxer pujat a la biblioteca de mitjans (WordPress).
+    /// Id del fitxer pujat a la biblioteca de mitjans (llegat; ara sempre None).
     pub attachment_id: Option<u64>,
-    /// URL del fitxer pujat.
+    /// URL pública de la fitxa del tema.
     pub url: Option<String>,
+    /// Id del producte (theme_product) creat o actualitzat.
+    pub product_id: Option<u64>,
+    /// Estat del producte (publish, pending, draft…).
+    pub status: Option<String>,
+    /// URL d'edició del tema al dashboard del marketplace.
+    pub edit_url: Option<String>,
 }
 
 /// Obre la pàgina de LOGIN del marketplace al navegador INTERN de NoOrbit
@@ -312,6 +339,7 @@ pub async fn upload_with_session(
     app: &tauri::AppHandle,
     zip: &Path,
     site: &str,
+    meta: &ThemeMeta,
 ) -> Result<UploadResult> {
     use base64::Engine as _;
     let base = site.trim().trim_end_matches('/');
@@ -371,37 +399,43 @@ pub async fn upload_with_session(
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "tema.zip".into());
-    let js_start = format!(
-        r#"(function(){{
-  try{{
-    window.__noorbitUpload = {{state:'pending', message:''}};
-    var b64 = {b64};
-    var name = {name};
-    var nonce = {nonce};
+    let meta_json = serde_json::to_string(meta).unwrap_or_else(|_| "{}".into());
+    let js_start = r#"(function(){
+  try{
+    window.__noorbitUpload = {state:'pending', message:''};
+    var b64 = __B64__;
+    var name = __NAME__;
+    var nonce = __NONCE__;
+    var meta = __META__;
     var bin = atob(b64);
     var arr = new Uint8Array(bin.length);
     for (var i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
-    fetch('/wp-json/wp/v2/media', {{
+    var fd = new FormData();
+    fd.append('zip', new Blob([arr], {type:'application/zip'}), name);
+    fd.append('name', meta.name || '');
+    fd.append('price', String(meta.price || 0));
+    fd.append('version', meta.version || '');
+    fd.append('description', meta.description || '');
+    fd.append('license', meta.license || '');
+    fd.append('category', meta.category || '');
+    if (meta.productId > 0) fd.append('product_id', String(meta.productId));
+    fetch('/wp-json/tpb/v1/vendor/publish', {
       method:'POST', credentials:'include',
-      headers:{{
-        'Content-Disposition':'attachment; filename="'+name+'"',
-        'Content-Type':'application/zip',
-        'X-WP-Nonce':nonce
-      }},
-      body: arr
-    }}).then(function(res){{
-      return res.text().then(function(txt){{
-        if(!res.ok){{ window.__noorbitUpload = {{state:'error', message:'El lloc ha rebutjat la pujada ('+res.status+'): '+txt.slice(0,240)}}; return; }}
-        var j = {{}}; try{{ j = JSON.parse(txt); }}catch(e){{}}
-        window.__noorbitUpload = {{state:'done', message:'ZIP pujat (fitxer #'+(j.id||'?')+').', id:j.id||null, url:j.source_url||null}};
-      }});
-    }}).catch(function(e){{ window.__noorbitUpload = {{state:'error', message:'Error de pujada: '+String(e)}}; }});
-  }}catch(e){{ window.__noorbitUpload = {{state:'error', message:String(e)}}; }}
-}})();"#,
-        b64 = serde_json::to_string(&b64).unwrap_or_else(|_| "\"\"".into()),
-        name = serde_json::to_string(&name).unwrap_or_else(|_| "\"tema.zip\"".into()),
-        nonce = serde_json::to_string(&nonce).unwrap_or_else(|_| "\"\"".into()),
-    );
+      headers:{ 'X-WP-Nonce':nonce },
+      body: fd
+    }).then(function(res){
+      return res.text().then(function(txt){
+        var j = {}; try{ j = JSON.parse(txt); }catch(e){}
+        if(!res.ok){ window.__noorbitUpload = {state:'error', message:(j.message || 'El lloc ha rebutjat la publicacio ('+res.status+').')}; return; }
+        window.__noorbitUpload = {state:'done', message:j.message||'Tema publicat.', id:j.product_id||null, url:j.url||null, editUrl:j.edit_url||null, status:j.status||null};
+      });
+    }).catch(function(e){ window.__noorbitUpload = {state:'error', message:'Error de publicacio: '+String(e)}; });
+  }catch(e){ window.__noorbitUpload = {state:'error', message:String(e)}; }
+})();"#
+        .replace("__B64__", &serde_json::to_string(&b64).unwrap_or_else(|_| "\"\"".into()))
+        .replace("__NAME__", &serde_json::to_string(&name).unwrap_or_else(|_| "\"tema.zip\"".into()))
+        .replace("__NONCE__", &serde_json::to_string(&nonce).unwrap_or_else(|_| "\"\"".into()))
+        .replace("__META__", &meta_json);
     let _ = crate::browser::run_js(app, &js_start, std::time::Duration::from_secs(15)).await;
 
     // 3) Espera el resultat (pujada d'un ZIP: pot trigar).
@@ -417,12 +451,12 @@ pub async fn upload_with_session(
             "done" => {
                 return Ok(UploadResult {
                     ok: true,
-                    message: format!(
-                        "{} Ara obre «Vendes ▸ Pujar Tema» per acabar la fitxa (preu, descripció i captures).",
-                        r.get("message").and_then(|m| m.as_str()).unwrap_or("ZIP pujat.")
-                    ),
-                    attachment_id: r.get("id").and_then(|i| i.as_u64()),
+                    message: r.get("message").and_then(|m| m.as_str()).unwrap_or("Tema publicat.").to_string(),
+                    attachment_id: None,
                     url: r.get("url").and_then(|u| u.as_str()).map(|s| s.to_string()),
+                    product_id: r.get("id").and_then(|i| i.as_u64()),
+                    status: r.get("status").and_then(|s| s.as_str()).map(|s| s.to_string()),
+                    edit_url: r.get("editUrl").and_then(|u| u.as_str()).map(|s| s.to_string()),
                 });
             }
             "error" => {
@@ -441,20 +475,22 @@ pub async fn upload_with_session(
     }
 }
 
-/// Puja el ZIP al marketplace amb l'API REST de WordPress.
+/// Publica el tema al marketplace (endpoint natiu `tpb/v1/vendor/publish`):
+/// crea o actualitza un `theme_product` amb el ZIP i les metadades de la fitxa.
 /// Autenticació: «contrasenya d'aplicació» de WordPress (usuari + contrasenya
-/// d'aplicació, autorització bàsica).
+/// d'aplicació, autorització bàsica). L'endpoint exigeix permís de venedor.
 pub async fn upload_zip(
     http: &reqwest::Client,
     zip: &Path,
     site: &str,
     user: &str,
     app_password: &str,
+    meta: &ThemeMeta,
 ) -> Result<UploadResult> {
     use base64::Engine as _;
     let base = site.trim().trim_end_matches('/');
     if base.is_empty() {
-        return Err(anyhow!("Indica l'adreça del lloc on pujar el tema."));
+        return Err(anyhow!("Indica l'adreça del lloc on publicar el tema."));
     }
     if user.trim().is_empty() || app_password.trim().is_empty() {
         return Err(anyhow!(
@@ -469,47 +505,66 @@ pub async fn upload_zip(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "tema.zip".into());
 
+    let mut form = reqwest::multipart::Form::new()
+        .part(
+            "zip",
+            reqwest::multipart::Part::bytes(data)
+                .file_name(name)
+                .mime_str("application/zip")
+                .map_err(|e| anyhow!("ZIP invàlid: {}", e))?,
+        )
+        .text("name", meta.name.clone())
+        .text("price", meta.price.to_string())
+        .text("version", meta.version.clone())
+        .text("description", meta.description.clone())
+        .text("license", meta.license.clone())
+        .text("category", meta.category.clone());
+    if meta.product_id > 0 {
+        form = form.text("product_id", meta.product_id.to_string());
+    }
+
     let resp = http
-        .post(format!("{}/wp-json/wp/v2/media", base))
+        .post(format!("{}/wp-json/tpb/v1/vendor/publish", base))
         .header("Authorization", format!("Basic {}", token))
-        .header("Content-Disposition", format!("attachment; filename=\"{}\"", name))
-        .header("Content-Type", "application/zip")
-        .body(data)
+        .multipart(form)
         .send()
         .await
-        .map_err(|e| anyhow!("No s'ha pogut pujar el ZIP: {}", e))?;
+        .map_err(|e| anyhow!("No s'ha pogut publicar el tema: {}", e))?;
 
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
-    if !status.is_success() {
-        let motiu = if body.contains("rest_cannot_create") {
-            "el compte no té permís per pujar fitxers (capacitat «upload_files»)".to_string()
-        } else if status.as_u16() == 401 {
-            "l'usuari o la contrasenya d'aplicació no són correctes".to_string()
-        } else if status.as_u16() == 404 {
-            "l'API del lloc no ha respost (comprova l'adreça)".to_string()
-        } else {
-            body.chars().take(200).collect::<String>()
-        };
-        return Err(anyhow!("El lloc ha rebutjat la pujada ({}): {}", status, motiu));
-    }
     let v: serde_json::Value = serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
-    let id = v.get("id").and_then(|i| i.as_u64());
-    let url = v
-        .get("source_url")
-        .and_then(|u| u.as_str())
-        .map(|s| s.to_string());
+    if !status.is_success() {
+        let motiu = if status.as_u16() == 401 {
+            "l'usuari o la contrasenya d'aplicació no són correctes".to_string()
+        } else if status.as_u16() == 403 {
+            "el compte no té permisos de venedor en aquest lloc".to_string()
+        } else if status.as_u16() == 404 {
+            "l'API del marketplace no ha respost (comprova l'adreça i que el tema estigui actualitzat)".to_string()
+        } else {
+            v.get("message")
+                .and_then(|m| m.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| body.chars().take(200).collect::<String>())
+        };
+        return Err(anyhow!("El lloc ha rebutjat la publicació ({}): {}", status, motiu));
+    }
+    let product_id = v.get("product_id").and_then(|i| i.as_u64());
+    let url = v.get("url").and_then(|u| u.as_str()).map(|s| s.to_string());
+    let edit_url = v.get("edit_url").and_then(|u| u.as_str()).map(|s| s.to_string());
+    let st = v.get("status").and_then(|s| s.as_str()).map(|s| s.to_string());
+    let message = v
+        .get("message")
+        .and_then(|m| m.as_str())
+        .unwrap_or("Tema publicat al marketplace.")
+        .to_string();
     Ok(UploadResult {
         ok: true,
-        message: format!(
-            "ZIP pujat{} a {}. Ara obre «Vendes ▸ Pujar Tema» per acabar la fitxa (preu, descripció i captures).",
-            match id {
-                Some(i) => format!(" (fitxer #{})", i),
-                None => String::new(),
-            },
-            base
-        ),
-        attachment_id: id,
+        message,
+        attachment_id: None,
         url,
+        product_id,
+        status: st,
+        edit_url,
     })
 }
