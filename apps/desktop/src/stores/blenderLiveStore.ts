@@ -166,6 +166,28 @@ export const useBlenderLiveStore = create<BlenderLiveState>((set, get) => ({
   },
 
   execute: async (code) => {
+    const t = (code || "").trim();
+    // Guarda al frontend: si no sembla codi Python/bpy, no enviem res a
+    // Blender (evita el SyntaxError criptic). El missatge és clar i en català.
+    const looksLikePython =
+      t.length > 0 &&
+      (t.includes("bpy") ||
+        t.includes("import ") ||
+        t.includes("from ") ||
+        t.includes("=") ||
+        t.includes("print(") ||
+        t.endsWith(".py"));
+    if (!looksLikePython) {
+      const msg =
+        "«" +
+        t.slice(0, 80) +
+        "» NO és codi Python: no s'ha executat res a Blender. Per editar " +
+        "l'escena cal codi bpy que comenci per «import bpy» (pot ser de varies " +
+        "línies). Les imatges planes es creen amb «IMG|descripció|ruta.png». " +
+        "Per a peticions en català, usa el xat i prem «Aplica a ▸ Blender».";
+      set({ lastError: msg });
+      return null;
+    }
     try {
       const out = await invoke<string>("blender_execute", { code });
       set({ lastError: null });
