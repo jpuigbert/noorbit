@@ -26,6 +26,7 @@ Construïda amb [Tauri 2](https://tauri.app) + [React](https://react.dev) + [Typ
 - [Compilar des del codi font](#compilar-des-del-codi-font)
 - [On són els instal·ladors un cop compilats](#on-són-els-instal·ladors-un-cop-compilats)
 - [Wiki](#wiki)
+- [Game Studios (site)](#game-studios-site)
 - [Arquitectura](#arquitectura)
 - [Llicència](#llicència)
 
@@ -40,6 +41,7 @@ Construïda amb [Tauri 2](https://tauri.app) + [React](https://react.dev) + [Typ
 | **IA** | Xat multi-sessió amb streaming en viu, **materialització automàtica** de fitxers mentre la IA encara està escrivint, i **reintents automàtics** si l'equip es queda sense memòria/context. |
 | **Mòbil natiu** | Selector de plataforma per xat (escriptori / Android / iOS). Android: Kotlin + Jetpack Compose + Material 3. iOS: Swift + SwiftUI. Gestió d'AVDs i simuladors, *live view* amb captures periòdiques. |
 | **Blender** | Add-on Python (`blender-scripts/noorbit_bridge.py`) + client socket. Executa scripts (inclòs de varies línies) dins la sessió de Blender, llegeix l'escena i genera figures/escenes complexes (nan de jardí, materials, animació, vídeo) amb l'agent 3D. |
+| **Imatges / Vídeo** | Generació via ComfyUI (local), rodet de CPU (stable-diffusion.cpp), proveïdors en línia (OpenAI, Venice…) **i Muapi.ai / Open Higgsfield / Open Generative AI** (200+ models: Flux, SDXL, Midjourney, Kling…). Configurable amb `MUAPI_API_KEY` / `HIGGSFIELD_API_KEY` / `HF_API_BASE_URL`. Usable per totes les IAs amb `IMG|descripció|ruta.png`. |
 | **Unreal** | Remote Control API + bootstrap Python (`unreal-scripts/bootstrap.py`). Build, launcher i execució de scripts. |
 | **Extensions** | Skills (carpetes amb `SKILL.md`), plugins natius i servidors **MCP**. |
 | **Especialistes** | Rols amb model, temperatura i prompt propis per tasques concretes. |
@@ -367,6 +369,18 @@ Fluxos clau:
 - **Streaming IA**: el backend emet l'event `ai://chunk` etiquetat per `sessionId`; el frontend (`agentStore.appendStream`) acumula el text i **crida `scheduleLiveMaterialize`** per escriure fitxers reals a disk **en viu**, mentre el model encara està generant.
 - **Reintents automàtics**: si Ollama/LM Studio fallan per `out of memory` o el stream es talla, NoOrbit torna a intentar-ho automat­icament amb context **reduït → sense codi → sense historial**, sense intervenció humana.
 - **Invoke**: comandaments Rust cridats des de TS via `invoke("name", { args })` de `@tauri-apps/api/core`.
+
+---
+
+## Game Studios (site)
+
+La plantilla i el flux «Claude Code Game Studios» (jocs de navegador a partir d'una idea)
+estan integrats a NoOrbit i documentats al lloc estàtic [`site/index.html`](site/index.html)
+(dreceres per a totes les IA: local, núvol, IA de web, imatges i 3D).
+
+- Repo original: <https://github.com/donchitos/claude-code-game-studios>
+- A NoOrbit: Fitxer ▸ Nou projecte… ▸ pestanya «Game Studios» (clona la plantilla).
+- Dreceres: IA ▸ Game Studios.
 
 ---
 
