@@ -32,9 +32,30 @@ fn expects_execution(prompt: &str, answer: &str) -> bool {
         Ok(r) => r,
         Err(_) => return false,
     };
+    // Figures i escenes 3D (sense «Blender» al text).
+    let scene_re = match Regex::new(
+        r"(?i)\b(nan|nans|nomo|noms|gome|gnom|gnome|figura|figures|personatge|escena|escenes|model\s*3d|3d|jard[ií]|blender)\b",
+    ) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    // Una PREGUNTA no demana execució («què és un model 3D?», «com es fa?»).
+    let question = prompt.trim_end().ends_with('?')
+        || Regex::new(r"(?i)^\s*(qu[eé]\s+es|qu[eé]\s+s[oó]|com\s|per\s+qu[eè]\s|explica|defineix)")
+            .map(|r| r.is_match(prompt))
+            .unwrap_or(false);
+    if !question && scene_re.is_match(prompt) {
+        return true;
+    }
     user_re.is_match(prompt) || answer_re.is_match(answer)
 }
 
+/// També apliquem les PETICIONS DE FIGURA O ESCENA 3D («crea un nan de
+/// jardí», «fes un model 3D d'una casa»): demanen una acció real — el model
+/// ha d'emetre «RUN|BLENDER|» amb el codi bpy — encara que la paraula
+/// «Blender» no hi aparegui. Sense això el model es limitaria a explicar com
+/// fer-ho i no es creava res.
+///
 /// Recordatori que es torna al model quan ha parlat d'executar sense haver
 /// emés cap directriu. Curto i imperatiu: fins i tot un model 1.5b el obeïx.
 const EXEC_NUDGE: &str = "NoOrbit: NO has emés cap directriu «RUN|», per tant NO \
@@ -42,9 +63,11 @@ s'ha executat res i l'usuari esperava accions reals. Si la tasca requereix \
 executar, compilar o llançar alguna cosa: 1) si falten fitxers, reemet-los \
 sencers ara mateix amb línies «@file: ruta» + contingut; 2) després escriu UNA \
 línia «RUN|<comanda>» («RUN|BG|<comanda>» per a servidors/apps que han de \
-quedar oberts) i ATURA la resposta eixe torn. No demanes a l'usuari que \
-execute ell: executes tu. Si de veritat no cal cap execució, respon amb \
-normalitat.";
+quedar oberts) i ATURA la resposta eixe torn. Si és una FIGURA o una ESCENA \
+3D, emet «RUN|BLENDER|» amb el codi bpy que la construeix (pot ser de varies \
+línies i ha de començar per «import bpy»): res de descripcions en prosa. \
+No demanes a l'usuari que execute ell: executes tu. Si de veritat no cal cap \
+execució, respon amb normalitat.";
 
 /// Detecta fitxers que la IA ha ANNUNCIAT amb «@file: ruta» però ha deixat 
 /// BUIT (cap línia de codi entre l'anunci i el següent @file:/@dir:/final de 
@@ -563,7 +586,7 @@ async fn chat_with_tools(
                     edits.join(" · ")
                 ));
             }
-            report.push_str(&runtools::execute(&app, computer, ai, &runs).await);
+            report.push_str(&runtools::execute(&app, computer, ai, &runs, prompt).await);
             report.push('\n');
         }
         if !nb.is_empty() {
@@ -2336,6 +2359,22 @@ mod nudge_tests {
             "fes el codi del projecte",
             "Millora de l'estructura del README.md: això seria el document."
         ));
+    }
+
+    /// Peticions de figura o escena 3D: l'usuari demana una acció real
+    /// (el model ha d'emetre «RUN|BLENDER|» amb el codi bpy), encara que
+    /// digui «Blender» o no.
+    #[test]
+    fn detecta_peticions_3d() {
+        assert!(expects_execution("crea un nomo de jardi", ""));
+        assert!(expects_execution("fes un model 3d d'una casa", ""));
+        assert!(expects_execution("crea una escena 3d del parc", ""));
+        assert!(expects_execution("fes un personatge a blender", ""));
+        // Una pregunta NO demana execució.
+        assert!(!expects_execution("què és un model 3d?", ""));
+        assert!(!expects_execution("explica'm què és un nan de jardí", ""));
+        // Una xerrada tampoc.
+        assert!(!expects_execution("bon dia, com va tot?", ""));
     }
 }
 

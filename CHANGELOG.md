@@ -3,6 +3,24 @@
 Totes les releases amb els seus binaris: <https://github.com/jpuigbert/noorbit/releases>.
 Les notes completes de cada release són a la pàgina del release corresponent.
 
+## 0.71.10-alpha (2026-11-15)
+
+**Blender: ordres complexes (figures, nans, escenes) ja no fallen amb «NO és codi Python»**
+
+- *RUN|BLENDER| de varies línies*: fins ara la directriu només capturava la PRIMERA línia del codi — una figura complexa (nan de jardí, personatge, escena) no hi cab en una línia, i el model es veia obligat a escriure una descripció en català, que Blender rebutjava amb «NO és codi Python». Ara `parse()` recull el codi sencer a sota de la directriu o dins d'un bloc ```python (fins a la següent directriu o a la prosa), i l'executa de veritat.
+- *Des de la conversa, la descripció es converteix en codi*: si el model envia una DESCRIPCIÓ en lloc de codi a «RUN|BLENDER|», NoOrbit la passa a l'agent 3D (que té les receptes bpy: nan de jardí, materials, càmera, animació, vídeo, veu) i executa el script multi-línia generat, en lloc de deixar l'usuari amb un error tècnic.
+- *Guàrdia de codi millorada*: `looks_like_python` i una nova `looks_like_code_line` distingeixen una frase en català d'un script («crea un nomo de jardi» ja no es confon amb codi; «bpy.ops…», assignacions i crides sí). El missatge d'error ara explica que el codi pot ser de varies línies.
+- *Prompt*: `RUN_PROMPT` diu clarament que «RUN|BLENDER|» pot ocupar varies línies i inclou un exemple; `expects_execution` també reconeix peticions de figura/escena 3D («crea un nan de jardí», «fes un model 3D d'una casa») encara que no diguin «Blender», perquè el model emeti la directriu en lloc d'explicar com fer-ho.
+- *Tests*: 8 tests nous a `runtools` (multi-línia, bloc ```python, parada a la següent directriu, descripció rebutjada) i 3 a `blender` (prosa vs. codi real).
+
+**Hugging Bay: només models descarregables + mida del disc**
+
+- *Hugging Bay, catàleg net*: el mirror marca «downloadable» repositoris que **no tenen cap fitxer GGUF hostatjat** (p. ex. `Qwen3.8-27B-iMatrix-NVFP4-MTP-GGUF`): abans apareixien com a «Ready to download» i fallaven en baixar-los («Aquest model no té cap fitxer descargable»). Ara el catàleg **només mostra els models que realment es poden descarregar**: cada candidat es valida amb `get_model` (fitxer recomanat present) — la mateixa comprovació que fa la descàrrega — i els que no en tenen s'oculten. La comprovació es fa en paral·lel per no alentir la pàgina, i un error transitori de xarxa no amaga models.
+- *Hugging Bay, mida del disc*: a més de l'espai **lliure**, el destí mostra la **mida total** del disc/USB («854 MB lliures de 500 GB»), perquè es vegi d'una ullada quant hi cap. Nou camp `total_bytes` a `hf_bay_disk_space` (Unix `statvfs.f_blocks`, Windows `GetDiskFreeSpaceExW`) i clau i18n `hfBay.diskSpace`.
+- *Crash (macOS) en arrencar i en fer servir el navegador intern*: `no-orbit` moria amb `abort() called` (SIGABRT) en el fil principal quan el getter d'URL del webview (`WebviewWindow::url()` → `WKWebView.URL()` → `Option::unwrap()`) trobava un `None`: el `WKWebView` no té URL fins que no confirma una navegació. Tauri resol aquests getters via l'event loop de macOS (un **observer de `CFRunLoop`**), i amb `panic = "abort"` al profile `release` un panic en el fil principal tanca l'app sencer. Fix: `wry` actualitzat a `0.57.2` (retorna `Err` en lloc d'abortar) i el navegador intern recorda l'última URL enviada. Incident: `no-orbit` 0.71.9-alpha (2026-11-14, `~/Library/Application Support/no-orbit/crash.log`).
+
+---
+
 ## 0.71.9-alpha (2026-11-13)
 
 **Auditoria de codi integral — fiabilitat, qualitat i UX**

@@ -231,10 +231,44 @@ print(json.dumps({
     }
 }
 
+/// Una línia sembla CODI Python (i no prosa en català)?
+///
+/// Ho fem servir per dues coses:
+///  1) tancar el codi d'una directriu «RUN|BLENDER|» quan el model l'escriu
+///     en diverses línies (abans només se'n capturava la primera i les
+///     altres es perdien: una figura complexa no hi cab en una línia);
+///  2) decidir si un text és un script executable o una frase.
+///
+/// Regla pràctica: una línia sense espais interiors és codi
+/// («bpy.ops.mesh.primitive_cube_add(size=2)», «}», «ob.data.x»); amb
+/// espais, només si té marcadors inequívocs de Python (assignació, import,
+/// bpy., print(…). La prosa («Fes un cub (2x2x2) vermell») no en té.
+pub fn looks_like_code_line(l: &str) -> bool {
+    let t = l.trim();
+    if t.is_empty() {
+        return false;
+    }
+    if t.starts_with('#') {
+        return true; // comentari
+    }
+    if l.starts_with(' ') || l.starts_with('\t') {
+        return true; // continuació indentada d'un bloc
+    }
+    // Sense espais interiors és codi (crides, índexs, «}», «),»…).
+    if !t.contains(' ') {
+        return true;
+    }
+    const MARKS: [&str; 14] = [
+        "=", "bpy.", "import ", "from ", "def ", "for ", "if ", "with ", "return ",
+        "print(", "print (", "else", "elif ", "while ",
+    ];
+    MARKS.iter().any(|m| t.contains(m))
+}
+
 /// Heurística: diu si un text sembla CODI PYTHON executable (no una frase en
 /// llenguatge natural). El Python real gairebé sempre conté «import», crides
-/// `(...)` o assignacions `=`; una petició com «crea una imatge vermella» no
-/// té cap d'aquests senyals. Sense aquesta guarda la frase arribava a exec()
+/// `bpy.` o assignacions `=`; una petició com «crea un nomo de jardi» no té
+/// cap d'aquests senyals. Sense aquesta guarda la frase arribava a exec()
 /// dins Blender i provocava un SyntaxError criptic que l'usuari no entenia.
 pub fn looks_like_python(code: &str) -> bool {
     let c = code.trim();
@@ -247,15 +281,40 @@ pub fn looks_like_python(code: &str) -> bool {
     if c.ends_with(".py") && !c.contains(char::is_whitespace) {
         return true;
     }
-    if ["(", ")", "=", "import ", "bpy.", "bmesh.", "\n    "]
-        .iter()
-        .any(|s| c.contains(s))
-    {
+    // Sense cap senyal: una sola paraula no la podem classificar; l'acceptem
+    // perquè Blender doni un error explícit (com abans).
+    if c.split_whitespace().count() <= 1 {
         return true;
     }
-    // Sense cap senyal: una frase. Només acceptem una única paraula ambigua
-    // (la guard no la pot classificar; Blender donarà un error explícit).
-    c.split_whitespace().count() <= 1
+    let lines: Vec<&str> = c.lines().filter(|l| !l.trim().is_empty()).collect();
+    if lines.is_empty() {
+        return false;
+    }
+    // Un script és codi si la majoria de les seves línies ho són: una barreja
+    // de prosa i codi no és un script executable.
+    let code_lines = lines
+        .iter()
+        .filter(|l| looks_like_code_line(l))
+        .count();
+    if code_lines == 0 || code_lines * 2 < lines.len() {
+        return false;
+    }
+    // I ha de tenir alguna senyal de Python/bpy: la prosa no en té.
+    const SIGNALS: [&str; 12] = [
+        "import ",
+        "from ",
+        "bpy.",
+        "bmesh.",
+        "def ",
+        "print(",
+        "print (",
+        "=",
+        "math.",
+        "random.",
+        "os.",
+        "scene.",
+    ];
+    SIGNALS.iter().any(|s| c.contains(s))
 }
 
 /// Comprovació amb missatge d'error homogeni per a allò que s'intenta
@@ -269,11 +328,43 @@ pub fn guard_python(code: &str) -> Result<()> {
     let shown: String = code.trim().chars().take(100).collect();
     Err(anyhow!(
         "«{}» NO és codi Python: no s'ha executat res a Blender. Per editar \
-l'escena cal codi bpy que comenci per «import bpy» (instruccions separades \
-amb «;» o una ruta d'script .py). Les imatges NO es fan amb Blender: per \
-generar-ne emet «IMG|descripció detallada|ruta/imatge.png».",
+l'escena cal codi bpy que comenci per «import bpy»: pot ser una línia \
+(«import bpy; bpy.ops…») o un script sencer de varies línies (escriu-lo a \
+sota de «RUN|BLENDER|» o dins d'un bloc ```python). Les imatges planes NO \
+es fan amb Blender: per generar-ne emet «IMG|descripció detallada|ruta/imatge.png».",
         shown
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prose_is_not_python() {
+        // El cas que queixava l'usuari: una ordre en català.
+        assert!(!looks_like_python("crea un nomo de jardi ,"));
+        assert!(!looks_like_python("Fes un cub (2x2x2) vermell"));
+        assert!(!looks_like_python("Aqui tens el nan de jardi, fet amb primitives."));
+    }
+
+    #[test]
+    fn real_scripts_are_python() {
+        assert!(looks_like_python("import bpy\nbpy.ops.mesh.primitive_cube_add(size=2)\nprint(\"Fet\")"));
+        assert!(looks_like_python("import bpy; bpy.ops.mesh.primitive_cube_add()"));
+        assert!(looks_like_python("ob = bpy.data.objects[\"Cub\"]"));
+        assert!(looks_like_python("from mathutils import Vector"));
+    }
+
+    #[test]
+    fn code_lines_are_detected() {
+        assert!(looks_like_code_line("import bpy"));
+        assert!(looks_like_code_line("bpy.ops.mesh.primitive_cube_add(size=2)"));
+        assert!(looks_like_code_line("    ob.location = (1, 2, 3)"));
+        assert!(looks_like_code_line("# un comentari"));
+        assert!(!looks_like_code_line("Fes un cub (2x2x2) vermell"));
+        assert!(!looks_like_code_line("Ara el nan: vermell"));
+    }
 }
 
 const SCREENSHOT_CODE: &str = r#"

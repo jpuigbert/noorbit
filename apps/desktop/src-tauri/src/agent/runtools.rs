@@ -32,8 +32,8 @@ UNA directriu sola en una línia i ATURA el torn. NoOrbit l'executa (l'usuari \
 pot confirmar-la) i et torna el resultat en un missatge nou.\n\
   RUN|<comanda de shell>       (dins el projecte i espera la sortida)\n\
   RUN|BG|<comanda>             (desconnectat: servidors/apps que queden obertes)\n\
-   RUN|BLENDER|«import bpy; ...» codi d'UNA línia o ruta/script.py   (Blender: editor connectat o headless)\n\
-  RUN|UNREAL|codi python       (Unreal, via Remote Control)\n\
+   RUN|BLENDER|<codi bpy>       (Blender: editor connectat o headless)\n\
+  RUN|UNREAL|<codi python>     (Unreal, via Remote Control)\n\
   IMG|descripció|ruta/caixa.png    (genera una imatge i la desa al projecte)\n\
   @delete: ruta/relativa       (esborra el fitxer o carpeta del projecte)\n\
   @edit: ruta + «<<<<<<< CERCA» + text antic + «=======» + text nou + «>>>>>>>»\n\
@@ -53,10 +53,15 @@ main.py»): no diguis a l'usuari que ho faci ell.\n\
 «IMG|descripció detallada|ruta/imatge.png» i ATURA el torn: la generació la \
 fa el sistema (rodet local en CPU —també Mac Intel— o proveïdor en línia); \
 MAI no l'expliquis amb prosa ni la promesis per a «després».\n\
-- Si l'usuari demana una FIGURA, un model 3D, un personatge, una escena o un jardí (encara que NO digui la paraula «Blender»), el pots construir a Blender: emet «RUN|BLENDER|import bpy; ...» amb el codi que ho construeix (el motor Blender connectat és una eina teva, com el terminal). Descriu la figura amb paràmetres (colors, mides, materials) i NO tornis a planificar: el codi el fa.
-- «RUN|BLENDER|» SEMPRE és codi Python real de Blender: comença per «import bpy»
-i separa instruccions amb «;» (o dona una ruta .py). MAI frases en llenguatge
-natural dins de BLENDER: les imatges es creen amb «IMG|descripció|ruta.png».
+- Si l'usuari demana una FIGURA, un model 3D, un personatge, una escena o un jardí (encara que NO digui la paraula «Blender»), el pots construir a Blender: emet «RUN|BLENDER|» amb el CODI bpy que ho construeix (el motor Blender connectat és una eina teva, com el terminal). Escriu el codi sencer, amb els seus colors, mides i materials: NO facis un pla ni una descripció en prosa.
+- «RUN|BLENDER|» SEMPRE és codi Python real de Blender: comença per «import bpy» i acaba amb un print(). POT ocupar varies línies: escriu el script sencer a sota de la directriu (o dins d'un bloc ```python), sense prosa al voltant. Exemple:
+RUN|BLENDER|
+import bpy
+bpy.ops.mesh.primitive_uv_sphere_add(radius=0.5, location=(0, 0, 1))
+bpy.context.active_object.name = 'NoOrbit_Esfera'
+print('Esfera creada')
+MAI hi posis una frase en llenguatge natural dins de BLENDER (ni una descripció de la figura): les imatges planes es creen amb «IMG|descripció|ruta.png».
+- Si la descripció demana MOLTS elements (jardí + casa + nan + arbres + follets + gos + vídeo + text…), fes-los TOTS en un sol script: no et quedis amb el primer element. Usa un prefix de nom per a cada grup («Casa_», «Arbre_», «Follet_»…), `import random` per a ubicacions a l'atzar i animals senzills, i acaba amb un print() (i, si hi ha vídeo, amb «NOORBIT_VIDEO_OK:<ruta>»).
 - VÍDEO/ANIMACIÓ a Blender: anima amb keyframes i fer NOMÉS això al final:
 desa una còpia del fitxer amb bpy.ops.wm.save_as_mainfile(..., copy=True) i
 imprimeix «NOORBIT_VIDEO_OK:<ruta_blend>» — MAI cridis render(animation=True)
@@ -93,39 +98,161 @@ pub enum RunAction {
     Image(String, String),
 }
 
-/// Extreu les directrius en línies pròpies: «RUN|…», «RUN|BG|…» i «IMG|…».
-/// La comanda de «RUN|» és tota la resta de la línia, perquè accepta pipes
-/// i «&&» sense emportar-se'ls com a separadors.
-pub fn parse(text: &str) -> Vec<RunAction> {
-    let mut out = Vec::new();
-    if let Ok(re) = regex::Regex::new(r"(?im)^[ \t>*-]*run\|(.*)$") {
-        for c in re.captures_iter(text) {
-            let raw = c.get(1).map(|m| m.as_str().trim()).unwrap_or("").to_string();
-            if raw.is_empty() {
+/// Neteja el prefix de markdown d'una línia de directriu: «> RUN|…»,
+/// «- RUN|…», «**RUN|…**» → «RUN|…». Només afecta al detectar la
+/// directriu: el codi i les comandes es copien tal qual.
+fn directive_line(l: &str) -> &str {
+    let mut s = l.trim_start();
+    while let Some(c) = s.chars().next() {
+        if c == '>' || c == '#' || c == '*' || c == '-' || c.is_whitespace() {
+            s = &s[c.len_utf8()..];
+        } else {
+            break;
+        }
+    }
+    s.trim_start_matches('`')
+}
+
+/// La línia obre una ALTRA directriu? (per saber on acaba el codi d'un
+/// «RUN|BLENDER|» que el model escriu en diverses línies).
+fn starts_directive(l: &str) -> bool {
+    let t = directive_line(l);
+    let low = t.to_ascii_lowercase();
+    if low.starts_with("run|") || low.starts_with("img|") || low.starts_with("nb|") {
+        return true;
+    }
+    // @file:, @edit:, @delete:, @dir:, @agent:, @todo:…
+    t.starts_with('@')
+}
+
+/// Recull el codi Python d'una directriu «RUN|BLENDER|» / «RUN|UNREAL|».
+///
+/// Abans només se'n capturava la PRIMERA línia, cosa que feia impossible
+/// construir una figura complexa (un nan de jardí té desenes de línies):
+/// el model es veia obligat a escriure una descripció i tot s'acabava amb
+/// «NO és codi Python». Ara s'accepten les tres formes que fan servir els
+/// models:
+///   1) el codi a la mateixa línia:   RUN|BLENDER|import bpy; bpy.ops…
+///   2) el codi a les línies següents: RUN|BLENDER|import bpy
+///                                     bpy.ops…
+///   3) un bloc ```python sencer:     RUN|BLENDER|
+///                                     ```python
+///                                     import bpy
+///                                     ```
+/// Retorna el codi i quantes línies addicionals s'han consumit.
+fn collect_script(lines: &[&str], start: usize, inline: &str) -> (String, usize) {
+    let mut out: Vec<String> = Vec::new();
+    let mut used = 0usize;
+    let mut in_fence = false;
+    let inline = inline.trim();
+    if inline.starts_with("```") {
+        // La directriu obre la tanca: el codi és a les línies següents.
+        in_fence = true;
+    } else if !inline.is_empty() {
+        out.push(inline.to_string());
+    }
+    let mut idx = start;
+    while idx < lines.len() {
+        let l = lines[idx];
+        let trimmed = l.trim_start();
+        if in_fence {
+            if trimmed.starts_with("```") {
+                // Tanca de la tanca: el codi s'ha acabat aquí.
+                used += 1;
+                break;
+            }
+            out.push(l.to_string());
+            idx += 1;
+            used += 1;
+            continue;
+        }
+        // Una tanca nova: el codi és dins, fins a la tanca de tancament.
+        if trimmed.starts_with("```") {
+            in_fence = true;
+            idx += 1;
+            used += 1;
+            continue;
+        }
+        // Una altra directriu: aquí acaba el codi.
+        if starts_directive(l) {
+            break;
+        }
+        if crate::blender::looks_like_code_line(l) {
+            out.push(l.to_string());
+            idx += 1;
+            used += 1;
+            continue;
+        }
+        // Línia buida: si el següent és codi, és un salt dins del bloc; si no,
+        // el codi ja s'ha acabat (aquí comença la prosa del model).
+        if l.trim().is_empty() {
+            let seg = lines
+                .get(idx + 1)
+                .map(|n| crate::blender::looks_like_code_line(n))
+                .unwrap_or(false);
+            if seg {
+                out.push(String::new());
+                idx += 1;
+                used += 1;
                 continue;
             }
-            // Prefixos dins de «RUN|»: BG (segon pla), BLENDER i UNREAL
-            // (apps locals). Tot el que ve darrere és la comanda o el codi.
-            let up = raw.to_uppercase();
-            let push = |out: &mut Vec<RunAction>, key: &str, kind: fn(String) -> RunAction| {
-                if let Some(tail) = up.strip_prefix(key) {
-                    // Les claus són ASCII purs: la longitud es conserva.
-                    let arg = raw[raw.len() - tail.len()..].trim().to_string();
-                    if !arg.is_empty() {
-                        out.push(kind(arg));
-                    }
-                }
-            };
-            if up.starts_with("BLENDER|") {
-                push(&mut out, "BLENDER|", RunAction::Blender);
-            } else if up.starts_with("UNREAL|") {
-                push(&mut out, "UNREAL|", RunAction::Unreal);
-            } else if up.starts_with("BG|") {
-                push(&mut out, "BG|", RunAction::Background);
-            } else {
-                out.push(RunAction::Foreground(raw));
-            }
         }
+        break;
+    }
+    (out.join("\n"), used)
+}
+
+/// Extreu les directrius en línies pròpies: «RUN|…», «RUN|BG|…» i «IMG|…».
+/// La comanda de «RUN|» és tota la resta de la línia, perquè accepta pipes
+/// i «&&» sense emportar-se'ls com a separadors. «RUN|BLENDER|» i
+/// «RUN|UNREAL|» poden dur varies línies: hi va tot el codi.
+pub fn parse(text: &str) -> Vec<RunAction> {
+    let mut out = Vec::new();
+    let lines: Vec<&str> = text.lines().collect();
+    let mut i = 0usize;
+    while i < lines.len() {
+        let t = directive_line(lines[i]);
+        let is_run = t
+            .get(..4)
+            .map(|s| s.eq_ignore_ascii_case("run|"))
+            .unwrap_or(false);
+        if is_run {
+            let rest = t[4..].trim_start();
+            let up = rest.to_ascii_uppercase();
+            if up.starts_with("BLENDER|") {
+                let inline = rest["BLENDER|".len()..].trim().to_string();
+                let (code, used) = collect_script(&lines, i + 1, &inline);
+                if !code.trim().is_empty() {
+                    out.push(RunAction::Blender(code));
+                }
+                i = i + 1 + used;
+                continue;
+            }
+            if up.starts_with("UNREAL|") {
+                let inline = rest["UNREAL|".len()..].trim().to_string();
+                let (code, used) = collect_script(&lines, i + 1, &inline);
+                if !code.trim().is_empty() {
+                    out.push(RunAction::Unreal(code));
+                }
+                i = i + 1 + used;
+                continue;
+            }
+            if up.starts_with("BG|") {
+                let arg = rest["BG|".len()..].trim().to_string();
+                if !arg.is_empty() {
+                    out.push(RunAction::Background(arg));
+                }
+                i += 1;
+                continue;
+            }
+            let cmd = rest.trim().to_string();
+            if !cmd.is_empty() {
+                out.push(RunAction::Foreground(cmd));
+            }
+            i += 1;
+            continue;
+        }
+        i += 1;
     }
     if let Ok(re) = regex::Regex::new(r"(?im)^[ \t>*-]*img\|([^|\r\n]+)(?:\|([^\r\n]*))?") {
         for c in re.captures_iter(text) {
@@ -530,11 +657,14 @@ fn find_uproject(root: &std::path::Path) -> Option<std::path::PathBuf> {
 
 /// Executa les directrius en ordre i construeix l'informe («RUN|RESULTAT|…»)
 /// que es tornarà al model com a torn d'usuari.
+/// `user_prompt` és l'ordre ORIGINAL de l'usuari: serveix de context per a
+/// l'agent 3D quan el model envia una descripció en lloc de codi bpy.
 pub async fn execute(
     app: &AppHandle,
     computer: &Arc<ComputerController>,
     ai: &Arc<AiManager>,
     actions: &[RunAction],
+    user_prompt: &str,
 ) -> String {
     let mut report = String::from("RUN|RESULTAT|—\n");
     let root = crate::commands::workspace::current_root();
@@ -631,78 +761,105 @@ pub async fn execute(
                 // Abans una frase («crea una imatge…») arribava a exec() dins
                 // Blender i provocava un SyntaxError que la IA no sabia corregir.
                 if let Err(e) = crate::blender::guard_python(&code) {
-                    return format!(
-                        "RUN|RESULTAT| BLENDER| NO EXECUTADA: {} Torna a emetre «RUN|BLENDER|» \
-amb el CODI PYTHON real (comença per «import bpy» i acaba amb un print() en català), \
-no amb una frase en llenguatge natural.",
-                        e
+                    // El model ha enviat una DESCRIPCIÓ («crea un nan de jardí…»)
+                    // en lloc de codi. En lloc de deixar l'usuari amb un error
+                    // tècnic, li donem la feina a l'AGENT 3D de NoOrbit: té les
+                    // receptes bpy (nan de jardí, materials, càmera…) i sap
+                    // escriure scripts de varies línies i executar-los de veritat.
+                    progress(
+                        app,
+                        "Blender: el model ha enviat una descripció; l'agent 3D hi posa el codi…",
+                        true,
                     );
-                }
-                // El codi és Python però sense «import bpy» (els models locals
-                // sovint l'obliden): l'hi afegim nosaltres (és inocu si ja hi és).
-                let code = if !code.contains("import bpy") && !code.contains("from bpy") {
-                    format!("import bpy\n{}", code)
+                    let desc = code.trim().to_string();
+                    let task = if user_prompt.trim().is_empty() {
+                        desc.clone()
+                    } else {
+                        format!("{}\n\n{}\n", user_prompt.trim(), desc)
+                    };
+                    let orch = crate::agent::AgentOrchestrator::new(
+                        crate::agent::AgentConfig::default(),
+                    );
+                    match orch.apply_blender(ai, app, &task).await {
+                        Ok((msg, ok)) => {
+                            let _ = ok;
+                            format!("RUN|RESULTAT| BLENDER| {}\n{}", e, msg)
+                        }
+                        Err(e2) => format!(
+                            "RUN|RESULTAT| BLENDER| NO EXECUTADA: {} No s'ha pogut \
+aplicar amb l'agent 3D ({}). Torna a emetre «RUN|BLENDER|» amb el CODI PYTHON \
+real (comença per «import bpy» i acaba amb un print() en català), no amb una \
+frase en llenguatge natural.",
+                            e, e2
+                        ),
+                    }
                 } else {
-                    code
-                };
-                let st = blender::status();
-                let exec = if st.running {
-                    let code2 = code.clone();
-                    tokio::task::spawn_blocking(move || {
-                        BlenderSocketClient::new(DEFAULT_SOCKET_PORT).execute_auto(&code2)
-                    })
-                    .await
-                    .map_err(|e| e.to_string())
-                    .and_then(|r| r.map_err(|e| e.to_string()))
-                } else if st.installed {
-                    let code2 = code.clone();
-                    tokio::task::spawn_blocking(move || blender::run_blender_headless(&code2))
+                    // El codi és Python però sense «import bpy» (els models locals
+                    // sovint l'obliden): l'hi afegim nosaltres (és inocu si ja hi és).
+                    let code = if !code.contains("import bpy") && !code.contains("from bpy") {
+                        format!("import bpy\n{}", code)
+                    } else {
+                        code
+                    };
+                    let st = blender::status();
+                    let exec = if st.running {
+                        let code2 = code.clone();
+                        tokio::task::spawn_blocking(move || {
+                            BlenderSocketClient::new(DEFAULT_SOCKET_PORT).execute_auto(&code2)
+                        })
                         .await
                         .map_err(|e| e.to_string())
                         .and_then(|r| r.map_err(|e| e.to_string()))
-                } else {
-                    Err("Blender no està instal·lat en aquest ordinador.".to_string())
-                };
-                match exec {
-                    Ok(out) => {
-                        let base = format!(
-                            "RUN|RESULTAT| BLENDER| ({}) eixit=0 — sortida:\n{}",
-                            if st.running { "editor connectat" } else { "headless" },
-                            clip(out.trim(), 2000)
-                        );
-                        // Vídeo: si l'script ha imprimit el marcador
-                        // NOORBIT_VIDEO_OK (animació + còpia .blend desada),
-                        // llença el render headless i afegeix el resultat:
-                        if let Some(blend) = out.lines().find_map(|l| {
-                            l.split(blender::VIDEO_MARKER).nth(1).map(|p| {
-                                p.trim().trim_matches('"').split_whitespace().next().unwrap_or("").to_string()
-                            })
-                        }).filter(|p| !p.is_empty()) {
-                            progress(app, "Blender: 🎬 render del vídeo (pot trigar)…", true);
-                            match tokio::task::spawn_blocking(move || {
-                                blender::render_blender_video(&blend)
-                            })
+                    } else if st.installed {
+                        let code2 = code.clone();
+                        tokio::task::spawn_blocking(move || blender::run_blender_headless(&code2))
                             .await
                             .map_err(|e| e.to_string())
                             .and_then(|r| r.map_err(|e| e.to_string()))
-                            {
-                                Ok(video) => {
-                                    progress(app, "🎬 Vídeo renderitzat", true);
-                                    return format!("{}\n\n🎬 Vídeo renderitzat: {}", base, video);
-                                }
-                                Err(e) => {
-                                    return format!(
-                                        "{}\n\n⚠️ El render del vídeo ha fallat: {}",
-                                        base, e
-                                    );
+                    } else {
+                        Err("Blender no està instal·lat en aquest ordinador.".to_string())
+                    };
+                    match exec {
+                        Ok(out) => {
+                            let base = format!(
+                                "RUN|RESULTAT| BLENDER| ({}) eixit=0 — sortida:\n{}",
+                                if st.running { "editor connectat" } else { "headless" },
+                                clip(out.trim(), 2000)
+                            );
+                            // Vídeo: si l'script ha imprimit el marcador
+                            // NOORBIT_VIDEO_OK (animació + còpia .blend desada),
+                            // llença el render headless i afegeix el resultat:
+                            if let Some(blend) = out.lines().find_map(|l| {
+                                l.split(blender::VIDEO_MARKER).nth(1).map(|p| {
+                                    p.trim().trim_matches('"').split_whitespace().next().unwrap_or("").to_string()
+                                })
+                            }).filter(|p| !p.is_empty()) {
+                                progress(app, "Blender: 🎬 render del vídeo (pot trigar)…", true);
+                                match tokio::task::spawn_blocking(move || {
+                                    blender::render_blender_video(&blend)
+                                })
+                                .await
+                                .map_err(|e| e.to_string())
+                                .and_then(|r| r.map_err(|e| e.to_string()))
+                                {
+                                    Ok(video) => {
+                                        progress(app, "🎬 Vídeo renderitzat", true);
+                                        return format!("{}\n\n🎬 Vídeo renderitzat: {}", base, video);
+                                    }
+                                    Err(e) => {
+                                        return format!(
+                                            "{}\n\n⚠️ El render del vídeo ha fallat: {}",
+                                            base, e
+                                        );
+                                    }
                                 }
                             }
+                            base
                         }
-                        base
-                    }
-                    Err(e) => {
-                        progress(app, &format!("Blender: {}", clip(&e, 70)), false);
-                        format!("RUN|RESULTAT| BLENDER| error: {}", e)
+                        Err(e) => {
+                            progress(app, &format!("Blender: {}", clip(&e, 70)), false);
+                            format!("RUN|RESULTAT| BLENDER| error: {}", e)
+                        }
                     }
                 }
             }
@@ -898,6 +1055,90 @@ pub async fn tools_status_line(computer_enabled: bool) -> String {
     });
     l.push_str("• Per obrir una app des del xat, usa la comanda REAL (p. ex. «RUN|open -a Blender»), no llenguatge natural.\n");
     l
+}
+
+#[cfg(test)]
+mod run_tests {
+    use super::*;
+
+    fn blender_code(text: &str) -> String {
+        let acts = parse(text);
+        let b = acts
+            .iter()
+            .find_map(|a| match a {
+                RunAction::Blender(c) => Some(c.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no hi ha cap directriu BLENDER: {:?}", acts));
+        b
+    }
+
+    #[test]
+    fn blender_directive_one_line() {
+        let code = blender_code("RUN|BLENDER|import bpy; bpy.ops.mesh.primitive_cube_add()");
+        assert!(code.contains("primitive_cube_add"));
+    }
+
+    #[test]
+    fn blender_directive_multi_line() {
+        // El cas que feia fallar tot: una figura complexa NO cap en una línia.
+        let text = "Ara ho construeixo:\n\
+RUN|BLENDER|import bpy\n\
+bpy.ops.mesh.primitive_uv_sphere_add(radius=0.3, location=(0, 0, 1.4))\n\
+bpy.context.active_object.name = \"Nan_Cap\"\n\
+print(\"Nan de jardí creat\")\n\
+Ja està fet.";
+        let code = blender_code(text);
+        assert!(code.starts_with("import bpy"), "codi: {}", code);
+        assert!(code.contains("Nan_Cap"), "codi: {}", code);
+        assert!(code.contains("print(\"Nan de jardí creat\")"), "codi: {}", code);
+        // La prosa del model NO entra al codi.
+        assert!(!code.contains("Ja està fet"), "codi: {}", code);
+        // I el que hem capturat és, de veritat, codi Python.
+        assert!(crate::blender::guard_python(&code).is_ok(), "codi: {}", code);
+    }
+
+    #[test]
+    fn blender_directive_fenced_block() {
+        let text = "RUN|BLENDER|\n\
+```python\n\
+import bpy\n\
+print('hola')\n\
+```\n\
+Fi.";
+        let code = blender_code(text);
+        assert!(code.contains("import bpy"), "codi: {}", code);
+        assert!(code.contains("print('hola')"), "codi: {}", code);
+        assert!(!code.contains("```"), "codi: {}", code);
+    }
+
+    #[test]
+    fn blender_directive_stops_at_the_next_directive() {
+        let text = "RUN|BLENDER|import bpy\n\
+print('x')\n\
+RUN|ls -la";
+        let acts = parse(text);
+        let b = acts
+            .iter()
+            .find_map(|a| match a {
+                RunAction::Blender(c) => Some(c.clone()),
+                _ => None,
+            })
+            .expect("hi ha d'haver una directriu BLENDER");
+        assert!(b.contains("print('x')"));
+        assert!(!b.contains("ls -la"));
+        assert!(acts
+            .iter()
+            .any(|a| matches!(a, RunAction::Foreground(c) if c == "ls -la")));
+    }
+
+    #[test]
+    fn a_description_is_not_code() {
+        // El model ha respost amb una descripció: la guarda l'ha de rebutjar
+        // (i aleshores NoOrbit la passa a l'agent 3D).
+        let code = blender_code("RUN|BLENDER|crea un nomo de jardi ,");
+        assert!(crate::blender::guard_python(&code).is_err(), "codi: {}", code);
+    }
 }
 
 #[cfg(test)]

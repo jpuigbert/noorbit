@@ -790,22 +790,77 @@ impl AgentOrchestrator {
         })
     }
 
-    /// Extreu el codi d'una resposta de la IA: prioritza el primer bloc
-    /// ```python (o ```py); si no n'hi ha, usa el text net.
+    /// Extreu el codi d'una resposta de la IA: recull TOTS els blocs
+    /// ```python (o ```py) i els concatena (un script llarg pot venir en
+    /// varies peces), eliminant els `import bpy` duplicats. Si no n'hi ha
+    /// cap, usa el text net només si sembla codi Python.
     fn extract_code(reply: &str) -> String {
-        for fence in ["```python", "```py", "```"] {
-            if let Some(start) = reply.find(fence) {
-                let after = &reply[start + fence.len()..];
-                if let Some(end) = after.find("```") {
-                    let code = after[..end].trim();
-                    if !code.is_empty() {
-                        return code.to_string();
+        // Recull TOTS els blocs fenced en ORDRE DE DOCUMENT (no per tipus de
+        // tanca), perquè un script llarg pot venir en varies peces.
+        let mut blocks: Vec<String> = Vec::new();
+        let mut in_fence = false;
+        let mut cur: Vec<&str> = Vec::new();
+        for line in reply.lines() {
+            let t = line.trim_start();
+            if !in_fence {
+                if t.starts_with("```") {
+                    let lang = t.trim_start_matches('`').trim().to_lowercase();
+                    // Acceptem ```python, ```py i ``` (sense llenguatge).
+                    if lang.is_empty() || lang == "python" || lang == "py" {
+                        in_fence = true;
+                        cur.clear();
                     }
+                }
+            } else {
+                if t.starts_with("```") {
+                    let code = cur.join("\n").trim().to_string();
+                    if !code.is_empty() {
+                        blocks.push(code);
+                    }
+                    in_fence = false;
+                    cur.clear();
+                } else {
+                    cur.push(line);
                 }
             }
         }
-        reply.trim().to_string()
+        // Bloc sense tancar (resposta tallada): agafem la resta.
+        if in_fence {
+            let code = cur.join("\n").trim().to_string();
+            if !code.is_empty() {
+                blocks.push(code);
+            }
+        }
+        if !blocks.is_empty() {
+            // Concatena i elimina `import` duplicats.
+            let mut out = String::new();
+            let mut seen_import = false;
+            for b in &blocks {
+                for line in b.lines() {
+                    let tl = line.trim();
+                    if tl.starts_with("import ") || tl.starts_with("from ") {
+                        if seen_import
+                            && (tl == "import bpy" || tl.starts_with("import bpy,"))
+                        {
+                            continue;
+                        }
+                        seen_import = true;
+                    }
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+            return out.trim().to_string();
+        }
+        // Sense blocs fenced: només si sembla codi Python.
+        let trimmed = reply.trim().to_string();
+        if crate::blender::looks_like_python(&trimmed) {
+            trimmed
+        } else {
+            String::new()
+        }
     }
+
 
     /// Si el codi executat ha imprimit el marcador NOORBIT_VIDEO_OK (l'IA ha
     /// animat l'escena i ha desat una còpia .blend), llença el render del
@@ -867,6 +922,11 @@ de fer a l'escena (crear, esborrar, moure, escalar, girar, posar material, afegi
 llum/càmera/text, etc.). Respon NOMÉS amb UN script Python dins un bloc ```python
 que s'executi dins Blender amb la API bpy i que ACONSEEIXI REALMENT la tasca:
 usa bpy.ops.* o bpy.data.* per crear o modificar objectes.
+IMPORTANT per a descripcions LARGUES o COMPLEXES: identifica TOTS els elements
+que l'usuari ha demanat (casa, nan, arbres, follets, gos, animals, text…)
+i crea'ls TOTS en un sol script, no només el primer. Si la descripció té 8
+elements, el script ha de crear els 8. No et justifiquis amb «fet» si n'has
+fet només una part.
 PROHIBIT entregar un script que només compti o llisti objectes
 (p. ex. print(len(bpy.context.scene.objects))) llevat que se't demanis expressament.
 Termina sempre amb un print() en català que digui QUÈ has fet.
@@ -1045,6 +1105,81 @@ for area in bpy.context.screen.areas:
             bpy.context.space_data.shading.type = "MATERIAL"
 print("Nan de jardí creat amb %d peces" % len(nomop))
 ```
+- ESCENA COMPLEXA DE MOLTS ELEMENTS (jardí, casa, nan, arbres, follets,
+gos, animals, text…): quan l'usuari demana VÀRIES coses en un sol missatge,
+fes-les TOTES en un sol script, no et quedis amb el primer element. Compon
+peça a peça: PRIMER crea cada element amb la seva ubicació, PRIMER els
+materials, i AL FINAL anima, posa càmera i desa el vídeo. Usa un prefix de
+nom per a cada grup («Casa_», «Arbre_», «Follet_», «Gos_», «Animal_») per
+poder-los editar després com a grup. Per posar elements «a l'atzar», usa
+`import random` i ubicacions aleatòries dins un rang. Recepta mínima:
+```python
+import bpy, random
+def mat(n, c, rough=0.6):
+    m = bpy.data.materials.new(n); m.use_nodes = True
+    b = next(nd for nd in m.node_tree.nodes if nd.type == "BSDF_PRINCIPLED")
+    b.inputs["Base Color"].default_value = (*c, 1.0)
+    b.inputs["Roughness"].default_value = rough
+    return m
+M_CASA = mat("Casa", (0.92, 0.90, 0.85))
+M_FUSTA = mat("Fusta", (0.55, 0.35, 0.18))
+M_FULLA = mat("Fulla", (0.18, 0.62, 0.22))
+M_PELL = mat("Pell", (0.90, 0.70, 0.58))
+M_ROG = mat("Rog", (0.80, 0.05, 0.03))
+def peça(nom, add, loc, scale=(1,1,1), rot=(0,0,0), material=None):
+    add(); ob = bpy.context.view_layer.objects.active; ob.name = nom
+    ob.location = loc; ob.rotation_euler = rot; ob.scale = scale
+    if material:
+        ob.data.materials.clear(); ob.data.materials.append(material)
+    return ob
+# Casa: base + teulada
+peça("Casa_Base", lambda: bpy.ops.mesh.primitive_cube_add(size=1), (0, 0, 0.5), (2.0, 1.6, 1.0), material=M_CASA)
+peça("Casa_Teulada", lambda: bpy.ops.mesh.primitive_cone_add(radius1=1.5, radius2=0.0, depth=1.0, vertices=4), (0, 0, 1.5), (1,1,1), (0,0,0.785), material=M_FUSTA)
+# Arbres (3, a l'esquerra)
+for i in range(3):
+    x = -4.0 + i * 1.6
+    peça("Arbre_Tr_%d" % i, lambda: bpy.ops.mesh.primitive_cylinder_add(radius=0.12, depth=1.4), (x, 0, 0.7), material=M_FUSTA)
+    peça("Arbre_Copa_%d" % i, lambda: bpy.ops.mesh.primitive_uv_sphere_add(radius=0.7), (x, 0, 1.9), material=M_FULLA)
+# Nan (a la dreta de la casa)
+peça("Nan_Cos", lambda: bpy.ops.mesh.primitive_cone_add(radius1=0.5, radius2=0.3, depth=1.0), (3.0, 0, 0.6), material=M_ROG)
+peça("Nan_Cap", lambda: bpy.ops.mesh.primitive_uv_sphere_add(radius=0.28), (3.0, 0, 1.4), material=M_PELL)
+# Gos (al costat del nan)
+peça("Gos_Cos", lambda: bpy.ops.mesh.primitive_uv_sphere_add(radius=0.25), (4.2, 0, 0.35), (1.6, 1.0, 0.9), material=M_FUSTA)
+peça("Gos_Cap", lambda: bpy.ops.mesh.primitive_uv_sphere_add(radius=0.18), (4.5, 0, 0.6), material=M_FUSTA)
+# Follets petits (4, a l'atzar per davant)
+for i in range(4):
+    x = random.uniform(-1.5, 1.5); y = random.uniform(-1.5, 1.5)
+    peça("Follet_%d" % i, lambda: bpy.ops.mesh.primitive_uv_sphere_add(radius=0.12), (x, y, 0.15), material=M_PELL)
+# Text "NoOrbit" al final (al cel)
+bpy.ops.object.text_add(location=(0, 0, 3.5)); t = bpy.context.view_layer.objects.active; t.name = "NoOrbit_Text"
+t.data.body = "NoOrbit"; t.data.size = 0.8
+# Animació simple: el nan gira entre frame 1 i 96
+nan = bpy.data.objects["Nan_Cos"]
+nan.keyframe_insert(data_path="rotation_euler", frame=1)
+nan.rotation_euler = (0.0, 0.0, 3.14); nan.keyframe_insert(data_path="rotation_euler", frame=96)
+# Escena + càmera + vídeo
+sc = bpy.context.scene; sc.frame_start = 1; sc.frame_end = 96; sc.render.fps = 24
+sc.render.resolution_x = 960; sc.render.resolution_y = 540
+if sc.camera is None:
+    bpy.ops.object.camera_add(location=(8, -8, 5), rotation=(1.1, 0.0, 0.8)); sc.camera = bpy.context.view_layer.objects.active
+bpy.ops.object.select_all(action="DESELECT")
+for o in bpy.data.objects:
+    if o.name.startswith(("Casa_", "Arbre_", "Nan_", "Gos_", "Follet_", "NoOrbit_")):
+        o.select_set(True)
+for area in bpy.context.screen.areas:
+    if area.type == "VIEW_3D":
+        region = next(r for r in area.regions if r.type == "WINDOW")
+        with bpy.context.temp_override(area=area, region=region):
+            bpy.ops.view3d.view_selected()
+            bpy.context.space_data.shading.type = "MATERIAL"
+bpy.ops.wm.save_as_mainfile(filepath="/tmp/noorbit_scene.blend", copy=True)
+print("NOORBIT_VIDEO_OK:/tmp/noorbit_scene.blend")
+print("Escena complexa creada: casa, 3 arbres, nan, gos, 4 follets i text NoOrbit")
+```
+- TEXT / PARLA / MÚSICA (si l'usuari demana veu o música, afegeix-les amb les receptes de sota).
+- Si l'usuari demana «a l'atzar» o «fes altres animalades», usa `random` per a ubicacions i mides, i crea animals senzills (cos = esfera/cub allargat, potes = 4 cilindres, cap = esfera, cua = cilindre): un gos, un gat, un ocell (esfera + con per al bec) ja donen varietat.
+- Al final de TOT script, SEMPRE: selecciona les peces creades, `view3d.view_selected`, `shading.type = "MATERIAL"`, i un `print()` en català que digui què s'ha fet (i, si hi ha vídeo, el marcador `NOORBIT_VIDEO_OK:<ruta>`).
+
 - ANIMAR I FER UN VÍDEO 3D (quan l'usuari demani vídeo, animació o pel·lícula
 de la seva escena): 1) anima amb KEYFRAMES les peces de la figura (EL GRUP
 sencer, no una peça sola), 2) ajusta l'escena (frame_start/frame_end, fps,
@@ -1166,6 +1301,13 @@ REGLS DE FIGURES (fonts principals d'error):
 - Si demanen un personatge/objecte real, MAI lliuris una única primitiva:
   «una esfera sobre un con» NO és un nan. Compon peça a peça (barba, gorra,
   nas, botes…) i no diguis que està acabat sense les peces i la vista.
+- Si la descripció demana MOLTS elements (jardí + casa + nan + arbres +
+  follets + gos + animals + vídeo + text…), fes-los TOTS en un sol script:
+  no et quedis amb el primer element ni et justifiquis amb «fet». Crea
+  cada grup amb el seu prefix de nom («Casa_», «Arbre_», «Follet_»…) per
+  poder-los editar després com a grup. Si demanen «a l'atzar» o «altres
+  animalades», usa `import random` i crea animals senzills (gos, gat, ocell)
+  amb primitives, a ubicacions aleatòries.
 - Al final, SEMPRE: selecciona les peces, view3d.view_selected i
   shading.type = "MATERIAL", perquè l'usuari vegi el color real.
 REGLS PER QUE NO FALLI (errors típics a Blender):
@@ -1276,8 +1418,11 @@ demanar i ho aplicaré.",
                 "La teva resposta anterior NO era codi Python, així que NO s'ha \
 executat res a Blender.\n\nRespon NOMÉS amb UN sol bloc ```python que comenci per \
 «import bpy» i que faci la tasca de veritat (bpy.ops.* o bpy.data.*). Cap text \
-al voltant.\n\nTasca: {}\n\nSi la tasca és una figura o una escena, recorda les \
-RECEPTES del manual (nan de jardí, materials, càmera…).",
+al voltant.\n\nTasca: {}\n\nSi la tasca demana varies coses (jardí + casa + nan + arbres + \
+follets + gos + vídeo + text…), fes-les TOTES en un sol script, no només la \
+primera. Usa un prefix de nom per a cada grup («Casa_», «Arbre_», «Follet_»…). \
+Si és una figura o una escena, recorda les RECEPTES del manual (nan de jardí, \
+materials, càmera, vídeo, text, random…) i acaba amb un print() en català.",
                 prompt
             );
             let reply2 = match ai.chat(&nudge, Some(system)).await {
