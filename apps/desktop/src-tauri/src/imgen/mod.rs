@@ -707,7 +707,7 @@ pub async fn sd_install(
             .unwrap_or(false);
         let _ = std::fs::remove_file(&arxiu);
         if !ok {
-            return Err(format!("No s'ha pogut descomprimir {}", nom));
+            return Err(anyhow!("No s'ha pogut descomprimir {}", nom));
         }
         // Marca el binari com a executable.
         if let Some(b) = sd_binary() {
@@ -718,7 +718,7 @@ pub async fn sd_install(
             }
             return Ok(format!("Rodet d'imatges en CPU instal·lat a {}", b.to_string_lossy()));
         }
-        Err("He descomprimit el binari, però no hi trobo l'executable «sd».".into())
+        Err(anyhow!("He descomprimit el binari, però no hi trobo l'executable «sd»."))
     }
 }
 
