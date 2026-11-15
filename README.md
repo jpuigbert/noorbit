@@ -39,7 +39,7 @@ Construïda amb [Tauri 2](https://tauri.app) + [React](https://react.dev) + [Typ
 | **Terminal** | PTY real multi-sessió connectat al backend Rust. |
 | **IA** | Xat multi-sessió amb streaming en viu, **materialització automàtica** de fitxers mentre la IA encara està escrivint, i **reintents automàtics** si l'equip es queda sense memòria/context. |
 | **Mòbil natiu** | Selector de plataforma per xat (escriptori / Android / iOS). Android: Kotlin + Jetpack Compose + Material 3. iOS: Swift + SwiftUI. Gestió d'AVDs i simuladors, *live view* amb captures periòdiques. |
-| **Blender** | Add-on Python (`blender-scripts/noorbit_bridge.py`) + client socket. Executa scripts dins la sessió de Blender i llegeix l'escena. |
+| **Blender** | Add-on Python (`blender-scripts/noorbit_bridge.py`) + client socket. Executa scripts (inclòs de varies línies) dins la sessió de Blender, llegeix l'escena i genera figures/escenes complexes (nan de jardí, materials, animació, vídeo) amb l'agent 3D. |
 | **Unreal** | Remote Control API + bootstrap Python (`unreal-scripts/bootstrap.py`). Build, launcher i execució de scripts. |
 | **Extensions** | Skills (carpetes amb `SKILL.md`), plugins natius i servidors **MCP**. |
 | **Especialistes** | Rols amb model, temperatura i prompt propis per tasques concretes. |
@@ -49,6 +49,17 @@ Construïda amb [Tauri 2](https://tauri.app) + [React](https://react.dev) + [Typ
 Tota la documentació ampliada és a la **wiki**: <https://github.com/jpuigbert/noorbit/wiki>
 
 ---
+
+## Novetats de la 0.71.10
+
+- **Blender: ordres complexes (figures, nans, escenes) ja no fallen** amb «NO és codi Python». Fins ara la directriu `RUN|BLENDER|` només capturava la **primera línia** del codi — una figura complexa no hi cabia en una línia, i el model es veia obligat a escriure una descripció en català que Blender rebutjava. Ara `parse()` recull el **codi sencer** a sota de la directriu o dins d'un bloc ` ```python ` (fins a la següent directriu o a la prosa), i l'executa de veritat.
+- **Descripció → codi automàtic**: si el model envia una **DESCRIPCIÓ** en lloc de codi a `RUN|BLENDER|`, NoOrbit la passa a l'**agent 3D** (receptes bpy: nan de jardí, materials, càmera, animació, vídeo, text, random) i executa el script multi-línia generat, en lloc de deixar-te amb un error tècnic.
+- **Guàrdia de codi millorada**: `looks_like_python` i `looks_like_code_line` distingeixen una frase en català d'un script («crea un nomo de jardi» ja no es confon amb codi; `bpy.ops`, assignacions i crides sí). El missatge d'error explica que el codi pot ser de **varies línies**.
+- **`extract_code` (agent 3D)** ara recull **TOTS els blocs** fenced en ordre de document i els concatena (un script llarg pot venir en varies peces), eliminant `import` duplicats.
+- **Prompt més clar**: `RUN_PROMPT` diu que `RUN|BLENDER|` pot ocupar varies línies i inclou un exemple; `expects_execution` també reconeix peticions de figura/escena 3D («crea un nan de jardí», «fes un model 3D d'una casa») encara que no diguin «Blender».
+- **Recepta «ESCENA COMPLEXA»** al prompt de l'agent 3D: mostra com compondre jardí + casa + nan + arbres + follets + gos + animals a l'atzar + text «NoOrbit» + animació + vídeo, amb prefixes de nom per grup i `import random`.
+- **Regles de multi-parte**: si la descripció demana MOLTS elements, fes-los TOTS en un sol script, no només el primer.
+- **12 tests nous** (8 a `runtools`, 3 a `blender`, 1 a `commands/ai`).
 
 ## Novetats de la 0.71.9
 
