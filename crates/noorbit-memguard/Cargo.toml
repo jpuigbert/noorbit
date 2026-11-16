@@ -1,0 +1,10 @@
+[package]
+name = "noorbit-memguard"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+tokio-util = "0.7"
+tracing = { workspace = true }
+libc = { workspace = true }

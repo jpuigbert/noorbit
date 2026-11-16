@@ -99,3 +99,12 @@ export const unrealPackageGame = (
 /// serveix per auto-omplir el projecte d'Unreal sense haver de seleccionar-lo.
 export const unrealFindUproject = (root: string) =>
   invoke<string | null>("unreal_find_uproject", { root });
+
+/// Port REAL de la Remote Control (el de la configuració, no sempre 30010):
+/// la UI el mostra i el deixa canviar, perquè un editor amb un altre port
+/// connecta en cas contrari «en silenci» sense que ningú sàpiga contra què
+/// s'està intentant.
+export const unrealGetRcPort = () => invoke<number>("unreal_get_rc_port");
+
+export const unrealSetRcPort = (port: number) =>
+  invoke<number>("unreal_set_rc_port", { port });

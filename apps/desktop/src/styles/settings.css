@@ -207,8 +207,8 @@
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-2, #999);
-  max-height: 260px;
-  overflow: auto;
+  /* El raonament també es llegeix SENCER: sense sostre que el tanqués en
+     una caixeta amb barra pròpia. */
 }
 
 /* Xat de l'Agent: historial de bombolles usuari / IA, amb el raonament
@@ -234,7 +234,7 @@
   align-items: flex-end;
 }
 .chat-row.assistant {
-  align-items: flex-start;
+  align-items: stretch;
 }
 .chat-bubble {
   max-width: 92%;
@@ -255,11 +255,14 @@
   border: 1px solid var(--border, #333);
   border-bottom-left-radius: 3px;
   color: var(--text-0, #ddd);
-  /* Respostes molt llargues (un fitxer sencer, un pla detallat): la bombolla
-     no creix sense fi —arriba fins al 60% de la pantalla i guanya barra de
-     desplaçament pròpia, així es llegeixen totes les línies. */
-  max-height: 60vh;
-  overflow: auto;
+  /* Respostes llargues (un fitxer sencer, un pla detallat): la bombolla NO
+     es contrau en una caixeta amb barra pròpia — creix amb tot el contingut
+     i la conversa sencera es desplaça amb una sola barra (.agent-body).
+     Amplada completa perquè el codi hi càpiga. */
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 .chat-bubble.assistant.err {
   border-color: var(--error, #e5484d);
@@ -323,7 +326,7 @@
 .chat-bubble.assistant.streaming {
   font-style: normal;
   color: var(--text-0, #ddd);
-  white-space: pre-wrap;
+  white-space: normal;
 }
 .stream-caret {
   display: inline-block;
@@ -361,7 +364,8 @@
   animation: stream-blink 2.4s ease-in-out infinite;
 }
 .chat-thought {
-  width: 92%;
+  width: 100%;
+  box-sizing: border-box;
   margin-bottom: 4px;
   border: 1px solid var(--border, #333);
   border-radius: 6px;

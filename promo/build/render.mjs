@@ -10,7 +10,7 @@ import path from "node:path";
 const ROOT = "/Users/appleone/programes/noorbit/promo";
 const STORY = "file://" + path.join(ROOT, "build/story.html");
 const FPS = 30;
-const DUR = 53;
+const DUR = 65;
 
 const mode = process.argv[2] || "preview";
 const fmt = mode === "preview" ? process.argv[5] || "wide" : process.argv[4] || "wide";

@@ -151,85 +151,136 @@ function persistSoon() {
   }, 1200);
 }
 
+// ── THROTTLE DEL VISOR (un sol render per tros de text) ──────────────────
+// Un model local emet «ai://process» un cop PER TOKEN: sense això, el visor
+// es re-renderitzava desenes de cops per segon. Els fragments «thinking» i
+// «streaming» s'acumulen per sessió i s'apliquen junts cada 80 ms; «done» i
+// «error» aboquen el pendent immediatament perquè el text final no es perda.
+interface PushAcc {
+  thinking: string;
+  text: string;
+  provider: string;
+  model: string;
+  elapsed_ms: number;
+}
+
+const pushBuf: Record<string, PushAcc | undefined> = {};
+const pushTimers: Record<string, ReturnType<typeof setTimeout> | undefined> = {};
+const PUSH_FLUSH_MS = 80;
+
+function flushPush(sid: string) {
+  const t = pushTimers[sid];
+  if (t) clearTimeout(t);
+  delete pushTimers[sid];
+  const acc = pushBuf[sid];
+  delete pushBuf[sid];
+  if (!acc || (!acc.thinking && !acc.text)) return;
+  useProcessStore.setState((s) => {
+    const prev = s.per[sid] ?? EMPTY;
+    // Un torn acabat seguit de text nou = generació nova: l'anterior
+    // s'arxiva (com feia el push immediat, però un sol cop per abocament).
+    const starting =
+      prev.phase === "done" || prev.phase === "error" || prev.phase === "idle";
+    let base: ProcessSnapshot = prev;
+    if (starting) {
+      const turn: ProcessTurn | null =
+        prev.thinking || prev.text || prev.error
+          ? {
+              id: ++turnSeq,
+              provider: prev.provider,
+              model: prev.model,
+              // Els torns arxivats es retallen TAMBÉ en memòria (la conversa
+              // completa ja viu al xat): 8 torns × textos llargs per sessió
+              // arribaven a ocupar una bona part de la RAM del webview.
+              thinking: tail(prev.thinking, TURN_CHARS),
+              text: tail(prev.text, TURN_CHARS),
+              error: prev.error,
+              elapsedMs: prev.elapsedMs,
+              endedAt: Date.now(),
+            }
+          : null;
+      base = {
+        ...EMPTY,
+        provider: prev.provider,
+        model: prev.model,
+        turns: turn ? [...prev.turns, turn].slice(-MAX_TURNS) : prev.turns,
+      };
+    }
+    const start = (starting ? null : prev.startedAt) ?? Date.now();
+    const next: ProcessSnapshot = {
+      ...base,
+      thinking: (starting ? "" : prev.thinking) + acc.thinking,
+      text: (starting ? "" : prev.text) + acc.text,
+      provider: acc.provider,
+      model: acc.model,
+      phase: acc.text ? "streaming" : "thinking",
+      elapsedMs: acc.elapsed_ms,
+      startedAt: start,
+    };
+    persistSoon();
+    return { per: { ...s.per, [sid]: next }, rev: s.rev + 1 };
+  });
+}
+
 export const useProcessStore = create<ProcessState>((set) => ({
   per: loadAll(),
   rev: 0,
 
-  push: (e) =>
-    set((s) => {
-      const sid = e.session || "main";
-      const prev = s.per[sid] ?? EMPTY;
-
-      // Una fase «thinking»/«streaming» després d'una generació acabada
-      // (done/error/idle) significa que ENCOMENÇA una de nova: el llenç
-      // anterior NO s'elimina, s'arxiva com a torn històric per poder-lo obrir.
-      const starting =
-        (e.phase === "thinking" || e.phase === "streaming") &&
-        (prev.phase === "done" || prev.phase === "error" || prev.phase === "idle");
-      let base: ProcessSnapshot = prev;
-      if (starting) {
-        const turn: ProcessTurn | null =
-          prev.thinking || prev.text || prev.error
-            ? {
-                id: ++turnSeq,
-                provider: prev.provider,
-                model: prev.model,
-                thinking: prev.thinking,
-                text: prev.text,
-                error: prev.error,
-                elapsedMs: prev.elapsedMs,
-                endedAt: Date.now(),
-              }
-            : null;
-        base = {
-          ...EMPTY,
-          provider: prev.provider,
-          model: prev.model,
-          turns: turn ? [...prev.turns, turn].slice(-MAX_TURNS) : prev.turns,
-        };
+  push: (e) => {
+    const sid = e.session || "main";
+    // Fragments de text: s'acumulen i s'apliquen amb throttle (vegeu
+    // «flushPush»). La resta de fases («done», «error»…) s'apliquen
+    // immediatament, abocant abans el pendent.
+    if (e.phase === "thinking" || e.phase === "streaming") {
+      const prev = pushBuf[sid] ?? {
+        thinking: "",
+        text: "",
+        provider: "",
+        model: "",
+        elapsed_ms: 0,
+      };
+      pushBuf[sid] = {
+        thinking: e.phase === "thinking" ? prev.thinking + e.chunk : prev.thinking,
+        text: e.phase === "streaming" ? prev.text + e.chunk : prev.text,
+        provider: e.provider,
+        model: e.model,
+        elapsed_ms: e.elapsed_ms,
+      };
+      if (!pushTimers[sid]) {
+        pushTimers[sid] = setTimeout(() => flushPush(sid), PUSH_FLUSH_MS);
       }
-      const start = (starting ? null : prev.startedAt) ?? Date.now();
-
-      let next: ProcessSnapshot;
-      if (e.phase === "thinking") {
-        next = {
-          ...base,
-          thinking: (starting ? "" : prev.thinking) + e.chunk,
-          provider: e.provider,
-          model: e.model,
-          phase: "thinking",
+      return;
+    }
+    flushPush(sid);
+    set((s) => {
+      const prev = s.per[sid] ?? EMPTY;
+      if (e.phase === "done") {
+        const next: ProcessSnapshot = {
+          ...prev,
+          phase: "done",
           elapsedMs: e.elapsed_ms,
-          startedAt: start,
+          startedAt: null,
         };
-      } else if (e.phase === "done") {
-        next = { ...prev, phase: "done", elapsedMs: e.elapsed_ms, startedAt: null };
-      } else if (e.phase === "error") {
+        persistSoon();
+        return { per: { ...s.per, [sid]: next }, rev: s.rev + 1 };
+      }
+      if (e.phase === "error") {
         // El chunk porta el motiu (no es descarta com abans) i el temps real.
         const reason = (e.chunk || "").trim();
         const known = prev.error && reason && prev.error.includes(reason);
-        next = {
+        const next: ProcessSnapshot = {
           ...prev,
           error: !reason || known ? prev.error : (prev.error ? prev.error + "\n\n" : "") + reason,
           phase: "error",
           elapsedMs: e.elapsed_ms,
           startedAt: null,
         };
-      } else {
-        // streaming: acumula el text de la resposta.
-        next = {
-          ...base,
-          text: (starting ? "" : prev.text) + e.chunk,
-          provider: e.provider,
-          model: e.model,
-          phase: "streaming",
-          elapsedMs: e.elapsed_ms,
-          startedAt: start,
-        };
+        persistSoon();
+        return { per: { ...s.per, [sid]: next }, rev: s.rev + 1 };
       }
-      const per = { ...s.per, [sid]: next };
-      persistSoon();
-      return { per, rev: s.rev + 1 };
-    }),
+      return {};
+    });
+  },
 
   reset: (session) =>
     set((s) => {

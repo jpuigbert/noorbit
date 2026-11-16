@@ -1,0 +1,271 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   JAM — panell de l'Autonomous Jam (agent autònom que construeix el joc)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.jam-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  font-size: 12px;
+}
+
+.jam-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.jam-live {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(88, 166, 255, 0.16);
+  color: #58a6ff;
+}
+
+.jam-row {
+  display: flex;
+  gap: 8px;
+}
+
+.jam-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.jam-panel textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 70px;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border, #30363d);
+  background: var(--bg-input, #0d1117);
+  color: var(--fg);
+}
+
+.jam-plan {
+  border: 1px solid var(--border, #30363d);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.jam-plan-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.jam-plan-list {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.jam-plan-list li b {
+  color: #58a6ff;
+  margin-right: 4px;
+}
+
+.jam-plan-list li em {
+  color: var(--fg-muted, #8b949e);
+  font-style: normal;
+}
+
+.jam-live-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border, #30363d);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.jam-stats {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+}
+
+.jam-stats span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.jam-stats .jam-bad {
+  color: #f85149;
+}
+
+.jam-stats .jam-muted {
+  color: var(--fg-muted, #8b949e);
+}
+
+.jam-current {
+  font-size: 11px;
+  color: var(--fg-muted, #8b949e);
+}
+
+.jam-current b {
+  color: #58a6ff;
+  margin-right: 4px;
+}
+
+.jam-log {
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--border, #30363d);
+  border-radius: 6px;
+  padding: 6px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.jam-log-row {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.jam-log-row.bad {
+  color: #f85149;
+}
+
+.jam-log-kind {
+  color: var(--fg-muted, #8b949e);
+  min-width: 78px;
+}
+
+.jam-log-detail {
+  color: var(--fg-muted, #8b949e);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jam-report {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: #3fb950;
+}
+
+/* ── PRESETS (un clic i a jugar) ── */
+.jam-presets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.jam-preset-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 4px;
+  border-radius: 8px;
+  border: 1px solid var(--border, #30363d);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 11px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.jam-preset-btn:hover {
+  background: rgba(88, 166, 255, 0.10);
+  border-color: #58a6ff;
+}
+
+.jam-preset-emoji {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.jam-preset-label {
+  font-weight: 600;
+}
+
+/* ── BARRA DE PROGRÉS GRAN ── */
+.jam-progress-bar {
+  position: relative;
+  height: 24px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.jam-progress-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: linear-gradient(90deg, #58a6ff, #3fb950);
+  transition: width 0.3s ease;
+}
+
+.jam-progress-text {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fg);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+/* ── VISOR DE L'INFORME ── */
+.jam-report-viewer {
+  border: 1px solid var(--border, #30363d);
+  border-radius: 6px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.jam-report-viewer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.jam-report-viewer-body {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--fg);
+}

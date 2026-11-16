@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NoOrbit × Game Studios</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 960px; margin: 0 auto; padding: 24px; line-height: 1.6; color: #e6e6e6; background: #0f1115; }
+    h1, h2 { color: #7ee787; }
+    a { color: #58a6ff; }
+    code { background: #1e222a; padding: 2px 6px; border-radius: 4px; }
+    .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; margin: 12px 0; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+    ul { margin: 8px 0; padding-left: 20px; }
+  </style>
+</head>
+<body>
+  <h1>NoOrbit × Claude Code Game Studios</h1>
+  <p>Plantilla i flux per crear jocs de navegador a partir d'una idea, dins de NoOrbit, compatible amb totes les IA connectades.</p>
+
+  <div class="card">
+    <h2>Com començar</h2>
+    <ol>
+      <li>Descarrega NoOrbit: <a href="https://github.com/jpuigbert/noorbit/releases">Releases</a>.</li>
+      <li>Fitxer → Nou projecte → pestanya <strong>Game Studios</strong> (clona la plantilla).</li>
+      <li>Obre el panell Agent i tria la IA (local o núvol).</li>
+      <li>Escriu: <code>/prototype un joc de pesca on el peix rar només pica a la posta de sol</code>.</li>
+    </ol>
+  </div>
+
+  <h2>Dreceres (shortcuts) per IA</h2>
+  <div class="grid">
+    <div class="card"><h3>Flux base (totes les IA)</h3><ul>
+      <li><code>/prototype &lt;idea&gt;</code></li>
+      <li>Respon les preguntes («tu tries» funciona).</li>
+      <li>Revisa <code>design/game-brief.md</code> → «Construeix-lo».</li>
+      <li>Joc a <code>prototypes/&lt;nom&gt;/</code>.</li>
+    </ul></div>
+    <div class="card"><h3>IA local (Ollama / llama.cpp)</h3><ul>
+      <li>Gestor de models → tria el model actiu.</li>
+      <li>Recomanat per a proves ràpides.</li>
+      <li>«construeix-lo a mitjà» per a models petits.</li>
+    </ul></div>
+    <div class="card"><h3>IA al núvol</h3><ul>
+      <li>IA ▸ Gestor de models → connecta el token.</li>
+      <li>OpenAI, Claude, Gemini, DeepSeek, Qwen, GLM, Grok…</li>
+      <li>Millor qualitat per al primer build.</li>
+    </ul></div>
+    <div class="card"><h3>IA de web</h3><ul>
+      <li>Panell «IA de web» → pregunta (amb permís).</li>
+      <li>NoOrbit extreu el codi i el materialitza.</li>
+    </ul></div>
+    <div class="card"><h3>Imatges i assets</h3><ul>
+      <li>ComfyUI local o via API.</li>
+      <li>Nudge «IMG|» si la IA respon amb prosa.</li>
+      <li>Enganxa imatges al xat (⌘V).</li>
+    </ul></div>
+    <div class="card"><h3>3D (Blender / Unreal)</h3><ul>
+      <li>Game Studios es centra en navegador.</li>
+      <li>Per a 3D, usa els panells Blender/Unreal.</li>
+    </ul></div>
+  </div>
+
+  <div class="card">
+    <h2>Després</h2>
+    <ul>
+      <li><strong>Canvia-ho preguntant</strong>: cada canvi es comprova; acceptat = punt de control.</li>
+      <li><strong>Comparteix-ho</strong>: còpia neta per a itch.io o enllaç.</li>
+      <li><strong>Fes-lo créixer</strong>: Vite + TypeScript, una funció per sessió; <code>/create-stories</code>, <code>/dev-story</code>, <code>/story-done</code>.</li>
+      <li><strong>Acaba'l</strong>: <code>/cut</code> proposa què tallar i data de venda.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Jam autònom — l'agent treballa sol (i el Mac no es penga)</h2>
+    <p>La Jam deixa la IA desenvolupar el projecte durant hores: fa un pla, escriu codi, el materialitza, el verifica i commiteja cada pas.</p>
+    <ul>
+      <li>Agent ▸ pestanya <strong>Jam</strong> (o IA ▸ Jam autònom).</li>
+      <li>Brief → «Fes el pla» → «Comença». Motor: Godot 4, Blender, Unreal 5, Unity o web.</li>
+      <li>Usa <strong>la IA que tinguis connectada</strong>: local (Ollama/llama.cpp) o núvol (OpenAI, Claude, Gemini, DeepSeek, GLM, Grok…).</li>
+      <li>Memòria: si una tasca consumeix massa, s'atura i es reintenta amb menys qualitat — el Mac no es congela.</li>
+      <li>Al final: <code>REPORT.md</code> amb el pla, els resultats i els commits.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Models lliures a l'edge (cost 0) + smolmaxxing</h2>
+    <p>Models GGUF de pesos oberts que es fan córrer localment (cost 0). Per a dispositius amb ~1 GB de RAM, usa <a href="https://github.com/hyperionaidev/smolmaxxing">smolmaxxing</a> (pedaç de llama.cpp).</p>
+    <ul>
+      <li>IA ▸ Hugging Bay → baixa un GGUF (Qwen3.5-0.8B/2B, SmolLM3 3B, Gemma 3 4B…).</li>
+      <li>IA ▸ Gestor de models → motor local (llama.cpp) registra el proveïdor sense clau.</li>
+      <li>Per a smolmaxxing: compila el build pedaçat i apunta NoOrbit al binari.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Referència</h2>
+    <p>Repo original: <a href="https://github.com/donchitos/claude-code-game-studios">donchitos/claude-code-game-studios</a></p>
+    <p>smolmaxxing: <a href="https://github.com/hyperionaidev/smolmaxxing">hyperionaidev/smolmaxxing</a></p>
+    <p>NoOrbit: <a href="https://github.com/jpuigbert/noorbit">jpuigbert/noorbit</a></p>
+  </div>
+</body>
+</html>
+EOF
+echo done

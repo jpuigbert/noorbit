@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useShallow } from "zustand/react/shallow";
 import { Plug, Unplug, FolderSearch, Loader2 } from "lucide-react";
@@ -14,7 +15,10 @@ export default function UnrealConnectButton() {
     engineVersion,
     projectName,
     installations,
+    rcPort,
+    lastError,
     setProjectPath,
+    setRcPort,
     connect,
     disconnect,
   } = useUnrealStore(
@@ -26,7 +30,10 @@ export default function UnrealConnectButton() {
       engineVersion: st.engineVersion,
       projectName: st.projectName,
       installations: st.installations,
+      rcPort: st.rcPort,
+      lastError: st.lastError,
       setProjectPath: st.setProjectPath,
+      setRcPort: st.setRcPort,
       connect: st.connect,
       disconnect: st.disconnect,
     }))
@@ -37,6 +44,15 @@ export default function UnrealConnectButton() {
   // feia caure el component i, amb ell, TOTA la interfície.
   const inst = Array.isArray(installations) ? installations : [];
 
+  // El port el resol el backend (config.toml) i arriba DESPRÉS del primer
+  // dibuix, així que el camp segueix l'store fins que l'usuari l'edita.
+  const [portText, setPortText] = useState(String(rcPort));
+  useEffect(() => {
+    setPortText(String(rcPort));
+  }, [rcPort]);
+  const portNet = Math.trunc(Number(portText) || 0);
+  const portCanviat = portNet >= 1 && portNet <= 65535 && portNet !== rcPort;
+
   const pickProject = async () => {
     const sel = await open({
       multiple: false,
@@ -45,18 +61,47 @@ export default function UnrealConnectButton() {
     if (typeof sel === "string") setProjectPath(sel);
   };
 
+  const PortField = () => (
+    <div className="field">
+      <label>{t("unreal.rcPort")}</label>
+      <div className="si-pick">
+        <input
+          value={portText}
+          inputMode="numeric"
+          onChange={(e) => setPortText(e.target.value)}
+        />
+        <button
+          className="btn sm"
+          disabled={!portCanviat}
+          onClick={() => setRcPort(portNet)}
+        >
+          {t("common.save")}
+        </button>
+      </div>
+      <p className="lp-hint">{t("unreal.rcPortHint")}</p>
+    </div>
+  );
+
+  // Els errors del panell (port, captura del viewport…) ja són en català i
+  // diuen el MOTIU: abans es quedaven a l'store i l'usuari només veia que
+  // «no passava res».
+  const ErrorLine = () =>
+    lastError ? <div className="ue-status err">{lastError}</div> : null;
+
   if (connected) {
     return (
       <div className="ue-connect">
         <div className="ue-connected">
           <span className="dot on" /> {t("unreal.connected")}
           <span className="ue-meta">
-            {projectName ?? "—"} · UE {engineVersion ?? "?"}
+            {projectName ?? "—"} · UE {engineVersion ?? "?"} · :{rcPort}
           </span>
         </div>
         <button className="btn sm" onClick={disconnect}>
           <Unplug size={13} /> {t("common.disconnect")}
         </button>
+        <PortField />
+        <ErrorLine />
       </div>
     );
   }
@@ -84,6 +129,7 @@ export default function UnrealConnectButton() {
           <p className="lp-hint">{t("unreal.noInstallations")}</p>
         )}
       </div>
+      <PortField />
       <button className="btn primary" disabled={busy || !projectPath} onClick={() => connect()}>
         {busy ? <Loader2 size={13} className="spin" /> : <Plug size={13} />}
         {busy ? t("unreal.connecting") : t("unreal.connect")}
@@ -91,6 +137,7 @@ export default function UnrealConnectButton() {
       {statusMessage && (
         <div className={"ue-status " + (status === "error" ? "err" : "")}>{statusMessage}</div>
       )}
+      <ErrorLine />
     </div>
   );
 }

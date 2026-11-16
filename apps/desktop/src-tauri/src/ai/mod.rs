@@ -13,6 +13,10 @@ pub mod hf_bay;
 /// Motor local sense Ollama: llama.cpp («llama-server»).
 pub mod llamacpp;
 
+/// IA NATIVA integrada al binari: funciona només instal·lant NoOrbit,
+/// sense baixar cap model ni motor de cap altre lloc.
+pub mod native;
+
 mod cloud;
 mod reasoning;
 mod repetition;
@@ -1586,6 +1590,15 @@ pub fn start_comfyui() -> Result<()> {
     ))
 }
 
+/// Temps que Ollama manté els models carregats a la RAM quan l'usuari no n'ha
+/// triat cap: «1m». El valor per defecte d'Ollama (5 minuts) deixava el model
+/// ocupant memòria en repòs; un minut cobreix el ritme d'una conversa i
+/// allibera la RAM cinc cops abans.
+fn normalize_keep_alive(raw: &str) -> String {
+    let v = raw.trim();
+    if v.is_empty() { "1m".to_string() } else { v.to_string() }
+}
+
 impl AiManager {
     pub fn new(config: &AppConfig) -> Self {
         Self {
@@ -1610,9 +1623,9 @@ impl AiManager {
             default_model: config.ai.default_model.clone(),
             active_provider: Arc::new(RwLock::new("ollama".into())),
             selected_model: Arc::new(RwLock::new(None)),
-            keep_alive: Arc::new(RwLock::new(
-                Some(config.ai.keep_alive.trim().to_string()).filter(|v| !v.is_empty()),
-            )),
+            keep_alive: Arc::new(RwLock::new(Some(normalize_keep_alive(
+                &config.ai.keep_alive,
+            )))),
             remote: None,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             background: Arc::new(AtomicBool::new(false)),
@@ -1665,6 +1678,9 @@ impl AiManager {
         let resp = self
             .http
             .get(self.url("/api/tags"))
+            // Llistar models locals és instantani: si Ollama no respon en 4 s,
+            // no bloquegem el xat esperant el timeout general de 240 s.
+            .timeout(std::time::Duration::from_secs(4))
             .send()
             .await
             .map_err(|e| anyhow!("Ollama no respon: {}", e))?;
@@ -1827,12 +1843,13 @@ impl AiManager {
     }
 
     /// Defineix quant de temps Ollama manté els models a la RAM.
-    /// Buit = valor per defecte d'Ollama.
+    /// Cap valor = l'opció per defecte de la UI, que ara equival al
+    /// recomanat «1m» (vegeu «normalize_keep_alive»).
     pub async fn set_keep_alive(&self, value: Option<String>) {
         let v = value
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
-        *self.keep_alive.write().await = v;
+        *self.keep_alive.write().await = Some(v.unwrap_or_else(|| "1m".to_string()));
     }
 
     pub async fn keep_alive(&self) -> Option<String> {
@@ -2303,7 +2320,10 @@ impl AiManager {
         guard
             .providers
             .iter()
-            .find(|p| p.enabled && p.has_token())
+            // La IA nativa NO és un «remot»: és el motor integrat. No compta
+            // com a reserva en línia (si no, desactivaria l'auto-install d'Ollama
+            // i es faria servir de teacher de si mateixa).
+            .find(|p| p.enabled && p.has_token() && !p.is_native())
             .map(|p| p.id.clone())
     }
 
@@ -2312,7 +2332,26 @@ impl AiManager {
         if self.is_running().await {
             return true;
         }
-        self.first_working_remote().is_some()
+        if self.first_working_remote().is_some() {
+            return true;
+        }
+        // La IA NATIVA sempre hi és (integrada al binari): NoOrbit funciona
+        // només instal·lant-lo, sense Ollama ni cap token ni descàrregues.
+        self.native_enabled()
+    }
+
+    /// Hi ha la IA nativa integrada i activada? (sempre disponible al binari).
+    pub fn native_enabled(&self) -> bool {
+        match &self.remote {
+            Some(r) => r
+                .lock()
+                .unwrap()
+                .providers
+                .iter()
+                .any(|p| p.is_native() && p.enabled),
+            // Sense gestor remot, el motor natiu continua existint al binari.
+            None => true,
+        }
     }
 
     /// Model d'un xat: el seu propi o, si no, el triat globalment.
@@ -2328,13 +2367,20 @@ impl AiManager {
     pub async fn session_labels(&self, session: &str) -> (String, String) {
         let ctl = self.ctl(session);
         let mut provider = self.effective_provider(&ctl).await;
-        // SENSE OLLAMA: caiguda a la IA en línia de l'usuari (si n'hi ha).
+        // SENSE OLLAMA: caiguda a la IA en línia de l'usuari (si n'hi ha) o,
+        // si no n'hi ha cap, a la IA NATIVA integrada (funciona sense baixar res).
         if provider == "ollama" && !self.is_running().await {
             if let Some(remot) = self.first_working_remote() {
                 provider = remot;
+            } else {
+                provider = native::PROVIDER_ID.to_string();
             }
         }
-        let model = self.model_for(&ctl).await;
+        let model = if provider == native::PROVIDER_ID {
+            native::MODEL_NAME.to_string()
+        } else {
+            self.model_for(&ctl).await
+        };
         (provider, model)
     }
 
@@ -2350,22 +2396,124 @@ impl AiManager {
     ///
     /// Serveix per a l'APRENENATGE: les converses de l'usuari es destil·len
     /// amb el model de la màquina i no suren mai de l'ordinador.
-    pub async fn chat_local_only(
+    ///
+    /// Retorna un futur EMBOLSAT a propòsit: hi ha un cicle real entre
+    /// `chat_local_only` → `chat_inner` → `native_compute` → `native_improve`
+    /// → `chat_local_only`. Sense esborrar el tipus (`Box<dyn Future>`),
+    /// Rust no pot dimensionar el futur i la llibreria NO COMPILA
+    /// («recursion in an async fn requires boxing»). Es trenca ací i no a
+    /// `chat_inner` perquè aquest és el camí calent de tots els xats.
+    pub fn chat_local_only<'a>(
+        &'a self,
+        prompt: &'a str,
+        system: Option<&'a str>,
+        model: Option<&'a str>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String>> + Send + 'a>> {
+        Box::pin(async move {
+            let ctl = self.ctl_now();
+            if let Some(m) = model {
+                if !m.trim().is_empty() {
+                    ctl.set_model(Some(m)).await;
+                }
+            }
+            ctl.begin().await;
+            // Proveïdor «ollama» = camí local SEMPRE (dins `chat_inner`).
+            self.chat_inner(prompt, system, &ctl, "ollama", &ChatOpts::default())
+                .await
+        })
+    }
+
+    /// Resposta de la IA NATIVA (motor integrat al binari). Si l'usuari demana
+    /// millorar/reprogramar el seu context, ho fa en SILENCI amb una IA
+    /// open-source disponible i respon naturalment; si no, respon amb el
+    /// cervell (matemàtiques + coneixement + aprenentatge local). La resposta
+    /// no ix d'aquest Mac: tot és codi integrat, sense descàrregues.
+    async fn native_compute(
         &self,
         prompt: &str,
         system: Option<&str>,
-        model: Option<&str>,
+        ctl: &Arc<SessionCtl>,
     ) -> Result<String> {
-        let ctl = self.ctl_now();
-        if let Some(m) = model {
-            if !m.trim().is_empty() {
-                ctl.set_model(Some(m)).await;
+        let text = if let Some(topic) = native::improvement_request(prompt) {
+            let n = self.native_improve(&topic, prompt).await;
+            native::improved_message(&topic, n)
+        } else {
+            let brain = native::load_brain();
+            let lessons = native::lessons_from_system(system);
+            native::answer(prompt, &brain, &lessons)
+        };
+        ctl.set_thinking(None).await;
+        Ok(text)
+    }
+
+    /// Millora SILENCIOSA del cervell natiu. Delega la generació de coneixement
+    /// en una IA open-source JA disponible: primer el model LOCAL d'Ollama
+    /// (qwen3, sense baixar res), i si no n'hi ha, un proveïdor gratuït en
+    /// línia (Ollama Cloud, MiniMax…). La crida va en una sessió AÏLLADA
+    /// («native_improve») perquè no toque el ctl del xat de l'usuari ni delate
+    /// el teacher: cap event «ai://chunk»/«ai://process» arriba al xat. Si no
+    /// hi ha cap IA, aplica coneixement predefinit (millora offline). MAI baixa
+    /// cap model: només fa servir el que ja hi és.
+    async fn native_improve(&self, topic: &str, request: &str) -> usize {
+        let prompt = native::build_improve_prompt(topic, request);
+        let raw: Option<String> = if self.is_running().await {
+            let models = self.list_models().await.unwrap_or_default();
+            if models.is_empty() {
+                None
+            } else {
+                // Preferix un qwen3 (open-source, multilingüe) ja instal·lat.
+                let model = models
+                    .iter()
+                    .find(|m| m.name.to_lowercase().contains("qwen3"))
+                    .or_else(|| models.first())
+                    .map(|m| m.name.clone());
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(90),
+                    in_session(
+                        "native_improve",
+                        self.chat_local_only(&prompt, Some(native::IMPROVE_SYSTEM), model.as_deref()),
+                    ),
+                )
+                .await
+                {
+                    Ok(Ok(text)) => Some(text),
+                    _ => None,
+                }
             }
+        } else if let Some(remot) = self.first_working_remote() {
+            // Teacher EN LÍNIA gratuït: api::chat (sense streaming) no emet cap
+            // event de procés, així que l'usuari no veu quina IA ho genera.
+            let prep = self
+                .remote
+                .as_ref()
+                .and_then(|r| r.lock().unwrap().prepare(&remot).ok());
+            match prep {
+                Some((prov, client)) => match tokio::time::timeout(
+                    std::time::Duration::from_secs(90),
+                    api::chat(
+                        &client,
+                        &prov,
+                        &[("user".to_string(), prompt.clone())],
+                        Some(native::IMPROVE_SYSTEM),
+                    ),
+                )
+                .await
+                {
+                    Ok(Ok((text, _))) => Some(text),
+                    _ => None,
+                },
+                None => None,
+            }
+        } else {
+            None
+        };
+        let mut incoming = raw.map(|t| native::parse_knowledge(&t)).unwrap_or_default();
+        if incoming.is_empty() {
+            // Sense teacher (o resposta buida): millora offline amb coneixement
+            // predefinit del tema. Silenciós i sense xarxa.
+            incoming = native::builtin_topic_knowledge(topic);
         }
-        ctl.begin().await;
-        // Proveïdor «ollama» = camí local SEMPRE (dins `chat_inner`).
-        self.chat_inner(prompt, system, &ctl, "ollama", &ChatOpts::default())
-            .await
+        native::merge_knowledge(incoming)
     }
 
     /// Envia un prompt de xat i retorna la resposta completa.
@@ -2403,7 +2551,16 @@ impl AiManager {
         self.bind(&ctl, opts).await;
         // Cada generació nova comença sense bandera d'aturada i sense raonament.
         ctl.begin().await;
-        let provider = self.effective_provider(&ctl).await;
+        let mut provider = self.effective_provider(&ctl).await;
+        // SENSE OLLAMA ni remot: la IA NATIVA integrada respon (només instal·lant
+        // NoOrbit, sense baixar res). Mateixa caiguda que al camí streaming.
+        if provider == "ollama" && !self.is_running().await {
+            if let Some(remot) = self.first_working_remote() {
+                provider = remot;
+            } else {
+                provider = native::PROVIDER_ID.to_string();
+            }
+        }
         let mut result = self.chat_inner(prompt, system, &ctl, &provider, opts).await;
         // Memòria exhaurida a mitja resposta: ATUREM, ALLIBEREM RAM i
         // CONDENSEM el context (no el retallem: així es conserva l'esperit del
@@ -2477,7 +2634,27 @@ impl AiManager {
                     0,
                 );
                 active = remot;
+            } else {
+                // Sense Ollama NI cap proveïdor en línia: la IA NATIVA integrada
+                // respon igualment. NoOrbit funciona NOMÉS INSTAL·LANT-LO, sense
+                // baixar cap model ni motor de cap altre lloc.
+                active = native::PROVIDER_ID.to_string();
             }
+        }
+        // IA NATIVA: motor integrat al binari. Respon localment (i es millora
+        // en silenci quan l'usuari ho demana), sense cap petició de xarxa.
+        if active == native::PROVIDER_ID {
+            ctl.process(
+                app,
+                native::PROVIDER_NAME,
+                native::MODEL_NAME,
+                "thinking",
+                "Faig servir la IA nativa integrada (sense descàrregues).",
+                0,
+            );
+            let text = self.native_compute(prompt, system, &ctl).await?;
+            native::emit_stream(app, &ctl, prompt, &text, start).await;
+            return Ok(text);
         }
         // Proveïdor remot: fa streaming SSE (emet «ai://process» token a token,
         // com Ollama). La cancel·lació és la del XAT que ha enviat el missatge.
@@ -3036,15 +3213,17 @@ impl AiManager {
             };
             buf.extend_from_slice(&chunk);
             // NDJSON: cada línia completa és un objecte que Ollama retorna.
-            while let Some(pos) = buf.iter().position(|b| *b == b'\n') {
-                let mut line: Vec<u8> = buf.drain(..=pos).collect();
-                if line.last() == Some(&b'\n') {
-                    line.pop();
-                }
+            // Un cursor evita fer «drain» a cada línia: desplaçar la resta
+            // del buffer cada cop feia que el cost creiés amb el QUADRAT del
+            // text quan un tros de xarxa porta moltes línies.
+            let mut cursor = 0;
+            while let Some(pos) = buf[cursor..].iter().position(|b| *b == b'\n') {
+                let line = &buf[cursor..cursor + pos];
+                cursor += pos + 1;
                 if line.is_empty() {
                     continue;
                 }
-                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&line) {
+                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(line) {
                     // Comptabilització de tokens: Ollama envia el compte al
                     // final del flux («prompt_eval_count» = tokens llegits,
                     // «eval_count» = tokens generats).
@@ -3107,6 +3286,9 @@ impl AiManager {
                         }
                     }
                 }
+            }
+            if cursor > 0 {
+                buf.drain(..cursor);
             }
         }
         // El torn pot acabar amb el repartidor encara indecis (resposta de
@@ -3177,6 +3359,10 @@ impl AiManager {
         provider: &str,
         opts: &ChatOpts,
     ) -> Result<String> {
+        // IA NATIVA: motor integrat, resposta local (i millora silenciosa).
+        if provider == native::PROVIDER_ID {
+            return self.native_compute(prompt, system, ctl).await;
+        }
         if provider != "ollama" {
             if let Some(remote) = &self.remote {
                 // prepare() retorna dades propietàries; el guard allibera abans de l'await

@@ -629,7 +629,13 @@
 .chat-bubble.assistant.streaming {
   white-space: normal;
 }
-/* Markdown dins les bombolles */
+/* Markdown dins les bombolles. El text llarg (URLs, rutes, paraules sense
+   espais) es parteix perquè càpiga dins l'amplada del panell: mai no es
+   desborda horitzontalment ni queda tallat. */
+.chat-md {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .chat-md > p {
   margin: 0 0 6px;
 }
@@ -665,7 +671,10 @@
   border-top: 1px solid var(--border-2);
   margin: 8px 0;
 }
-/* Bloc de codi AMB CAPÇALERA (llenguatge + còpia): com els xats d'IDE. */
+/* Bloc de codi AMB CAPÇALERA (llenguatge + còpia): com els xats d'IDE.
+   També és el marc de les targetes «@file:» (mateixa base, capçalera amb
+   la ruta del fitxer). El plec de línies fa que la conversa no s'engoleixi
+   un bloc gegant: es desplega amb un clic. */
 .cmd-code {
   background: var(--bg-1);
   border: 1px solid var(--border-2);
@@ -677,6 +686,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 4px 10px;
   background: color-mix(in srgb, var(--bg-3) 70%, transparent);
   border-bottom: 1px solid var(--border);
@@ -687,6 +697,12 @@
   text-transform: uppercase;
   letter-spacing: 0.6px;
   color: var(--accent-2);
+}
+.cmd-code-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
 }
 .cmd-code-copy {
   display: inline-flex;
@@ -701,17 +717,139 @@
   border-radius: 4px;
   transition: color 0.12s, background 0.12s;
 }
-.cmd-code-copy:hover {
+.cmd-code-copy:hover:not(:disabled) {
   color: var(--text-0);
   background: var(--bg-4);
+}
+.cmd-code-copy:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.cmd-code-copy.ok,
+.cmd-code-copy:hover.ok {
+  color: var(--success);
 }
 .cmd-code pre {
   margin: 0 !important;
   border: none !important;
   border-radius: 0 !important;
-  padding: 10px 12px !important;
-  max-height: 340px;
-  overflow: auto;
+  padding: 8px 12px !important;
+  overflow-x: auto;
+}
+/* Línies numerades: marge atenuat que no es copia amb el codi. */
+.cmd-line {
+  display: flex;
+}
+.cmd-ln {
+  flex: 0 0 auto;
+  min-width: 2.2em;
+  padding-right: 10px;
+  text-align: right;
+  color: var(--text-3);
+  opacity: 0.65;
+  user-select: none;
+}
+.cmd-line-body {
+  flex: 1;
+  min-width: 0;
+}
+/* Ressaltat de sintaxi lleuger: colors de tema, mai literals. */
+.cmd-code .tok-c {
+  color: var(--text-3);
+  font-style: italic;
+}
+.cmd-code .tok-s {
+  color: var(--success);
+}
+.cmd-code .tok-k {
+  color: var(--accent-2);
+}
+.cmd-code .tok-n {
+  color: var(--warning);
+}
+/* Botó de plec: sota el codi, a tota l'amplada. */
+.cmd-fold {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  padding: 4px;
+  font-size: 11px;
+  color: var(--text-2);
+  background: var(--bg-2);
+  border: none;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+.cmd-fold:hover {
+  color: var(--text-0);
+  background: var(--bg-3);
+}
+/* Targeta «@file:»: la ruta és la capçalera, el codi va dins. */
+.cmd-file-path {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-1);
+}
+.cmd-file-path svg {
+  flex: 0 0 auto;
+  color: var(--accent-2);
+}
+.cmd-file-dir {
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cmd-file-name {
+  color: var(--text-0);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.cmd-file-lang {
+  font-size: 10px;
+  color: var(--text-3);
+  background: var(--bg-3);
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+/* Xips de directrius «@dir:»/«@delete:»: informen, no executen res. */
+.cmd-dir {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+  padding: 3px 9px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-1);
+  background: var(--bg-2);
+  border: 1px dashed var(--border-2);
+  border-radius: 999px;
+}
+.cmd-dir svg {
+  color: var(--accent-2);
+}
+.cmd-dir.del {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--error) 40%, transparent);
+}
+.cmd-dir.del svg {
+  color: var(--error);
+}
+.cmd-dir-path {
+  color: var(--text-0);
+}
+.cmd-dir-tag {
+  color: var(--text-3);
 }
 /* Cursor d'escriptura en directe: pols suau */
 .stream-caret {
@@ -742,7 +880,15 @@
   border: 1px solid var(--border-2) !important;
   color: var(--text-0) !important;
   border-bottom-left-radius: 4px !important;
-  max-height: 62vh;
+  /* La resposta de la IA es mostra SENCERA: sense sostre d'alçada ni barra
+     de desplaçament pròpia que la «contragués» en una caixeta. La bombolla
+     creix amb el contingut i qui desplaça és el xat (.agent-body), una sola
+     barra per a tota la conversa. Ocupa tota l'amplada disponible perquè el
+     codi i les taules hi càpiguen. */
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 .chat-bubble.assistant:hover {
   box-shadow: var(--shadow-md);
@@ -868,6 +1014,11 @@
 /* ---- Sub-pestanyes dins de l'Agent (integracions al costat del xat) ---- */
 .rp-subtabs-agent {
   overflow-x: auto;
+}
+/* Botó «separar el xat en finestra pròpia»: sempre al final de la fila. */
+.rp-subtabs-agent .rp-detach {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 .rp-team-strip {
   display: flex;

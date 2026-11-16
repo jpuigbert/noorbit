@@ -1,8 +1,14 @@
+import { emit } from "@tauri-apps/api/event";
 import { create } from "zustand";
 
 const LS_AUTOSAVE = "noorbit.autosave";
 const LS_AUTOSAVE_DELAY = "noorbit.autosaveDelay";
 const LS_THEME = "noorbit.theme";
+const LS_SIDEBAR_W = "noorbit.ui.sidebarW";
+const LS_RIGHT_W = "noorbit.ui.rightW";
+const LS_TERM_H = "noorbit.ui.termH";
+const LS_FUN_CURSOR = "noorbit.fun.cursor";
+const LS_FUN_SOUND = "noorbit.fun.sound";
 
 export type Theme = "dark" | "light" | "gray" | "green" | "yellow" | "gold";
 
@@ -36,8 +42,12 @@ interface UIState {
   showPublishTheme: boolean;
   /** Gestor d'extensions de VS Code instal·lades. */
   showVsCodeExtensions: boolean;
+  /** Menú «Game Studios»: flux de creació de jocs de navegador + dreceres per IA. */
+  showGameStudios: boolean;
   /** Menú «Crear tema de WordPress»: la IA en crea els fitxers inicials. */
   showWpTheme: boolean;
+  /** Menú «Treball autopilotat»: la IA millora qualsevol projecte un temps triat. */
+  showProjectWork: boolean;
   showIaCatalog: boolean;
   showRemoteServer: boolean;
   showSettings: boolean;
@@ -56,6 +66,17 @@ interface UIState {
   showSetupCheck: boolean;
   terminalOpen: boolean;
 
+  // Mides dels panells (arrossegant les nanses de separació): es recorden
+  // entre sessions perquè cada pantalla té la seva millor disposició.
+  sidebarWidth: number;
+  rightPanelWidth: number;
+  terminalHeight: number;
+
+  // Panells oberts en FINESTRA SEPARADA (per posar-los a una altra pantalla):
+  // mentre són separats, el programa mostra un marc amb el botó de reenganxar.
+  chatDetached: boolean;
+  terminalDetached: boolean;
+
   // Autodesat (com VS Code)
   autoSave: boolean;
   autoSaveDelay: number; // ms
@@ -66,6 +87,12 @@ interface UIState {
   // Tema de colors de tota la pantalla
   theme: Theme;
 
+  // Diversió: cursor disfressat per zones (SVG propis) i toc alegre en
+  // acabar una tasca. Es recorden entre sessions; commutadors ràpids a
+  // la barra d'estat i ajustos a Configuració → General.
+  funCursor: boolean;
+  funSound: boolean;
+
   toggleSidebar: () => void;
   toggleRightPanel: () => void;
   setRightPanelOpen: (v: boolean) => void;
@@ -75,7 +102,9 @@ interface UIState {
   setShowHuggingBay: (v: boolean) => void;
   setShowPublishTheme: (v: boolean) => void;
   setShowVsCodeExtensions: (v: boolean) => void;
+  setShowGameStudios: (v: boolean) => void;
   setShowWpTheme: (v: boolean) => void;
+  setShowProjectWork: (v: boolean) => void;
   setShowIaCatalog: (v: boolean) => void;
   setShowRemoteServer: (v: boolean) => void;
   setShowSettings: (v: boolean) => void;
@@ -91,6 +120,14 @@ interface UIState {
   setShowSetupCheck: (v: boolean) => void;
   setTerminalOpen: (v: boolean) => void;
   toggleTerminal: () => void;
+  setSidebarWidth: (px: number) => void;
+  addSidebarWidth: (d: number) => void;
+  setRightPanelWidth: (px: number) => void;
+  addRightPanelWidth: (d: number) => void;
+  setTerminalHeight: (px: number) => void;
+  addTerminalHeight: (d: number) => void;
+  setChatDetached: (v: boolean) => void;
+  setTerminalDetached: (v: boolean) => void;
   setAutoSave: (v: boolean) => void;
   setAutoSaveDelay: (ms: number) => void;
   setZoom: (z: number) => void;
@@ -98,9 +135,13 @@ interface UIState {
   zoomOut: () => void;
   zoomReset: () => void;
   setTheme: (t: Theme) => void;
+  setFunCursor: (v: boolean) => void;
+  setFunSound: (v: boolean) => void;
 }
 
-function loadTheme(): Theme {
+/// Tema desat (el llegim directament a les finestres de panells separats,
+/// que no passen per l'arrencada completa de l'app).
+export function loadTheme(): Theme {
   try {
     const v = localStorage.getItem(LS_THEME);
     if (v === "light" || v === "gray" || v === "green" || v === "yellow" || v === "gold" || v === "dark")
@@ -126,7 +167,9 @@ export const useUIStore = create<UIState>((set, get) => ({
   showHuggingBay: false,
   showPublishTheme: false,
   showVsCodeExtensions: false,
+  showGameStudios: false,
   showWpTheme: false,
+  showProjectWork: false,
   showIaCatalog: false,
   showRemoteServer: false,
   showSettings: false,
@@ -143,10 +186,19 @@ export const useUIStore = create<UIState>((set, get) => ({
   showSetupCheck: false,
   terminalOpen: false,
 
+  sidebarWidth: loadNum(LS_SIDEBAR_W, 240),
+  rightPanelWidth: loadNum(LS_RIGHT_W, 380),
+  terminalHeight: loadNum(LS_TERM_H, 220),
+
+  chatDetached: false,
+  terminalDetached: false,
+
   autoSave: loadBool(LS_AUTOSAVE, true),
   autoSaveDelay: loadNum(LS_AUTOSAVE_DELAY, 1000),
   zoom: 1,
   theme: loadTheme(),
+  funCursor: loadBool(LS_FUN_CURSOR, true),
+  funSound: loadBool(LS_FUN_SOUND, true),
 
   toggleSidebar: () => set({ sidebarOpen: !get().sidebarOpen }),
   toggleRightPanel: () => set({ rightPanelOpen: !get().rightPanelOpen }),
@@ -157,7 +209,9 @@ export const useUIStore = create<UIState>((set, get) => ({
   setShowHuggingBay: (v) => set({ showHuggingBay: v }),
   setShowPublishTheme: (v) => set({ showPublishTheme: v }),
   setShowVsCodeExtensions: (v) => set({ showVsCodeExtensions: v }),
+  setShowGameStudios: (v) => set({ showGameStudios: v }),
   setShowWpTheme: (v) => set({ showWpTheme: v }),
+  setShowProjectWork: (v) => set({ showProjectWork: v }),
   setShowIaCatalog: (v) => set({ showIaCatalog: v }),
   setShowRemoteServer: (v) => set({ showRemoteServer: v }),
   setShowSettings: (v) => set({ showSettings: v }),
@@ -173,6 +227,45 @@ export const useUIStore = create<UIState>((set, get) => ({
   setShowSetupCheck: (v) => set({ showSetupCheck: v }),
   setTerminalOpen: (v) => set({ terminalOpen: v }),
   toggleTerminal: () => set({ terminalOpen: !get().terminalOpen }),
+
+  // Mides dels panells: amb clamps perquè cap panell no desaparegui ni
+  // engolpí tota la finestra; es desen a localStorage (el doble clic sobre
+  // la nansa torna als valors per defecte).
+  setSidebarWidth: (px) => {
+    const v = Math.min(560, Math.max(170, Math.round(px)));
+    try {
+      localStorage.setItem(LS_SIDEBAR_W, String(v));
+    } catch {
+      /* sense persistència */
+    }
+    set({ sidebarWidth: v });
+  },
+  addSidebarWidth: (d) => get().setSidebarWidth(get().sidebarWidth + d),
+  setRightPanelWidth: (px) => {
+    const v = Math.min(700, Math.max(280, Math.round(px)));
+    try {
+      localStorage.setItem(LS_RIGHT_W, String(v));
+    } catch {
+      /* sense persistència */
+    }
+    set({ rightPanelWidth: v });
+  },
+  addRightPanelWidth: (d) => get().setRightPanelWidth(get().rightPanelWidth + d),
+  setTerminalHeight: (px) => {
+    const v = Math.min(700, Math.max(120, Math.round(px)));
+    try {
+      localStorage.setItem(LS_TERM_H, String(v));
+    } catch {
+      /* sense persistència */
+    }
+    set({ terminalHeight: v });
+  },
+  addTerminalHeight: (d) => get().setTerminalHeight(get().terminalHeight + d),
+
+  // Els flags de separació NO es persistenten: si l'app es tanca de cop,
+  // els panells tornen enganxats a la finestra principal.
+  setChatDetached: (v) => set({ chatDetached: v }),
+  setTerminalDetached: (v) => set({ terminalDetached: v }),
 
   setAutoSave: (v) => {
     try {
@@ -204,5 +297,25 @@ export const useUIStore = create<UIState>((set, get) => ({
     }
     applyTheme(t);
     set({ theme: t });
+    // Les finestres de panells separats són webviews independents i no
+    // veuen aquest canvi: els l'enviem perquè s'actualitzin en directe.
+    void emit("theme://changed", { theme: t }).catch(() => undefined);
+  },
+
+  setFunCursor: (v) => {
+    try {
+      localStorage.setItem(LS_FUN_CURSOR, v ? "1" : "0");
+    } catch {
+      /* sense persistència */
+    }
+    set({ funCursor: v });
+  },
+  setFunSound: (v) => {
+    try {
+      localStorage.setItem(LS_FUN_SOUND, v ? "1" : "0");
+    } catch {
+      /* sense persistència */
+    }
+    set({ funSound: v });
   },
 }));

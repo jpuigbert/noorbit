@@ -1,0 +1,16 @@
+[package]
+name = "noorbit-planner"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+noorbit-jam = { path = "../noorbit-jam" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

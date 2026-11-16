@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState, type CSSProperties } from "react";
 import "./App.css";
 import { useUIStore, applyTheme } from "./stores/uiStore";
 import { useWorkspaceStore } from "./stores/workspaceStore";
@@ -19,6 +19,8 @@ import Sidebar from "./components/Sidebar";
 import EditorPane from "./components/Editor/EditorPane";
 import RightPanel from "./components/RightPanel/RightPanel";
 import PanelErrorBoundary from "./components/PanelErrorBoundary";
+import ResizeHandle from "./components/ResizeHandle";
+import { initPanelWindowSync } from "./windowing";
 // Panells GRANS AMB LAZY: el seu codi és un chunk apart que només baixa quan
 // el flag que els obre és actiu per primer cop (arrencada més ràpida i poc
 // JS per analitzar). Els diàlegs mitjans (⌘P, quick open…) queden estàtics:
@@ -38,7 +40,9 @@ import SetupCheckModal from "./components/SetupCheckModal";
 import HuggingBayModal from "./components/AI/HuggingBayModal";
 import PublishThemeModal from "./components/Publish/PublishThemeModal";
 const WordPressThemeModal = lazy(() => import("./components/WordPress/WordPressThemeModal"));
+const ProjectWorkModal = lazy(() => import("./components/ProjectWork/ProjectWorkModal"));
 const VsCodeExtensionsModal = lazy(() => import("./components/Extensions/VsCodeExtensionsModal"));
+const GameStudiosModal = lazy(() => import("./components/GameStudios/GameStudiosModal"));
 import ComputerConfirmModal from "./components/Computer/ComputerConfirmModal";
 import CommandPalette from "./components/CommandPalette";
 import QuickOpen from "./components/QuickOpen";
@@ -46,6 +50,8 @@ import SearchPalette from "./components/SearchPalette";
 import TerminalPanel from "./components/Terminal/TerminalPanel";
 import ReviewPill from "./components/Editor/ReviewPill";
 import { markForPath, resolveMark } from "./stores/editReviewStore";
+import { useFunCursor } from "./utils/useFunCursor";
+import { initFunFx } from "./utils/funFx";
 import StartupScreen from "./components/StartupScreen";
 import Toaster from "./components/Toaster";
 /// Autodesat (com l'«Auto Save» de VS Code): desa el fitxer obert poc
@@ -97,6 +103,11 @@ function useAutosave() {
 export default function App() {
   const sidebarOpen = useUIStore((s) => s.sidebarOpen);
   const rightPanelOpen = useUIStore((s) => s.rightPanelOpen);
+  const sidebarWidth = useUIStore((s) => s.sidebarWidth);
+  const rightPanelWidth = useUIStore((s) => s.rightPanelWidth);
+  const terminalHeight = useUIStore((s) => s.terminalHeight);
+  const terminalOpen = useUIStore((s) => s.terminalOpen);
+  const terminalDetached = useUIStore((s) => s.terminalDetached);
   const zoom = useUIStore((s) => s.zoom);
   const theme = useUIStore((s) => s.theme);
   const { t } = useT();
@@ -106,6 +117,24 @@ export default function App() {
   const [askClose, setAskClose] = useState(false);
 
   useAutosave();
+  // Cursor divertit: personatge SVG segons la zona de sota el punter,
+  // disfresses que roten cada 5 minuts i mode «avorrit» quan no fas res.
+  useFunCursor();
+
+  // Finestres de panells separats: quan es tanquen (creu X o «Torna al
+  // programa»), tornen a enganxar-se aquí sense reiniciar el programa.
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    let disposed = false;
+    void initPanelWindowSync().then((u) => {
+      if (disposed) u();
+      else un = u;
+    });
+    return () => {
+      disposed = true;
+      un?.();
+    };
+  }, []);
 
   // Interceptem el tancament de la finestra (creu X, ⌘Q, tancar des de la
   // resta de finestres): preventDefault + modal propi. Sense plugin extern.
@@ -159,6 +188,9 @@ export default function App() {
     // funcionen encara que el seu panell no estiga obert ara mateix.
     registerProcessListener();
     registerTaskListeners();
+    // Efectes de celebració: toc alegre + confeti + cursor de festa quan
+    // una tasca acaba (idempotent: StrictMode no els duplica).
+    initFunFx();
     // El control de l'ordinador: els seus escoltadors (computer://confirm, 
     // …/agent, …/executed) i permisos s'activen DES DE L'ARRANCAIDA, no només
     // quan el panell «Ordinador» està obert. Si no, una comanda «RUN|» del xat
@@ -341,10 +373,29 @@ export default function App() {
   }, []);
 
   return (
-    <div className="app">
+    <div
+      className="app"
+      /* Les mides de la disposició viatgen en variables CSS: els panells
+         (sidebar, panell dret, terminal) les llegeixen del seu CSS i les
+         nanses de redimensionat les canvien a través de l'uiStore. */
+      style={{
+        "--sidebar-w": sidebarWidth + "px",
+        "--rp-w": rightPanelWidth + "px",
+        "--term-h": terminalHeight + "px",
+      } as CSSProperties}
+    >
       <MenuBar />
       <div className="app-body">
         {sidebarOpen && <Sidebar />}
+        {sidebarOpen && (
+          <ResizeHandle
+            axis="x"
+            dir={1}
+            onResize={(d) => useUIStore.getState().addSidebarWidth(d)}
+            onReset={() => useUIStore.getState().setSidebarWidth(240)}
+            tip={t("layout.resizeTip")}
+          />
+        )}
         <div className="app-main">
           {/* Cada zona gran va amb la seva pròpia xarxa de seguretat: si un
               panell peta, només mor AQUELL panell — la resta de NoOrbit
@@ -355,14 +406,36 @@ export default function App() {
           <ReviewPill />
         </div>
         {rightPanelOpen && (
-          <PanelErrorBoundary label="Error al panell lateral">
-            <RightPanel />
-          </PanelErrorBoundary>
+          <>
+            <ResizeHandle
+              axis="x"
+              dir={-1}
+              onResize={(d) => useUIStore.getState().addRightPanelWidth(d)}
+              onReset={() => useUIStore.getState().setRightPanelWidth(380)}
+              tip={t("layout.resizeTip")}
+            />
+            <PanelErrorBoundary label="Error al panell lateral">
+              <RightPanel />
+            </PanelErrorBoundary>
+          </>
         )}
       </div>
-      <PanelErrorBoundary label="Error al terminal">
-        <TerminalPanel />
-      </PanelErrorBoundary>
+      {terminalOpen && !terminalDetached && (
+        <ResizeHandle
+          axis="y"
+          dir={-1}
+          onResize={(d) => useUIStore.getState().addTerminalHeight(d)}
+          onReset={() => useUIStore.getState().setTerminalHeight(220)}
+          tip={t("layout.resizeTip")}
+        />
+      )}
+      {/* El terminal integrat només viu ací quan NO està en finestra
+          separada: en separar-lo, la seva UI passa a la finestra pròpia. */}
+      {!terminalDetached && (
+        <PanelErrorBoundary label="Error al terminal">
+          <TerminalPanel />
+        </PanelErrorBoundary>
+      )}
       <StatusBar />
       {/* Avisos visibles: cap operació important pot fallar en silenci. */}
       <Toaster />
@@ -387,7 +460,10 @@ export default function App() {
         {useUIStore((s) => s.showPublishTheme) && <PublishThemeModal />}
         {/* Menú «Crear tema de WordPress»: la IA en crea els fitxers inicials. */}
         {useUIStore((s) => s.showWpTheme) && <WordPressThemeModal />}
+        {/* Menú «Treball autopilotat»: la IA millora qualsevol projecte un temps triat. */}
+        {useUIStore((s) => s.showProjectWork) && <ProjectWorkModal />}
         {useUIStore((s) => s.showVsCodeExtensions) && <VsCodeExtensionsModal />}
+        {useUIStore((s) => s.showGameStudios) && <GameStudiosModal />}
       </Suspense>
       <ComputerConfirmModal />
       {/* Detecció d'entorn a l'obrir: es mostra SOL si falta algun component

@@ -360,6 +360,14 @@ export default function AgentPanel() {
     void materialize(text);
   };
 
+  // Aplica UN sol fitxer de les targetes «@file:» del xat: reutilitza el
+  // materialitzador amb el text sintètic d'aquell fitxer (mateixa lògica,
+  // mateixa revisió verd/roig que el botó de tot el missatge).
+  const handleApplyFile = (path: string, content: string) => {
+    if (running) return Promise.resolve(null);
+    return materialize(`@file: ${path}\n${content}`);
+  };
+
   // Forcar: duplica la conversa fins a aquest missatge en un xat NOU i canvia
   // a ell. L'original queda intacte; al fork pots triar una altra IA i
   // continuar el treball per un altre camí.
@@ -1120,7 +1128,7 @@ export default function AgentPanel() {
                 <ChatThought thinking={m.thinking} elapsedMs={m.elapsedMs} />
               )}
               <div className={"chat-bubble assistant" + (m.error ? " err" : "")}>
-                <ChatMarkdown text={m.text} />
+                <ChatMarkdown text={m.text} onApplyFile={handleApplyFile} />
               </div>
               {/* Imatges esmentades a la resposta: previsualització amb botons
                   de copiar al porta-retalls i mostrar al Finder. */}
@@ -1246,7 +1254,7 @@ export default function AgentPanel() {
           <div className="chat-row assistant">
               {stream ? (
                 <div className="chat-bubble assistant streaming">
-                  <ChatMarkdown text={stream} />
+                  <ChatMarkdown text={stream} live />
                   <span className="stream-caret">▋</span>
                   <div className="stream-meta">
                     <RefreshCw size={11} className="spin" /> {t("agent.running")}

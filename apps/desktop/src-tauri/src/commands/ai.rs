@@ -856,7 +856,7 @@ pub async fn ollama_unload_models(
         .map_err(|e| e.to_string())
 }
 
-/// Quant de temps Ollama manté els models a la memòria (buit = per defecte).
+/// Quant de temps Ollama manté els models a la memòria (buit = «1m» recomanat).
 #[command]
 pub async fn ollama_get_keep_alive(state: State<'_, AppState>) -> Result<String, String> {
     Ok(state.ai_manager.keep_alive().await.unwrap_or_default())
@@ -2204,7 +2204,7 @@ pub struct IaCatalogEntry {
 #[command]
 pub async fn ia_catalog(state: State<'_, AppState>) -> Result<Vec<IaCatalogEntry>, String> {
     // (nom, GB aproximats, sense censura, visió, nota)
-    const LOCAL: [(&str, f64, bool, bool, &str); 24] = [
+    const LOCAL: [(&str, f64, bool, bool, &str); 27] = [
         ("qwen3:8b", 5.2, false, false, "Raonament i codi; pesos oberts (Apache 2.0)"),
         ("qwen2.5-coder:7b", 4.7, false, false, "Codi — equilibri qualitat/velocitat"),
         ("qwen2.5-coder:3b", 1.9, false, false, "Codi — per a màquines modestes"),
@@ -2229,6 +2229,9 @@ pub async fn ia_catalog(state: State<'_, AppState>) -> Result<Vec<IaCatalogEntry
         ("minicpm-v:8b", 6.6, false, true, "Visió — excel·lent en detalls i OCR"),
         ("moondream:latest", 1.7, false, true, "Visió — miniatura (1.7 GB), ràpid"),
         ("stable-diffusion-v2:latest", 4.9, false, false, "Genera imatges, però NoOrbit recomana ComfyUI (qualitat i control)"),
+        ("qwen3.5:0.8b", 0.45, false, false, "Edge: model petit, ideal per a dispositius modestos (smolmaxxing)"),
+        ("qwen3.5:2b", 1.0, false, false, "Edge: millor equilibri qualitat/velocitat en ~1 GB (smolmaxxing)"),
+        ("smollm3:3b", 1.9, false, false, "Edge: petit i obert (Hugging Face), cost 0"),
     ];
     let installed: Vec<String> = state
         .ai_manager

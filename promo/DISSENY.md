@@ -163,18 +163,42 @@ al ritme de la veu.
 
 | Secció | Temps | Instruments |
 |---|---|---|
-| Ganxo | 0:00–0:05.6 | pad + melodia apagada i baixa |
+| Ganxo | 0:00–0:05.6 | pad + melodia apagada i baixa, un pols suau |
 | Fricció | 0:05.6–0:10.9 | pad + melodia al 22 %, baix apagat |
 | Revel·lació | 0:10.9–0:13.6 | **tot** + campanes |
-| Diàleg | 0:13.6–0:35.4 | **llit prim**: pad + brillants. Molt espai per a la veu |
-| Demo | 0:35.4–0:43.8 | construcció: melodia, baix, maller, shaker |
-| Publicació | 0:43.8–0:47.9 | **màxima** + campanes i arpegi |
-| Cartell | 0:47.9–0:53.0 | resolució, decreixement |
+| Diàleg | 0:13.6–0:42.0 | **llit prim**: pad + melodia + brillants. Molt espai per a la veu |
+| Demo | 0:42.0–0:51.0 | construcció: melodia, baix, maller, shaker |
+| Publicació | 0:51.0–0:56.5 | **màxima** + campanes i arpegi |
+| Cartell | 0:56.5–1:05.0 | resolució, decreixement |
 
-**Ducking:** quan parla la veu, la música baixa al 30 % amb rampes de 340 ms.
+**El pad és un drone continu.** Les tres veus del pad **glissen** d'un acord al
+següent (glissando de 380 ms) en lloc de tocar-se i encollar-se: un pad fet a
+notes sempre deixa un forat de mig segon a cada frontera de temps, i el llit
+sota un diàleg ha de ser continu o sembla que l'àudio es talla.
+
+**Ducking:** quan parla la veu, la música baixa al 25 % amb rampes de 340 ms.
 Sense això la locució no s'entén; amb això, la música continua viva. La música
 és **coherent amb el tema** perquè sona com el tema que es ven: farg, ceràmica,
 calidesa i una miqueta de llum.
+
+### L'equilibri final (mesurat, no a ull)
+
+| | nivell |
+|---|---|
+| Veu | **−13 dB** |
+| Música entre frases | −21 dB |
+| Música mentre parla (amb ducking) | −33 dB |
+| Pico del mix | −2,6 dBFS (sense saturació) |
+| Mitjana global | −15,5 dB |
+
+La veu surt **8,4 dB per damunt** de la música quan ningú parla i **20 dB** per
+damunt quan parla: es llegeix en un altaveu de mòbil, en un cercavipes i en un
+PC de gamma baixa. La música té amplada estéreo (retard de 16 ms en un canal)
+però la veu es queda al centre.
+
+**Receptors mòbils.** La veu passa per un filtre de presència (2,8 kHz +3,5 dB)
+i un tall de graves a 95 Hz, i el pic es limita amb una corba suau (`tanh`) en
+lloc d'un retall, que deformaria els pics de la sibilància.
 
 ---
 
@@ -182,7 +206,9 @@ calidesa i una miqueta de llum.
 
 - **16:9 (1920×1080)** — mestre, per a la web i YouTube.
 - **9:16 (1080×1920)** — retall per a Reels/TikTok/Shorts, amb la mateixa
-  storyboard i una maqueta vertical pròpia.
+  storyboard i una maqueta vertical pròpia: els dos personatges passen al terç
+  inferior, les bombolles hi queden just a sobre i l'app s'hi encara en
+  vertical (arbre a dalt, codi al mig, agent a sota).
 - **Subtítols cremats** en tots els formats: es veu completament en silenci.
 - **Contraste:** tot el text sobre fosc està per sobre de WCAG AA; el daurat
   `e8c465` sobre `04060e` dona 10,4:1.

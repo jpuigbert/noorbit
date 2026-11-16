@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   AlertTriangle,
   CheckCircle2,
+  Clock,
   Cpu,
   Download,
   Folder,
@@ -11,9 +13,12 @@ import {
   Loader2,
   Palette,
   Sparkles,
+  Square,
   X,
 } from "lucide-react";
 import { useT } from "../../i18n";
+import WorkProgress from "../WorkProgress";
+import { customMinutes, formatDuration, type TimeUnit } from "../../utils/workTime";
 import { useUIStore } from "../../stores/uiStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { useAIStore } from "../../stores/aiStore";
@@ -62,6 +67,38 @@ const emptyApiForm = (): ProviderInput => ({
   enabled: true,
 });
 
+/// Estat de la millora contínua autopilotada (veu del backend `project://work`).
+interface ProjectWorkState {
+  running: boolean;
+  pass: number;
+  elapsedMs: number;
+  budgetMs: number;
+  filesChanged: number;
+  detail: string;
+  startedAt: number;
+  finishedAt: number | null;
+  projectPath: string;
+  error: string | null;
+}
+
+/// Temps de treball EXTRA (millora autopilotada) que l'usuari pot triar.
+/// 0 = només crear el tema; la resta = la IA treballa eixe temps buscant
+/// millores i bugs i implementant-los, sense que l'usuari toque res.
+/// Opció «Personalitzat»: temps exacte (valor + unitat), com a la Jam.
+const CUSTOM = -1;
+
+const WORK_DURATIONS = [
+  { mins: 0, label: "—" },
+  { mins: 15, label: "15 min" },
+  { mins: 30, label: "30 min" },
+  { mins: 60, label: "1 hora" },
+  { mins: 120, label: "2 hores" },
+  { mins: 240, label: "4 hores" },
+  { mins: 480, label: "8 hores" },
+  { mins: 1440, label: "1 dia" },
+  { mins: CUSTOM, label: "" },
+];
+
 export default function WordPressThemeModal() {
   const { t } = useT();
   const show = useUIStore((s) => s.showWpTheme);
@@ -90,12 +127,27 @@ export default function WordPressThemeModal() {
   const [msg, setMsg] = useState<string | null>(null);
   const [files, setFiles] = useState<string[]>([]);
   const [themePath, setThemePath] = useState<string | null>(null);
+  const [workMins, setWorkMins] = useState(0);
+  const [workCustomVal, setWorkCustomVal] = useState(2);
+  const [workCustomUnit, setWorkCustomUnit] = useState<TimeUnit>("h");
+  const [wpState, setWpState] = useState<ProjectWorkState | null>(null);
 
   useEffect(() => {
     if (!show) return;
     void loadModels();
     void loadProviders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show]);
+
+  /// Estat de la millora autopilotada + esdeveniments en viu. En obrir el
+  /// diàleg es recupera l'estat (la feina pot continuar en segon pla).
+  useEffect(() => {
+    if (!show) return;
+    void invoke<ProjectWorkState>("project_work_state").then(setWpState).catch(() => undefined);
+    const un = listen<ProjectWorkState>("project://work", (e) => setWpState(e.payload));
+    return () => {
+      void un.then((u) => u());
+    };
   }, [show]);
 
   /// Tria per defecte la IA que té l'usuari activa: el model local si en té,
@@ -118,6 +170,11 @@ export default function WordPressThemeModal() {
     return { provider: undefined, model: undefined };
   }, [ai, providers]);
 
+  /// Temps efectiu de treball (minuts): preset triat o valor personalitzat
+  /// (retallat a 1 minut..7 dies, igual que el backend).
+  const effectiveWorkMins =
+    workMins === CUSTOM ? customMinutes(workCustomVal, workCustomUnit) : workMins;
+
   const close = () => {
     setShow(false);
     setStep(1);
@@ -130,6 +187,10 @@ export default function WordPressThemeModal() {
     setThemePath(null);
     setApiForm(emptyApiForm());
     setDlModel("");
+    setWorkMins(0);
+    setWorkCustomVal(2);
+    setWorkCustomUnit("h");
+    setWpState(null);
   };
 
   const browse = async () => {
@@ -264,11 +325,40 @@ export default function WordPressThemeModal() {
       setMsg(t("wpTheme.created", { path, n: made.length }));
       // Obre el tema com a projecte perquè l'usuari hi treballi de seguida.
       await useWorkspaceStore.getState().openWorkspace(path);
+      // MILLORA AUTOPILOTADA: si l'usuari ha triat un temps de treball extra,
+      // la IA continua millorant el tema (bugs, rendiment, SEO, noves
+      // funcionalitats…) durant eixe temps, sense que l'usuari toque res.
+      if (effectiveWorkMins > 0) {
+        setMsg(t("wpTheme.workStarting"));
+        await startWork(path);
+      }
     } catch (e) {
       setErr(String(e));
     } finally {
       setBusy(null);
     }
+  };
+
+  /// Arrenca la millora contínua autopilotada sobre el tema ja creat.
+  const startWork = async (path: string) => {
+    const { provider, model } = resolveAi;
+    setErr(null);
+    try {
+      await invoke("wp_theme_work", {
+        themePath: path,
+        name: name.trim(),
+        idea: idea.trim(),
+        budgetSecs: effectiveWorkMins * 60,
+        provider: provider ?? undefined,
+        model: model ?? undefined,
+      });
+    } catch (e) {
+      setErr(String(e));
+    }
+  };
+
+  const stopWork = async () => {
+    await invoke("project_work_stop").catch(() => undefined);
   };
 
   if (!show) return null;
@@ -531,6 +621,92 @@ export default function WordPressThemeModal() {
                       <CheckCircle2 size={11} /> {f}
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* TEMPS DE TREBALL EXTRA (millora autopilotada): la IA treballa
+                  eixe temps buscant millores i bugs i implementant-los sola. */}
+              <div className="field">
+                <label>
+                  <Clock size={12} style={{ marginRight: 4, verticalAlign: -2 }} />
+                  {t("wpTheme.workLabel")}
+                </label>
+                <select
+                  className="lp-select"
+                  value={workMins}
+                  disabled={busy !== null || wpState?.running === true}
+                  onChange={(e) => setWorkMins(Number(e.target.value))}
+                >
+                  {WORK_DURATIONS.map((d) => (
+                    <option key={d.mins} value={d.mins}>
+                      {d.mins === 0 ? t("wpTheme.workNone") : d.mins === CUSTOM ? t("work.custom") : d.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="lp-hint" style={{ marginTop: 4 }}>
+                  {t("wpTheme.workHint")}
+                </div>
+                {workMins === CUSTOM && (
+                  <div className="wp-2" style={{ marginTop: 8 }}>
+                    <div className="field">
+                      <label>{t("work.customTime")}</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={workCustomVal}
+                        disabled={busy !== null || wpState?.running === true}
+                        onChange={(e) => setWorkCustomVal(Number(e.target.value))}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>{t("work.unit")}</label>
+                      <select
+                        className="lp-select"
+                        value={workCustomUnit}
+                        disabled={busy !== null || wpState?.running === true}
+                        onChange={(e) => setWorkCustomUnit(e.target.value as TimeUnit)}
+                      >
+                        <option value="min">{t("work.unitMin")}</option>
+                        <option value="h">{t("work.unitH")}</option>
+                        <option value="d">{t("work.unitD")}</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+                {workMins === CUSTOM && (
+                  <div className="lp-hint" style={{ marginTop: 4 }}>
+                    {formatDuration(effectiveWorkMins * 60_000)} · {t("work.customHint")}
+                  </div>
+                )}
+              </div>
+
+              {themePath && effectiveWorkMins > 0 && !wpState?.running && busy === null && (
+                <button className="btn sm primary" onClick={() => void startWork(themePath)}>
+                  <Sparkles size={12} /> {t("wpTheme.workStart")}
+                </button>
+              )}
+
+              {wpState && (wpState.running || wpState.finishedAt) && (
+                <div className="wp-work">
+                  <WorkProgress
+                    running={wpState.running}
+                    startedAtMs={(wpState.startedAt || 0) * 1000}
+                    mode="time"
+                    budgetMs={wpState.budgetMs}
+                    finishedAtMs={wpState.finishedAt ? wpState.finishedAt * 1000 : null}
+                    label={`${t("wpTheme.workPass")} ${wpState.pass} · ${wpState.filesChanged} ${t("wpTheme.workFiles")}`}
+                  />
+                  {wpState.detail && <div className="lp-hint">{wpState.detail}</div>}
+                  {wpState.running && (
+                    <button className="btn sm" onClick={() => void stopWork()}>
+                      <Square size={12} /> {t("wpTheme.workStop")}
+                    </button>
+                  )}
+                  {wpState.error && (
+                    <div className="wp-msg err">
+                      <AlertTriangle size={13} /> {wpState.error}
+                    </div>
+                  )}
                 </div>
               )}
               {msg && <div className="wp-msg">{msg}</div>}

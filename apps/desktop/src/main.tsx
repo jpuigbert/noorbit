@@ -3,7 +3,10 @@ import ReactDOM from "react-dom/client";
 // NOTA v0.70: Monaco (3,9 MB + workers) JA NO es carrega a l'arrencada.
 // Es importa ÀJUS quan s'obre el primer fitxer de codi: fa l'app molt més
 // lleugera i ràpida d'iniciar (consulta src/editor/monReady.ts).
-import App from "./App";
+// NOTA v0.71: «App» es importa DINÀMICAMENT més avall: abans de carregar el
+// graf de stores cal decidir QUÈ pinta esta finestra — el programa sencer o
+// un panell separat (l'agentStore tria el calaix de xats segons el projecte
+// que haguem posat al workspaceStore). No ho tornis a fer estàtic.
 import { t } from "./i18n";
 import "./theme.css";
 
@@ -108,11 +111,42 @@ if (!isTauri) {
       </div>`;
   }
 } else {
-  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-    <React.StrictMode>
-      <ErrorBoundary>
-        <App />
-      </ErrorBoundary>
-    </React.StrictMode>
-  );
+  void (async () => {
+    // Etiqueta d'esta finestra: «main» és el programa sencer; les etiquetes
+    // «noorbit-chat» / «noorbit-terminal» (mateixos valors que a windowing.ts)
+    // són finestres de PANELLS SEPARATS que l'usuari pot posar a qualsevol
+    // pantalla: aquí només es pinta el panell corresponent.
+    const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+    const label = getCurrentWebviewWindow().label;
+
+    if (label === "noorbit-chat" || label === "noorbit-terminal") {
+      if (label === "noorbit-chat") {
+        // El projecte actual el deixa windowing.ts a localStorage
+        // («noorbit.detachedChatRoot») ABANS de crear esta finestra: les
+        // webviews comparteixen origen i localStorage. Sense ell, la finestra
+        // carregaria el calaix de xats «sense projecte».
+        try {
+          const project = localStorage.getItem("noorbit.detachedChatRoot");
+          if (project) {
+            const { useWorkspaceStore } = await import("./stores/workspaceStore");
+            useWorkspaceStore.setState({ root: project });
+          }
+        } catch {
+          /* sense persistència: xat del calaix «sense projecte» */
+        }
+      }
+      const { mountDetached } = await import("./detached/DetachedPanels");
+      mountDetached(label === "noorbit-chat" ? "chat" : "terminal");
+      return;
+    }
+
+    const { default: App } = await import("./App");
+    ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+      <React.StrictMode>
+        <ErrorBoundary>
+          <App />
+        </ErrorBoundary>
+      </React.StrictMode>
+    );
+  })();
 }

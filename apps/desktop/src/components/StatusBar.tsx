@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Loader2, Folder, MemoryStick } from "lucide-react";
+import { Loader2, Folder, MemoryStick, Volume2, VolumeX, MousePointer2 } from "lucide-react";
 import { useT } from "../i18n";
 import { useWorkspaceStore } from "../stores/workspaceStore";
 import { useBlenderLiveStore } from "../stores/blenderLiveStore";
@@ -25,6 +25,10 @@ export default function StatusBar() {
   const unreal = useUnrealStore((s) => s.connected);
   const ollama = useAIStore((s) => s.ollamaRunning);
   const setShowSetupCheck = useUIStore((s) => s.setShowSetupCheck);
+  const funSound = useUIStore((s) => s.funSound);
+  const setFunSound = useUIStore((s) => s.setFunSound);
+  const funCursor = useUIStore((s) => s.funCursor);
+  const setFunCursor = useUIStore((s) => s.setFunCursor);
   const activity = useAIActivity();
 
   // RAM en temps real: arrenca el mostreig global (idempotent) i llig.
@@ -83,6 +87,22 @@ export default function StatusBar() {
       <div className="spacer" />
       <AccountChip />
       <BackgroundTaskBadge />
+      {/* Commutadors ràpids de la diversió: so de tasca acabada i cursor
+          disfressat. Un clic i canvia l'estat (es desa entre sessions). */}
+      <button
+        className={"status-item status-fun-btn" + (funSound ? "" : " off")}
+        title={t(funSound ? "status.funSoundOn" : "status.funSoundOff")}
+        onClick={() => setFunSound(!funSound)}
+      >
+        {funSound ? <Volume2 size={12} /> : <VolumeX size={12} />}
+      </button>
+      <button
+        className={"status-item status-fun-btn" + (funCursor ? "" : " off")}
+        title={t(funCursor ? "status.funCursorOn" : "status.funCursorOff")}
+        onClick={() => setFunCursor(!funCursor)}
+      >
+        <MousePointer2 size={12} />
+      </button>
       {ramPct !== null && (
         <span
           className="status-item"

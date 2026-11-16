@@ -12,6 +12,21 @@ use tokio::time::sleep;
 
 const DEFAULT_RC_PORT: u16 = crate::ports::UNREAL_RC_PORT;
 
+/// Port REAL de la Remote Control (el de la configuració, si n'hi ha un).
+///
+/// No pot ser una constant: `launch_editor` INJECTA el port configurat a
+/// l'editor (bootstrap.py l'obre), així que esperar al 30010 fixe era una
+/// contradicció — amb un port canviat l'editor s'aixecava i la connexió
+/// acabava sempre en temps exhaurit.
+fn rc_port() -> u16 {
+    let port = super::client::configured_port();
+    if port == 0 {
+        DEFAULT_RC_PORT
+    } else {
+        port
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LaunchReport {
     pub engine_path: String,
@@ -209,15 +224,12 @@ pub async fn launch_editor(
         cmd.arg(arg);
     }
 
-    // El port CONFIGURAT (Configuració ▸ Unreal) s'injecta per entorn: el
-    // bootstrap.py el llegeix i obri AQUELL port. Abans el Python sempre
-    // obria el 30010 i la configuració era ignorada.
-    let rc_port = crate::config::AppConfig::load()
-        .ok()
-        .map(|c| c.unreal.rc_port)
-        .filter(|p| *p != 0)
-        .unwrap_or(crate::ports::UNREAL_RC_PORT);
-    cmd.env(crate::ports::ENV_UNREAL_PORT, rc_port.to_string());
+    // El port CONFIGURAT (panell d'Unreal ▸ Port de Remote Control, que desa
+    // `rc_port` a config.toml) s'injecta per entorn: el bootstrap.py el
+    // llegeix i obre AQUELL port. Abans el Python sempre obria el 30010 i la
+    // configuració era ignorada.
+    let port = rc_port();
+    cmd.env(crate::ports::ENV_UNREAL_PORT, port.to_string());
 
     // Habilita Remote Control API i Python Editor Script (per si el .uproject
     // no ha pogut ser parchejat; l'un no treu l'altre).
@@ -277,11 +289,20 @@ fn init_script_path() -> Option<PathBuf> {
 /// Bootstrap d'emergència: si el bundle no porta unreal-scripts (execucions
 /// en desenvolupament), l'ESCRIU a la carpeta temporal del sistema perquè
 /// `-ExecutePythonScript` sempre tingui un fitxer vàlid que obrir el RC.
-const BOOTSTRAP_FALLBACK: &str = r#"import unreal
-PORT = 30010
-def _log(m): unreal.log("[NoOrbit/bootstrap] " + m)
+/// El port ve de l'entorn que injecta `launch_editor` (mai fixe: si l'usuari
+/// en configura un altre, aquest fallback obriria el port equivocat).
+const BOOTSTRAP_FALLBACK: &str = r#"import os
+import unreal
+
+PORT = int(os.environ.get("NOORBIT_UNREAL_RC_PORT", "30010"))
+
+
+def _log(m):
+    unreal.log("[NoOrbit/bootstrap] " + m)
+
+
 try:
-    ctx = unreal.EditorLevelLibrary.get_editor_world()
+    ctx = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).get_editor_world()
 except Exception:
     ctx = None
 for cmd in ("RemoteControl.EnableServer", "rc.EnableServer 1",
@@ -321,7 +342,8 @@ pub async fn wait_for_rc(port: u16, timeout_secs: u64) -> Result<bool> {
 
 /// Flux complet: detecta, arrenca si cal, espera, retorna estat.
 pub async fn auto_connect(project: &Path, timeout: u64) -> Result<LaunchReport> {
-    if is_rc_open(DEFAULT_RC_PORT).await {
+    let port = rc_port();
+    if is_rc_open(port).await {
         return Ok(LaunchReport {
             engine_path: String::new(),
             project_path: project.to_string_lossy().to_string(),
@@ -356,25 +378,27 @@ pub async fn auto_connect(project: &Path, timeout: u64) -> Result<LaunchReport> 
 
     launch_editor(&editor, project, &[]).await?;
 
-    let ok = wait_for_rc(DEFAULT_RC_PORT, timeout).await?;
+    let ok = wait_for_rc(port, timeout).await?;
     if !ok {
         return Err(anyhow!(
-            "Unreal Editor s'ha obert però la Remote Control API no ha respost en {} s.\n\
+            "Unreal Editor s'ha obert però la Remote Control API no ha respost al port \
+             {} en {} s.\n\
              Els plugins «Python Editor Script» i «Remote Control API» ja estan activats \
              al projecte; si no connecta, obre l'editor amb el mateix projecte i activa \
-             «Window → Virtual Production → Remote Control».\n\
+             «Window → Virtual Production → Remote Control» (servidor HTTP al port {}).\n\
              També pots tornar-ho a provar (la primera arrencada pot trigar més: \
              compilació de shaders).",
-            timeout
+            port, timeout, port
         ));
     }
 
     // Assegura els dos servidors de Remote Control (HTTP ja respon; el WS és
     // el que la intefície web de RC fara servir més endavant). Best-effort:
     // si no es pot, el HTTP que ja hi ha n'és suficient per treballar.
-    let client = UnrealClient::with_port(DEFAULT_RC_PORT);
-    let _ = super::remote_control::start_websocket(&client, 30020).await;
-    let _ = super::remote_control::start_http(&client, DEFAULT_RC_PORT).await;
+    let client = UnrealClient::with_port(port);
+    let _ = super::remote_control::start_websocket(&client, crate::ports::UNREAL_RC_WS_PORT)
+        .await;
+    let _ = super::remote_control::start_http(&client, port).await;
 
     Ok(LaunchReport {
         engine_path: engine_root.to_string_lossy().to_string(),

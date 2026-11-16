@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { Plus, Trash2, Zap, Star, Pencil, Loader2, Power } from "lucide-react";
+import { Plus, Trash2, Zap, Star, Pencil, Loader2, Power, Cpu } from "lucide-react";
 import { useT } from "../../i18n";
 import HarnessSection from "./HarnessSection";
 import RemoteAiServerPanel from "./RemoteAiServerPanel";
@@ -45,6 +45,15 @@ export const PRESETS: { key: string; label: string; data: Partial<ProviderInput>
     key: "ollamacloud",
     label: "Ollama Cloud (gratuït)",
     data: { name: "Ollama Cloud", baseUrl: "https://ollama.com/v1", model: "gpt-oss:20b", kind: "openai", auth: "bearer" },
+  },
+  {
+    // MiniMax: API compatible amb OpenAI (https://api.minimax.io/v1) amb un
+    // tier GRATUÏT potent (MiniMax-M3.1-Flash, context d'1M). Serveix com a
+    // «teacher» en línia per millorar la IA nativa quan no hi ha Ollama local.
+    // No queda configurat fins que l'usuari hi enganxa el seu token.
+    key: "minimax",
+    label: "MiniMax (gratuït)",
+    data: { name: "MiniMax (gratuït)", baseUrl: "https://api.minimax.io/v1", model: "MiniMax-M3.1-Flash", kind: "openai", auth: "bearer" },
   },
   {
     // Venice AI: API compatible amb OpenAI (documentació oficial:
@@ -140,7 +149,7 @@ export default function ProviderManager() {
       name: p.name,
       baseUrl: p.base_url,
       model: p.model,
-      kind: (p.kind === "anthropic" ? "anthropic" : "openai") as ProviderKind,
+      kind: p.kind as ProviderKind,
       auth: p.auth,
       headerName: p.header_name,
       token: "", // buit = conserva
@@ -195,6 +204,10 @@ export default function ProviderManager() {
         {providers.length === 0 && <div className="empty-hint">{t("providers.none")}</div>}
         {providers.map((p) => {
           const tst = lastTest[p.id];
+          // IA NATIVA: integrada al binari, sense token ni descàrregues. No
+          // s'edita ni s'esborra (el backend també ho protegeix); només es
+          // pot activar/desactivar, provar i fer servir.
+          const native = p.kind === "native";
           return (
             <div
               key={p.id}
@@ -204,6 +217,11 @@ export default function ProviderManager() {
                 <div className="prov-title">
                   {active === p.id && <Star size={12} />} {p.name}
                   <span className="prov-model">{p.model}</span>
+                  {native && (
+                    <span className="prov-native-badge" title={t("providers.nativeHint")}>
+                      <Cpu size={11} /> {t("providers.native")}
+                    </span>
+                  )}
                   {/* ESTAT ACTIU/INACTIU amb toggle MANUAL: proveïdors com
                       DeepInfer (servidor GPU) venen desactivats de fàbrica;
                       quan l'usuari té el servidor en marxa, ho activa aquí
@@ -218,9 +236,11 @@ export default function ProviderManager() {
                     <Power size={11} /> {p.enabled ? t("providers.on") : t("providers.off")}
                   </button>
                 </div>
-                <div className="prov-url">{p.base_url}</div>
+                <div className="prov-url">{native ? t("providers.nativeUrl") : p.base_url}</div>
                 <div className="prov-token">
-                  {p.has_token
+                  {native
+                    ? t("providers.nativeNoToken")
+                    : p.has_token
                     ? `${p.token_masked}`
                     : // Un servidor LOCAL (LM Studio, vLLM/DeepInfer…) no demana
                       // cap clau: «sense token» no és cap problema allà.
@@ -248,12 +268,16 @@ export default function ProviderManager() {
                     {t("providers.use")}
                   </button>
                 )}
-                <button className="icon-btn" onClick={() => startEdit(p.id)} title={t("providers.edit")}>
-                  <Pencil size={13} />
-                </button>
-                <button className="icon-btn" onClick={() => remove(p.id)} title={t("providers.remove")}>
-                  <Trash2 size={13} />
-                </button>
+                {!native && (
+                  <button className="icon-btn" onClick={() => startEdit(p.id)} title={t("providers.edit")}>
+                    <Pencil size={13} />
+                  </button>
+                )}
+                {!native && (
+                  <button className="icon-btn" onClick={() => remove(p.id)} title={t("providers.remove")}>
+                    <Trash2 size={13} />
+                  </button>
+                )}
               </div>
             </div>
           );

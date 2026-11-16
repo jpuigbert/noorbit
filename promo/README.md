@@ -1,7 +1,7 @@
 # NoOrbit · Spot publicitari
 
 Material complet del vídeo de promoció de NoOrbit per a
-**themes.thepuigberts.com**. 53 s, amb dos personatges originals en estil
+**themes.thepuigberts.com**. 65 s, amb dos personatges originals en estil
 kawaii/anime que expliquen el projecte.
 
 ---
@@ -10,7 +10,7 @@ kawaii/anime que expliquen el projecte.
 
 | Fitxer | Què és |
 |---|---|
-| **`video/noorbit-spot-16x9.mp4`** | **Mestre.** 1920×1080, 53 s, H.264 + AAC. Per a la web i YouTube. |
+| **`video/noorbit-spot-16x9.mp4`** | **Mestre.** 1920×1080, 65 s, H.264 + AAC. Per a la web i YouTube. |
 | **`video/noorbit-spot-9x16.mp4`** | Retall vertical. 1080×1920, 53 s. Per a Reels, TikTok i Shorts. |
 | `video/poster-16x9.jpg` | Cartell per al `<video>` (1280×720). |
 | `video/poster-9x16.jpg` | Cartell vertical (1080×1920). |
@@ -42,7 +42,13 @@ marketplace és autèntica. Cap claim tècnic que NoOrbit no faci.
 **El so és 100 % sintetitzat.** Veu en català (Montse, veu del sistema macOS) i
 una banda sonora generada amb síntesis pura — caixa de música, pad de corda, baix,
 maller, shaker i campanes, a 96 BPM en Do major. Cap mostra, cap llicència, cap
-problema de drets. La música baixa automàticament quan parla la veu.
+problema de drets.
+
+**L'equilibri de l'àudio està mesurat, no a ull:** la veu surt 8 dB per damunt
+de la música entre frases i 20 dB per damunt quan parla, el pic no arriba a
+−2,9 dBFS i el limitador és suau (`tanh`) perquè els pics de la veu no
+deformin. La veu rep un filtre de presència a 2,8 kHz perquè s'entengui
+també en un altaveu de mòbil.
 
 ## Reproduir
 

@@ -141,7 +141,9 @@
 
 /* ---- Barra lateral ---- */
 .sidebar {
-  width: 240px;
+  /* Amplada configurable amb la nansa d'arrossegament (--sidebar-w la
+     posa App.tsx des de l'uiStore; es recorda entre sessions). */
+  width: var(--sidebar-w, 240px);
   flex-shrink: 0;
   background: var(--bg-1);
   border-right: 1px solid var(--border);
@@ -229,7 +231,8 @@
 
 /* ---- Panell dret ---- */
 .rightpanel {
-  width: 380px;
+  /* Amplada configurable amb la nansa d'arrossegament (--rp-w, vegeu App.tsx). */
+  width: var(--rp-w, 380px);
   flex-shrink: 0;
   background: var(--bg-1);
   border-left: 1px solid var(--border);
@@ -263,6 +266,89 @@
   height: 100%;
   border: none;
   background: #fff;
+}
+
+/* ---- Nanses de redimensionat (entre panells, estil VS Code) ----
+   Franja fina invisible que arrossega la mida del panell adjacent; en
+   hover i durant l'arrossegament mostra una veta de l'accent. */
+.resize-handle {
+  flex-shrink: 0;
+  position: relative;
+  z-index: 5;
+}
+.rh-x {
+  width: 6px;
+  margin: 0 -3px;
+  cursor: col-resize;
+}
+.rh-y {
+  height: 6px;
+  margin: -3px 0;
+  cursor: row-resize;
+}
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  background: transparent;
+  transition: background var(--speed-fast) var(--ease-out);
+}
+.rh-x::after {
+  left: 2px;
+  right: 2px;
+  top: 0;
+  bottom: 0;
+}
+.rh-y::after {
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  right: 0;
+}
+.resize-handle:hover::after,
+.resize-handle:active::after {
+  background: var(--accent-soft, color-mix(in srgb, var(--accent) 35%, transparent));
+}
+/* Mentre s'arrossega una nansa: no seleccionar text i els iframes (vista
+   prèvia) no s'empassen el punter. */
+body.resizing {
+  user-select: none;
+  cursor: col-resize;
+}
+body.resizing iframe {
+  pointer-events: none;
+}
+
+/* ---- Finestres de panells separats (xat / terminal a una altra pantalla) */
+.detached-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-0);
+  color: var(--text-0);
+}
+.detached-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+  flex-shrink: 0;
+}
+.detached-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+.detached-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ---- Vista prèvia ---- */

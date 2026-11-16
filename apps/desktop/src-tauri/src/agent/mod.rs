@@ -317,6 +317,66 @@ impl AgentOrchestrator {
         Some(text.chars().take(4000).collect())
     }
 
+    /// Recerca AUTOPILOTADA i HEADLESS: cerca a internet (DuckDuckGo, sense
+    /// clau d'API) i llegeix les pàgines rellevants per HTTP, sense obrir CAP
+    /// finestra ni demanar CAP acció a l'usuari. Pensada per a les feines
+    /// llargues (Jam de jocs multi-dia i millora contínua de temes WordPress):
+    /// la IA s'informa sola (documentació, APIs, solucions reals) i continua
+    /// treballant sense interrupcions ni permisos.
+    ///
+    /// Mai usa el navegador intern ni `browser_read` (que podria fer visible
+    /// una finestra per a sessió/captcha): si una pàgina no es pot llegir per
+    /// HTTP, simplement s'ignora. Torna un bloc de context llest per injectar
+    /// al prompt (o cadena buida si no hi ha connexió o resultats).
+    pub async fn research_headless(&self, query: &str, max_pages: usize) -> String {
+        let q = query.trim();
+        if q.is_empty() {
+            return String::new();
+        }
+        let mut results = self.web_search(q).await;
+        let mut seen: std::collections::HashSet<String> =
+            results.iter().map(|r| r.1.clone()).collect();
+        // Fonts tècniques on viuen les solucions reals de programari.
+        for site in ["stackoverflow.com", "github.com"] {
+            for (title, url, sn) in self.web_search(&format!("site:{site} {q}")).await {
+                if !url.is_empty() && seen.insert(url.clone()) {
+                    results.push((title, url, sn));
+                }
+            }
+        }
+        results.truncate(8);
+        if results.is_empty() {
+            return String::new();
+        }
+        let mut ctx = String::from(
+            "INFORMACIÓ D'INTERNET (recerca autònoma, sense intervenció de l'usuari):\n",
+        );
+        for (title, url, sn) in &results {
+            ctx.push_str(&format!("- {title}"));
+            if !url.is_empty() {
+                ctx.push_str(&format!(" — {url}"));
+            }
+            if !sn.is_empty() {
+                ctx.push_str(&format!(": {sn}"));
+            }
+            ctx.push('\n');
+        }
+        // Llegeix les primeres pàgines per HTTP (text net). Sense navegador.
+        let mut read = 0usize;
+        for (_, url, _) in results.iter().filter(|(_, u, _)| !u.is_empty()) {
+            if read >= max_pages {
+                break;
+            }
+            if let Some(page) = self.web_fetch(url).await {
+                if page.chars().count() > 200 {
+                    ctx.push_str(&format!("\nCONTINGUT DE {url}:\n{page}\n"));
+                    read += 1;
+                }
+            }
+        }
+        ctx
+    }
+
     /// Llegeix una pàgina amb el NAVEGADOR INTERN: l'obre amagada, l'espera
     /// i en torna el text ja renderitzat (JavaScript inclòs). Si la pàgina
     /// demana una acció humana —iniciar sessió, captcha— la finestra es fa
@@ -1101,8 +1161,14 @@ for area in bpy.context.screen.areas:
     if area.type == "VIEW_3D":
         region = next(r for r in area.regions if r.type == "WINDOW")
         with bpy.context.temp_override(area=area, region=region):
-            bpy.ops.view3d.view_selected()
-            bpy.context.space_data.shading.type = "MATERIAL"
+            try:
+                bpy.ops.view3d.view_selected()
+            except Exception:
+                pass
+            try:
+                bpy.context.space_data.shading.type = "MATERIAL"
+            except Exception:
+                pass
 print("Nan de jardí creat amb %d peces" % len(nomop))
 ```
 - ESCENA COMPLEXA DE MOLTS ELEMENTS (jardí, casa, nan, arbres, follets,
@@ -1161,7 +1227,10 @@ nan.rotation_euler = (0.0, 0.0, 3.14); nan.keyframe_insert(data_path="rotation_e
 sc = bpy.context.scene; sc.frame_start = 1; sc.frame_end = 96; sc.render.fps = 24
 sc.render.resolution_x = 960; sc.render.resolution_y = 540
 if sc.camera is None:
-    bpy.ops.object.camera_add(location=(8, -8, 5), rotation=(1.1, 0.0, 0.8)); sc.camera = bpy.context.view_layer.objects.active
+    try:
+        bpy.ops.object.camera_add(location=(8, -8, 5), rotation=(1.1, 0.0, 0.8)); sc.camera = bpy.context.view_layer.objects.active
+    except Exception:
+        pass
 bpy.ops.object.select_all(action="DESELECT")
 for o in bpy.data.objects:
     if o.name.startswith(("Casa_", "Arbre_", "Nan_", "Gos_", "Follet_", "NoOrbit_")):
@@ -1170,8 +1239,14 @@ for area in bpy.context.screen.areas:
     if area.type == "VIEW_3D":
         region = next(r for r in area.regions if r.type == "WINDOW")
         with bpy.context.temp_override(area=area, region=region):
-            bpy.ops.view3d.view_selected()
-            bpy.context.space_data.shading.type = "MATERIAL"
+            try:
+                bpy.ops.view3d.view_selected()
+            except Exception:
+                pass
+            try:
+                bpy.context.space_data.shading.type = "MATERIAL"
+            except Exception:
+                pass
 bpy.ops.wm.save_as_mainfile(filepath="/tmp/noorbit_scene.blend", copy=True)
 print("NOORBIT_VIDEO_OK:/tmp/noorbit_scene.blend")
 print("Escena complexa creada: casa, 3 arbres, nan, gos, 4 follets i text NoOrbit")
@@ -1204,11 +1279,17 @@ for ob in peces:
 sc.render.resolution_x = 960; sc.render.resolution_y = 540
 sc.render.image_settings.file_format = 'FFMPEG'
 sc.render.ffmpeg.format = 'MPEG4'
-sc.render.ffmpeg.audio_codec = 'AAC'
+try:
+    sc.render.ffmpeg.audio_codec = 'AAC'
+except Exception:
+    pass
 if sc.camera is None:
-    bpy.ops.object.camera_add(location=(4.5, -5.5, 3.2),
-        rotation=(1.15, 0.0, 0.75))
-    sc.camera = bpy.context.view_layer.objects.active
+    try:
+        bpy.ops.object.camera_add(location=(4.5, -5.5, 3.2),
+            rotation=(1.15, 0.0, 0.75))
+        sc.camera = bpy.context.view_layer.objects.active
+    except Exception:
+        pass
 bpy.ops.wm.save_as_mainfile(filepath="/tmp/noorbit_video.blend", copy=True)
 print("NOORBIT_VIDEO_OK:/tmp/noorbit_video.blend")
 ```
@@ -1418,7 +1499,11 @@ demanar i ho aplicaré.",
                 "La teva resposta anterior NO era codi Python, així que NO s'ha \
 executat res a Blender.\n\nRespon NOMÉS amb UN sol bloc ```python que comenci per \
 «import bpy» i que faci la tasca de veritat (bpy.ops.* o bpy.data.*). Cap text \
-al voltant.\n\nTasca: {}\n\nSi la tasca demana varies coses (jardí + casa + nan + arbres + \
+al voltant.
+
+Tasca: {}
+
+Si la tasca demana varies coses (jardí + casa + nan + arbres + \
 follets + gos + vídeo + text…), fes-les TOTES en un sol script, no només la \
 primera. Usa un prefix de nom per a cada grup («Casa_», «Arbre_», «Follet_»…). \
 Si és una figura o una escena, recorda les RECEPTES del manual (nan de jardí, \
@@ -1562,14 +1647,62 @@ Scripting > Console):\n```python\n{}\n```",
         config: &crate::unreal::commands::UnrealConfig,
     ) -> Result<(String, bool)> {
         let system = "ETS L'AGENT DE NOORBIT per a UNREAL ENGINE 5. L'usuari et dona un \
-texte i t'explica què hi ha de fer (crear o moure actors, editar un text/títol, \
-importar, il·luminar…). Respon NOMÉS amb un script Python per a Unreal Editor \
-(un bloc ```python) usant `unreal` (Editor Scripting). Sense explicacions.";
+texte i t'explica què hi ha de fer (crear o moure actors, editar un text/títol, \n\
+importar un FBX/GLB, il·luminar…). Respon NOMÉS amb un script Python per a Unreal Editor \
+(un bloc ```python) que comenci per `import unreal` i usi l'API actual d'Editor \
+Scripting: `unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)`, \
+`unreal.EditorActorSubsystem`, `unreal.EditorAssetSubsystem` (NO `EditorLevelLibrary` \
+ni `EditorAssetLibrary`, deprecades). Acaba sempre amb un `print()` amb el que has fet. \
+Sense explicacions ni prosa. Si una cosa NO es pot fer des de script, digues-ho en una \
+línia que comenci per «NOORBIT_IMPOSSIBLE: ».";
         progress(app, "ia", "La IA està escrivint l'script per a Unreal…", true);
         let reply = ai.chat(prompt, Some(system)).await?;
-        let code = Self::extract_code(&reply);
+        let mut code = Self::extract_code(&reply);
+        if let Err(e) = crate::unreal::guard_python(&code) {
+            // Mateix tractament que Blender: si el model ha explicat en prosa
+            // en lloc d'escriure codi, se li torna l'avís UNA vegada perquè
+            // emet l'script de veritat (abans la prosa s'enviava a l'editor).
+            progress(app, "unreal", "La resposta no és codi; se li torna a demanar…", false);
+            let retry = format!(
+                "«{}» NO és codi Python. {}\n\nTasca original:\n{}\n\nReescriu NOMÉS l'script python dins d'un bloc ```python.",
+                code.trim().chars().take(80).collect::<String>(),
+                e,
+                prompt
+            );
+            let reply2 = ai.chat(&retry, Some(system)).await?;
+            let code2 = Self::extract_code(&reply2);
+            if let Err(e2) = crate::unreal::guard_python(&code2) {
+                progress(app, "unreal", "El 2n intent tampoc és codi Python", false);
+                return Ok((
+                    format!("❓ No puc aplicar a Unreal: {}\n\nResposta de la IA:\n{}", e2, reply2.trim()),
+                    false,
+                ));
+            }
+            code = code2;
+        }
+        // Els models locals sovint obliden la importació: inocu si ja hi és.
+        if !code.contains("import unreal") && !code.contains("from unreal") {
+            code = format!("import unreal\n{}", code);
+        }
+
+        let client =
+            crate::unreal::UnrealClient::with_port(crate::unreal::client::resolve_port(config.port));
+        if !client.ping().await.unwrap_or(false) {
+            progress(app, "unreal", "Unreal no està connectat", false);
+            return Ok((
+                format!(
+                    "❓ Unreal Engine no respon a la Remote Control API (port {}).\n\
+                     Obre l'editor amb el projecte i activa «Window → Virtual Production → \
+                     Remote Control», o fes servir el botó de connexió del panell d'Unreal.\n\n\
+                     Aquest és l'script que la IA havia preparat:\n```python\n{}\n```",
+                    client.port(),
+                    code
+                ),
+                false,
+            ));
+        }
+
         progress(app, "ia", "Script generat", true);
-        let client = crate::unreal::UnrealClient::with_port(config.port);
         progress(app, "unreal", "Executant l'script a Unreal…", true);
         let result = crate::unreal::python::run_script(&client, &code)
             .await
@@ -1577,17 +1710,32 @@ importar, il·luminar…). Respon NOMÉS amb un script Python per a Unreal Edito
         if result.success {
             progress(app, "unreal", "Canvis aplicats a Unreal", true);
             let out = result.output.join("\n");
-            Ok((format!("✅ Unreal: canvis aplicats.\n\n{}", out).trim_end().to_string(), true))
+            Ok((
+                format!("✅ Unreal: canvis aplicats.\n\n{}", out)
+                    .trim_end()
+                    .to_string(),
+                true,
+            ))
         } else {
             progress(app, "unreal", "L'script ha fallat; la IA el corregeix…", false);
             let errs = result.errors.join("\n");
-            // Reintent amb l'error.
+            // Reintent: li passem l'error perquè corregisqa el script.
             let retry_prompt = format!(
-                "L'script anterior ha fallat:\n{}\n\nTasca original:\n{}\n\nReescriu NOMÉS l'script corregit.",
+                "L'script anterior ha fallat a Unreal amb aquest error:\n{}\n\nTasca original:\n{}\n\nReescriu NOMÉS l'script corregit.",
                 errs, prompt
             );
             let reply2 = ai.chat(&retry_prompt, Some(system)).await?;
-            let code2 = Self::extract_code(&reply2);
+            let mut code2 = Self::extract_code(&reply2);
+            if let Err(e) = crate::unreal::guard_python(&code2) {
+                progress(app, "unreal", "El 2n intent tampoc és codi Python", false);
+                return Ok((
+                    format!("❓ No puc aplicar a Unreal: {}\n\nResposta de la IA:\n{}", e, reply2.trim()),
+                    false,
+                ));
+            }
+            if !code2.contains("import unreal") && !code2.contains("from unreal") {
+                code2 = format!("import unreal\n{}", code2);
+            }
             let result2 = crate::unreal::python::run_script(&client, &code2)
                 .await
                 .map_err(|e| anyhow!("{}", e))?;
@@ -1603,7 +1751,13 @@ importar, il·luminar…). Respon NOMÉS amb un script Python per a Unreal Edito
             } else {
                 progress(app, "unreal", "Unreal ha fallat", false);
                 Ok((
-                    format!("❌ Unreal ha fallat:\n{}", result2.errors.join("\n")),
+                    format!(
+                        "❌ Unreal ha fallat:\n{}\n\nAquest és l'últim script generat (pots \
+executar-lo a mà a Unreal > Window > Output Log > cmd, o al panell d'Unreal \
+> Python):\n```python\n{}\n```",
+                        result2.errors.join("\n"),
+                        code2
+                    ),
                     false,
                 ))
             }

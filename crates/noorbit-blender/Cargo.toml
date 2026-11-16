@@ -1,0 +1,16 @@
+[package]
+name = "noorbit-blender"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+noorbit-jam = { path = "../noorbit-jam" }
+noorbit-planner = { path = "../noorbit-planner" }
+noorbit-lessons = { path = "../noorbit-lessons" }
+tracing = { workspace = true }
+tokio = { workspace = true }
+tokio-util = "0.7"
+async-trait = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

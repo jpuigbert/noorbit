@@ -4,7 +4,9 @@
 .terminal-panel {
   display: flex;
   flex-direction: column;
-  height: 220px;
+  /* Alçada configurable amb la nansa d'arrossegament (--term-h la posa
+     App.tsx des de l'uiStore; es recorda entre sessions). */
+  height: var(--term-h, 220px);
   min-height: 120px;
   border-top: 1px solid var(--border);
   background: var(--bg-1);

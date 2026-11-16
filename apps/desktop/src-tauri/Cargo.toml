@@ -1,6 +1,6 @@
 [package]
 name = "no-orbit"
-version = "0.71.10-alpha"
+version = "0.71.11-alpha"
 description = "NoOrbit — IDE amb agent IA local, Blender i Unreal Engine 5"
 authors = ["NoOrbit"]
 edition = "2021"
@@ -42,8 +42,23 @@ urlencoding = "2.1"
 once_cell = "1"
 sha2 = "0.10"
 
+noorbit-guardian = { path = "../../../crates/noorbit-guardian" }
+noorbit-jam = { path = "../../../crates/noorbit-jam" }
+noorbit-planner = { path = "../../../crates/noorbit-planner" }
+noorbit-git = { path = "../../../crates/noorbit-git" }
+noorbit-llm-openai = { path = "../../../crates/noorbit-llm-openai" }
+noorbit-signal = { path = "../../../crates/noorbit-signal" }
+noorbit-reporter = { path = "../../../crates/noorbit-reporter" }
+noorbit-lessons = { path = "../../../crates/noorbit-lessons" }
+noorbit-persistence = { path = "../../../crates/noorbit-persistence" }
+tokio-util = "0.7"
+async-trait = "0.1"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
 
 [features]
 default = ["custom-protocol"]

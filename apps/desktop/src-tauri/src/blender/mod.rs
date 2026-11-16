@@ -300,6 +300,7 @@ pub fn looks_like_python(code: &str) -> bool {
         return false;
     }
     // I ha de tenir alguna senyal de Python/bpy: la prosa no en té.
+
     const SIGNALS: [&str; 12] = [
         "import ",
         "from ",
@@ -354,6 +355,12 @@ mod tests {
         assert!(looks_like_python("import bpy; bpy.ops.mesh.primitive_cube_add()"));
         assert!(looks_like_python("ob = bpy.data.objects[\"Cub\"]"));
         assert!(looks_like_python("from mathutils import Vector"));
+    }
+
+    #[test]
+    fn user_complex_description_is_not_python() {
+        let t = "crea un nom de jardi de color vermell amb trets humans i barba , en un jardi ple de flors , amb una casa estil victoria mab arquitectura de la sagrada familia , i que sigui de dia amb un cel blau";
+        assert!(!looks_like_python(t), "should reject: {}", t);
     }
 
     #[test]
@@ -478,27 +485,85 @@ pub fn render_blender_video(blend_path: &str) -> Result<String> {
     let binary = detect_blender_binary().ok_or_else(|| anyhow!("Blender no instal·lat"))?;
     let script = std::env::temp_dir().join(format!("noorbit_video_{}.py", uuid::Uuid::new_v4()));
     std::fs::write(&script, VIDEO_RENDER_CODE)?;
-    let out = std::process::Command::new(&binary)
+    // Spawn en lloc de .output(): així podem posar un temps límit i matar el
+    // procés si es penja (render massa llarg, denoising, manca de RAM…). Si
+    // no, .output() bloqueja per sempre i la UI queda colgada.
+    let mut child = std::process::Command::new(&binary)
         .arg("-b")
         .arg(blend_path)
         .arg("-P")
         .arg(&script)
-        .output()?;
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| anyhow!("No s'ha pogut arrencar Blender per renderitzar: {}", e))?;
+
+    // Llegim stdout/stderr en fils apart per no bloquejar-nos i per tenir el
+    // buffer disponible quan el procés acabi (o quan el matem per timeout).
+    let mut stdout_handle = child.stdout.take();
+    let mut stderr_handle = child.stderr.take();
+    let stdout_thread = std::thread::spawn(move || {
+        let mut buf = String::new();
+        if let Some(r) = stdout_handle.as_mut() {
+            use std::io::Read;
+            let _ = r.read_to_string(&mut buf);
+        }
+        buf
+    });
+    let stderr_thread = std::thread::spawn(move || {
+        let mut buf = String::new();
+        if let Some(r) = stderr_handle.as_mut() {
+            use std::io::Read;
+            let _ = r.read_to_string(&mut buf);
+        }
+        buf
+    });
+
+    // Temps límit: 10 minuts. El render amb Cycles 4 samples a 480x270 de
+    // fins a 120 frames hauria d'acabar molt abans; si no, alguna cosa va mal.
+    const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+    let start = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break Ok(s),
+            Ok(None) => {
+                if start.elapsed() >= TIMEOUT {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break Err(anyhow!(
+                        "El render ha superat els 10 minuts i s'ha aturat. Prova amb menys frames o una escena més senzilla."
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                break Err(anyhow!("Error esperant Blender: {}", e));
+            }
+        }
+    };
+
     let _ = std::fs::remove_file(&script);
-    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let stdout = stdout_thread.join().unwrap_or_default();
+    let stderr = stderr_thread.join().unwrap_or_default();
+
+    if let Err(e) = status {
+        return Err(e);
+    }
+    let status = status.unwrap();
+    if !status.success() {
+        let tail: String = stderr.lines().rev().take(8).collect::<Vec<_>>().join(" | ");
+        return Err(anyhow!("Blender no ha acabat el render del vídeo: {}", tail));
+    }
     if let Some(line) = stdout.lines().rev().find(|l| l.contains(VIDEO_DONE_MARKER)) {
         if let Some(path) = line.split(VIDEO_DONE_MARKER).nth(1) {
             return Ok(path.trim().trim_matches('"').to_string());
         }
     }
+    let tail: String = stderr.lines().rev().take(8).collect::<Vec<_>>().join(" | ");
     Err(anyhow!(
-        "Blender no ha acabat el render del vídeo: {}",
-        String::from_utf8_lossy(&out.stderr)
-            .lines()
-            .rev()
-            .take(5)
-            .collect::<Vec<_>>()
-            .join(" | ")
+        "Blender no ha imprès el marcador de finalització. Stderr: {}",
+        tail
     ))
 }
 
@@ -513,26 +578,38 @@ const VIDEO_DONE_MARKER: &str = "NOORBIT_VIDEO_DONE:";
 /// de l'escena no pot renderitzar sense pantalla (EEVEE/Workbench), fallback
 /// a Cycles amb pocs samples perquè el render acabi abans de caure.
 const VIDEO_RENDER_CODE: &str = r#"
-import bpy
+import bpy, os
 sc = bpy.context.scene
+# Sortida del vídeo: sempre a /tmp per evitar problemes de ruta relativa (//)
+# en mode headless, on no hi ha carpeta de projecte.
+out = "/tmp/noorbit_render.mp4"
+sc.render.filepath = out
 sc.render.image_settings.file_format = 'FFMPEG'
 sc.render.ffmpeg.format = 'MPEG4'
-# Àudio del vídeo: si l'escena té música/veu a l'editor de seqüències, el
-# render els inclou NOMÉS amb un codec d'àudio definit; sense això el .mp4
-# sortiria mut.
 try:
     sc.render.ffmpeg.audio_codec = 'AAC'
 except Exception:
     pass
-if sc.frame_end > 300:
-    sc.frame_end = 300
+# Forcem Cycles en CPU amb pocs samples i SENSE denoising: EEVEE no renderitza
+# bé en mode headless (-b) i es penja; el denoising (OIDN) triga molt i pot
+# consumir tota la RAM, provocant EAGAIN (os error 35) en spawnar processos.
+sc.render.engine = 'CYCLES'
+sc.cycles.samples = 4
+sc.cycles.device = 'CPU'
 try:
-    bpy.ops.render.render(animation=True)
+    sc.cycles.use_denoising = False
 except Exception:
-    sc.render.engine = 'CYCLES'
-    sc.cycles.samples = 32
-    sc.cycles.device = 'CPU'
-    bpy.ops.render.render(animation=True)
+    pass
+# Resolució baixa perquè el render acabi ràpid.
+sc.render.resolution_x = 480
+sc.render.resolution_y = 270
+sc.render.resolution_percentage = 100
+if sc.frame_end > 120:
+    sc.frame_end = 120
+if sc.frame_start < 1:
+    sc.frame_start = 1
+print("Renderitzant %d..%d frames a %s" % (sc.frame_start, sc.frame_end, out))
+bpy.ops.render.render(animation=True)
 print("NOORBIT_VIDEO_DONE:%s" % sc.render.filepath)
 "#;
 

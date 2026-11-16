@@ -1,11 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
-  Eye, Bot, Play, Square, Globe, Users, Monitor, Boxes, Clapperboard,
-  Smartphone, Wrench, Brain, Activity, GitBranch, AlertTriangle, Terminal,
+  Eye, Bot, Play, Square, Globe, Users, Monitor, Boxes, Clapperboard, ExternalLink,
+  Smartphone, Wrench, Brain, Activity, GitBranch, AlertTriangle, Terminal, Gamepad2,
 } from "lucide-react";
 import { useT } from "../../i18n";
 import { usePreviewStore, type AgentSub, type RightTab } from "../../stores/previewStore";
+import { useUIStore } from "../../stores/uiStore";
+import { detachChat, reattachChat } from "../../windowing";
 import { useExpertStore } from "../../stores/expertStore";
 import AgentPanel from "../Agent/AgentPanel";
 import WebAiPanel from "../WebAi/WebAiPanel";
@@ -13,6 +15,7 @@ import AIProcessViewer from "../AI/AIProcessViewer";
 import ComputerPanel from "../Computer/ComputerPanel";
 import ExpertsPanel from "../Experts/ExpertsPanel";
 import LearningPanel from "../Learning/LearningPanel";
+import JamPanel from "../Jam/JamPanel";
 import UnrealPanel from "../Unreal/UnrealPanel";
 import BlenderPanel from "../Blender/BlenderPanel";
 import PanelErrorBoundary from "../PanelErrorBoundary";
@@ -28,6 +31,7 @@ import DebugConsole from "../Console/DebugConsole";
 const SUB_AGENT = [
   "chat",
   "experts",
+  "jam",
   "learning",
   "computer",
   "unreal",
@@ -41,6 +45,7 @@ type SubKeyDev = (typeof SUB_DEV)[number];
 const SUB_ICONS: Record<SubKeyAgent, ReactNode> = {
   chat: <Bot size={12} />,
   experts: <Users size={12} />,
+  jam: <Gamepad2 size={12} />,
   learning: <Brain size={12} />,
   computer: <Monitor size={12} />,
   unreal: <Boxes size={12} />,
@@ -74,6 +79,10 @@ export default function RightPanel() {
   const [subDev, setSubDev] = useSubDev();
   const teamRunning = useExpertStore((s) => s.teamRunning);
   const teamProgress = useExpertStore((s) => s.teamProgress);
+  // El xat pot estar en FINESTRA SEPARADA (per posar-lo a una altra pantalla):
+  // mentre ho sigui, aquí només es mostra un marc amb el botó de reenganxar
+  // (un sol lloc edita els xats: el calaix de localStorage no es baralla).
+  const chatDetached = useUIStore((s) => s.chatDetached);
 
   useEffect(() => {
     init();
@@ -89,6 +98,7 @@ export default function RightPanel() {
   const subAgentLabels: Record<SubKeyAgent, string> = {
     chat: t("agent.chat"),
     experts: t("rightPanel.experts"),
+    jam: t("jam.tab"),
     learning: t("rightPanel.learning"),
     computer: t("rightPanel.computer"),
     unreal: t("menu.unreal"),
@@ -140,19 +150,46 @@ export default function RightPanel() {
                   {SUB_ICONS[k]} {subAgentLabels[k]}
                 </button>
               ))}
+              {agentSub === "chat" && (
+                <button
+                  className="icon-btn rp-detach"
+                  title={t("panel.detachChat")}
+                  onClick={() => void detachChat()}
+                >
+                  <ExternalLink size={12} />
+                </button>
+              )}
             </div>
             <div className="rp-group-body">
               {/* Cada panell va amb la seva pròpia xarxa de seguretat: si un
                   peta (un null d'una dada), només mor AQUELL panell — la resta
                   de NoOrbit (xat, editor, terminal) continua funcionant. */}
-              {agentSub === "chat" && (
-                <PanelErrorBoundary label={t("rightPanel.errChat")}>
-                  <AgentPanel />
-                </PanelErrorBoundary>
-              )}
+              {agentSub === "chat" &&
+                (chatDetached ? (
+                  <div className="empty-hint" style={{ marginTop: 48 }}>
+                    {t("panel.detachedHint")}
+                    <div style={{ marginTop: 10 }}>
+                      <button
+                        className="btn sm primary"
+                        onClick={() => void reattachChat()}
+                      >
+                        {t("panel.reattachHere")}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <PanelErrorBoundary label={t("rightPanel.errChat")}>
+                    <AgentPanel />
+                  </PanelErrorBoundary>
+                ))}
               {agentSub === "experts" && (
                 <PanelErrorBoundary label={t("rightPanel.errExperts")}>
                   <ExpertsPanel />
+                </PanelErrorBoundary>
+              )}
+              {agentSub === "jam" && (
+                <PanelErrorBoundary label={t("rightPanel.errJam")}>
+                  <JamPanel />
                 </PanelErrorBoundary>
               )}
               {agentSub === "learning" && (

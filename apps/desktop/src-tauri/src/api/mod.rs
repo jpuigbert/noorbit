@@ -161,10 +161,19 @@ impl AiProvider {
         self.kind.eq_ignore_ascii_case("anthropic")
     }
 
+    /// Cert si aquest proveïdor és la IA NATIVA integrada: un motor Rust que
+    /// viu dins del binari de NoOrbit. No fa cap petició HTTP ni necessita
+    /// token o descàrrega; funciona només instal·lant l'app.
+    pub fn is_native(&self) -> bool {
+        self.kind.eq_ignore_ascii_case("native")
+    }
+
     /// Nom del tipus d'API (per a la interfície i la comptabilització):
-    /// «openai» (compatible OpenAI) o «anthropic».
+    /// «native» (motor integrat), «anthropic» (Claude) o «openai».
     pub fn kind_name(&self) -> String {
-        if self.is_anthropic() {
+        if self.is_native() {
+            "native".to_string()
+        } else if self.is_anthropic() {
             "anthropic".to_string()
         } else {
             "openai".to_string()
@@ -314,6 +323,44 @@ impl ApiManager {
             });
             seeded = true;
         }
+        // IA NATIVA: el motor integrat al binari (sense descàrrega ni token).
+        // Es sembra SEMPRE al capdavant de la llista perquè «només instal·lant»
+        // NoOrbit ja tinga una IA que funciona en aquest Mac (també Intel).
+        if !providers.iter().any(|p| p.id == crate::ai::native::PROVIDER_ID) {
+            providers.insert(
+                0,
+                AiProvider {
+                    id: crate::ai::native::PROVIDER_ID.into(),
+                    name: crate::ai::native::PROVIDER_NAME.into(),
+                    base_url: String::new(),
+                    model: crate::ai::native::MODEL_NAME.into(),
+                    kind: crate::ai::native::KIND.into(),
+                    auth: AuthScheme::None,
+                    header_name: String::new(),
+                    token: String::new(),
+                    enabled: true,
+                },
+            );
+            seeded = true;
+        }
+        // MINIMAX (gratuït): API compatible amb OpenAI (api.minimax.io/v1),
+        // models potents amb 1M de context. Lloc fixe per si l'usuari hi vol
+        // enganxar el seu token gratuït; també serveix de teacher de la IA
+        // nativa quan no hi ha model local. No queda configurat fins al token.
+        if !providers.iter().any(|p| p.id == "minimax") {
+            providers.push(AiProvider {
+                id: "minimax".into(),
+                name: "MiniMax (gratuït)".into(),
+                base_url: "https://api.minimax.io/v1".into(),
+                model: "MiniMax-M3.1-Flash".into(),
+                kind: "openai".into(),
+                auth: AuthScheme::Bearer,
+                header_name: String::new(),
+                token: String::new(),
+                enabled: true,
+            });
+            seeded = true;
+        }
         // Migració suau del que ja estava desenat: URLs normals (espais,
         // barres, /api/v1 que faltava) i el model Venice per defecte antic.
         // Així una configuració creationada amb la versió prèvia torna a
@@ -411,20 +458,29 @@ impl ApiManager {
         enabled: Option<bool>,
     ) -> Result<AiProviderPublic> {
         let item = self.find(id)?;
+        // La IA nativa és integrada: es conserva el seu tipus, auth i URL
+        // (buida) encara que la UI envie una patch amb valors d'un altre tipus.
+        let native = item.is_native();
         if let Some(v) = name {
             item.name = v.trim().to_string();
         }
         if let Some(v) = base_url {
-            item.base_url = normalize_base(&v);
+            if !native {
+                item.base_url = normalize_base(&v);
+            }
         }
         if let Some(v) = model {
             item.model = v.trim().to_string();
         }
         if let Some(v) = kind {
-            item.kind = v;
+            if !native {
+                item.kind = v;
+            }
         }
         if let Some(v) = auth {
-            item.auth = v;
+            if !native {
+                item.auth = v;
+            }
         }
         if let Some(v) = header_name {
             item.header_name = v.trim().to_string();
@@ -441,6 +497,13 @@ impl ApiManager {
     }
 
     pub fn remove(&mut self, id: &str) -> Result<()> {
+        // La IA nativa està integrada al programa: no es pot esborrar (només
+        // activar/desactivar). Esborrar-la deixaria l'app sense IA de sèrie.
+        if id == crate::ai::native::PROVIDER_ID {
+            return Err(anyhow!(
+                "La IA nativa està integrada al programa i no es pot esborrar; pots desactivar-la."
+            ));
+        }
         self.providers.retain(|p| p.id != id);
         self.save()?;
         Ok(())
@@ -512,6 +575,18 @@ pub async fn chat(
     conversation: &[(String, String)],
     system: Option<&str>,
 ) -> Result<(String, Option<String>)> {
+    // IA NATIVA: resposta local del motor integrat (sense HTTP ni token).
+    if provider.is_native() {
+        let prompt = conversation
+            .iter()
+            .rev()
+            .find(|(r, _)| r == "user")
+            .map(|(_, c)| c.clone())
+            .unwrap_or_default();
+        let brain = crate::ai::native::load_brain();
+        let lessons = crate::ai::native::lessons_from_system(system);
+        return Ok((crate::ai::native::answer(&prompt, &brain, &lessons), None));
+    }
     if provider.is_anthropic() {
         return chat_anthropic(http, provider, conversation, system).await;
     }
@@ -538,6 +613,22 @@ pub async fn chat_stream(
     ctl: &std::sync::Arc<crate::ai::SessionCtl>,
     start: std::time::Instant,
 ) -> Result<(String, Option<String>)> {
+    // IA NATIVA: streaming local del motor integrat (mateixos events que la
+    // resta de proveïdors). La millora silenciosa es fa a AiManager, que té
+    // accés al teacher; ací només es respon amb el cervell carregat.
+    if provider.is_native() {
+        let prompt = conversation
+            .iter()
+            .rev()
+            .find(|(r, _)| r == "user")
+            .map(|(_, c)| c.clone())
+            .unwrap_or_default();
+        let brain = crate::ai::native::load_brain();
+        let lessons = crate::ai::native::lessons_from_system(system);
+        let text = crate::ai::native::answer(&prompt, &brain, &lessons);
+        crate::ai::native::emit_stream(app, ctl, &prompt, &text, start).await;
+        return Ok((text, None));
+    }
     if provider.is_anthropic() {
         stream_sse(app, http, provider, conversation, system, ctl, start, anthropic_delta).await
     } else {
@@ -684,12 +775,16 @@ async fn stream_sse(
             None => break,
         };
         buf.extend_from_slice(&chunk);
-        while let Some(pos) = buf.iter().position(|b| *b == b'\n') {
-            let mut line: Vec<u8> = buf.drain(..=pos).collect();
+        // Cursor en lloc de «drain» per línia: desplaçar el buffer restant a
+        // cada línia feia que el cost creiés amb el quadrat del flux.
+        let mut cursor = 0;
+        while let Some(pos) = buf[cursor..].iter().position(|b| *b == b'\n') {
+            let mut line = &buf[cursor..cursor + pos];
+            cursor += pos + 1;
             while matches!(line.last(), Some(&b'\n') | Some(&b'\r')) {
-                line.pop();
+                line = &line[..line.len() - 1];
             }
-            let text = String::from_utf8_lossy(&line);
+            let text = String::from_utf8_lossy(line);
             let text = text.trim();
             // SSE: només les línies «data: …» porten càrrega; la resta
             // («event:», comentaris «:», buit) s'ignoren.
@@ -755,6 +850,9 @@ async fn stream_sse(
                     break 'stream;
                 }
             }
+        }
+        if cursor > 0 {
+            buf.drain(..cursor);
         }
     }
     let ms = start.elapsed().as_millis() as u64;

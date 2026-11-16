@@ -1,0 +1,18 @@
+[package]
+name = "noorbit-llm-openai"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+noorbit-planner = { path = "../noorbit-planner" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+httpdate = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

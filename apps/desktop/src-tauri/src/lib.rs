@@ -12,6 +12,7 @@ pub mod config;
 pub mod experts;
 pub mod external_orchestrator;
 pub mod imgen;
+pub mod jam;
 pub mod learning;
 pub mod lsp;
 pub mod mobile;
@@ -20,6 +21,7 @@ pub mod ports;
 pub mod skills;
 pub mod themes;
 pub mod unreal;
+pub mod project_work;
 
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
@@ -41,6 +43,10 @@ pub struct AppState {
     pub team: Arc<experts::TeamControl>,
     /// Aprenentatge local: registre de converses + lliçons apreses (tot local).
     pub learning: Arc<learning::LearningStore>,
+    /// Autonomous Jam: estat i cancel·lació de la Jam en curs.
+    pub jam: Arc<jam::commands::JamHandle>,
+    /// Millora contínua autopilotada de qualsevol projecte (estat + cancel·lació).
+    pub project_work: Arc<project_work::ProjectWorkHandle>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -123,12 +129,20 @@ pub fn run() {
         autonomous,
         team: Arc::new(experts::TeamControl::new()),
         learning,
+        jam: Arc::new(jam::commands::JamHandle::default()),
+        project_work: Arc::new(project_work::ProjectWorkHandle::default()),
     };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        // El handle de la Jam es registra EXPLÍCITAMENT: les comandes
+        // jam_start/jam_stop/jam_state demanen `State<Arc<JamHandle>>` i, sense
+        // aquest manage, Tauri no el trobaria (petaria en runtime).
+        .manage(state.jam.clone())
+        // Handle de la millora de projectes (mateix patró que la Jam).
+        .manage(state.project_work.clone())
         .manage(state)
         .manage(agent_state)
         .manage(blender_state)
@@ -224,11 +238,27 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // En sortir de l'app, els servidors locals que NoOrbit ha engegat
-            // (llama.cpp) es tanquen: si no, quedaven com a processos orfes
-            // ocupant el port.
             if let tauri::WindowEvent::Destroyed = event {
-                crate::ai::llamacpp::stop_all();
+                use tauri::{Emitter as _, Manager as _};
+                let label = window.label();
+                if label == "main" {
+                    // En sortir de l'app, els servidors locals que NoOrbit ha
+                    // engegat (llama.cpp) es tanquen: si no, quedaven com a
+                    // processos orfes ocupant el port. Només ho fem en tancar
+                    // la finestra PRINCIPAL: si ho féssim a qualsevol finestra,
+                    // tancar un panell separat (xat o terminal) mataria la IA
+                    // mentre l'app segueix oberta.
+                    crate::ai::llamacpp::stop_all();
+                } else if label == "noorbit-chat" || label == "noorbit-terminal" {
+                    // Xarxa de seguretat: si una finestra separada mor sense
+                    // passar pel seu tancament JS (crash del webview, tancament
+                    // extern), el programa principal es quedaria amb el panell
+                    // «destacat» per sempre. El listener de windowing.ts és
+                    // idempotent: si el flag ja és net, no fa res.
+                    let _ = window
+                        .app_handle()
+                        .emit("panel://closed", serde_json::json!({ "label": label }));
+                }
             }
             let _ = window;
         })
@@ -261,6 +291,11 @@ pub fn run() {
             commands::term::kill_command,
             commands::workspace::open_workspace,
             commands::workspace::create_project,
+            jam::commands::jam_plan,
+            jam::commands::jam_start,
+            jam::commands::jam_stop,
+            jam::commands::jam_state,
+            commands::workspace::clone_game_studios,
             // Sistema operatiu
             commands::system::open_terminal,
             commands::system::reveal_in_finder,
@@ -372,6 +407,11 @@ pub fn run() {
             commands::themes::theme_upload_session,
             commands::themes::theme_check_auth,
             commands::themes::theme_open_sales_page,
+            // Millora contínua AUTOPILOTADA de qualsevol projecte (temps de treball)
+            project_work::wp_theme_work,
+            project_work::project_work,
+            project_work::project_work_stop,
+            project_work::project_work_state,
             // Proveïdors d'IA en línia (tokens)
             commands::api::ai_provider_list,
             commands::api::ai_provider_add,
@@ -478,6 +518,8 @@ pub fn run() {
             unreal::commands::unreal_info,
             unreal::commands::unreal_detect_installations,
             unreal::commands::unreal_find_uproject,
+            unreal::commands::unreal_get_rc_port,
+            unreal::commands::unreal_set_rc_port,
             unreal::commands::unreal_auto_connect,
             unreal::commands::unreal_run_python,
             unreal::commands::unreal_create_blueprint,

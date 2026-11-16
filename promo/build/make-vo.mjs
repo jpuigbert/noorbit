@@ -39,7 +39,11 @@ for (const seg of cfg.segments) {
   // ordre de comandes de veu de macOS: primer el to (pbas), després el text.
   const spoken = (seg.pbas ? `[[pbas ${seg.pbas}]]` : "") + seg.text;
   await exec("say", ["-v", seg.voice || "Montse", "-r", String(seg.rate || 150), "-o", aiff, spoken]);
+  // Equalització de veu: es talla el grave sobrant (no aporta intel·ligibilitat
+  // i embaraixa la música) i s'impulsa la presència (2–4 kHz) perquè la veu
+  // se sentiment clarament per damunt del llit musical.
   await exec(FF, ["-y", "-hide_banner", "-loglevel", "error", "-i", aiff,
+    "-af", "highpass=f=95,equalizer=f=2800:t=q:w=1.3:g=3.5,equalizer=f=4200:t=q:w=1.6:g=2",
     "-ar", "48000", "-ac", "1", "-c:a", "pcm_s16le", wav]);
   const d = await duration(aiff);
   const out = +(seg.in + d).toFixed(3);

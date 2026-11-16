@@ -9,6 +9,7 @@ export type RightTab = "preview" | "agent" | "web" | "dev";
 export type AgentSub =
   | "chat"
   | "experts"
+  | "jam"
   | "learning"
   | "computer"
   | "unreal"

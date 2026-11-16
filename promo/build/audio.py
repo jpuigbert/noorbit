@@ -31,7 +31,7 @@ FF = os.path.join(ROOT, "node_modules/ffmpeg-static/ffmpeg")
 os.makedirs(AUDIO, exist_ok=True)
 
 SR = 48000
-DUR = 53.0
+DUR = 65.0
 N = int(SR * DUR)
 BPM = 96.0
 BEAT = 60.0 / BPM
@@ -70,8 +70,6 @@ def add(buf, start, dur, fn, amp=1.0, attack=0.005, release=0.0, pan=0.0):
     n = i1 - i0
     if n <= 0:
         return
-    gl = math.sqrt((1.0 - pan) * 0.5) * 1.414
-    gr = math.sqrt((1.0 + pan) * 0.5) * 1.414
     a = max(1, int(attack * SR))
     rl = int(release * SR)
     for i in range(n):
@@ -81,9 +79,7 @@ def add(buf, start, dur, fn, amp=1.0, attack=0.005, release=0.0, pan=0.0):
         if rl and i > n - rl:
             v *= (n - i) / rl
         j = i0 + i
-        buf[j] += v * amp * gl
-        if j + 1 < N:
-            buf[j + 1] += v * amp * gr
+        buf[j] += v * amp
 
 
 def musicbox(freq, dur=1.6, vib=0.0):
@@ -155,10 +151,10 @@ def kick(dur=0.3):
 S_HOOK = (0.0, 5.6)
 S_FRICTION = (5.6, 10.9)
 S_REVEAL = (10.9, 13.6)
-S_TALK = (13.6, 35.4)
-S_DEMO = (35.4, 43.8)
-S_PUBLISH = (43.8, 47.9)
-S_CTA = (47.9, 53.0)
+S_TALK = (13.6, 42.0)
+S_DEMO = (42.0, 51.0)
+S_PUBLISH = (51.0, 56.5)
+S_CTA = (56.5, 65.0)
 
 
 
@@ -218,18 +214,18 @@ def build_music(vo_timings):
         (12.0, 1.0, 0), (13.0, 1.0, 1), (14.0, 1.0, 2), (15.0, 1.0, 3),
     ]
     mel_amp = 0.20
-    for cyc, t0 in enumerate([0.0, 16.0, 26.0, 40.0]):
+    for cyc, t0 in enumerate([0.0, 16.0, 26.0, 36.0, 46.0, 56.0]):
         for (bpos, blen, midx) in phrase:
             t = t0 + bpos * BEAT
             ch = CHORDS[int((t / BAR) % 4)]
             note = ch["meld"][midx % 4]
-            oct_up = 1 if (cyc in (1, 3) and bpos >= 8) else 0
+            oct_up = 1 if (cyc in (1, 3, 5) and bpos >= 8) else 0
             f = PITCH[note] * (2 if oct_up else 1)
-            add(mel, t, blen * BEAT + 1.0, musicbox(f, 1.5), amp=mel_amp * (0.85 if cyc in (1, 2) else 1),
+            add(mel, t, blen * BEAT + 1.0, musicbox(f, 1.5), amp=mel_amp * (0.85 if cyc in (1, 2, 3, 4, 5) else 1),
                 attack=0.003, pan=0.12)
 
     # ── BAIX: arrel a 1 i 3
-    for b in range(22):
+    for b in range(26):
         t0 = b * BAR
         if t0 > DUR:
             break
@@ -242,7 +238,7 @@ def build_music(vo_timings):
             add(bass, t, BEAT * 1.9, bassnote(f, BEAT * 1.9), amp=amp, attack=0.02, release=0.35)
 
     # ── MALLER: 2 i 4
-    for b in range(22):
+    for b in range(26):
         t0 = b * BAR
         if t0 > DUR:
             break
@@ -254,7 +250,7 @@ def build_music(vo_timings):
             add(mal, t, 0.5, mallet(PITCH[note] * 2), amp=0.075, attack=0.002, pan=0.28)
 
     # ── SHAKER: contrasTemps, molt suau
-    for b in range(22):
+    for b in range(26):
         t0 = b * BAR
         if t0 > DUR:
             break
@@ -265,7 +261,7 @@ def build_music(vo_timings):
             add(shk, t, 0.07, shaker(), amp=0.032, attack=0.001, pan=-0.3)
 
     # ── CAMPANES: la revel·lació i la publicació
-    for t0, notes in ((11.35, ["C6", "E6", "G6", "C7"]), (44.05, ["C6", "E6", "G6", "C7", "E7"])):
+    for t0, notes in ((11.35, ["C6", "E6", "G6", "C7"]), (51.25, ["C6", "E6", "G6", "C7", "E7"])):
         for i, nn in enumerate(notes):
             add(bels, t0 + i * 0.11, 3.2, bell(PITCH[nn]), amp=0.16 - i * 0.018,
                 attack=0.002, release=1.6, pan=-0.4 + (i / len(notes)) * 0.8)
@@ -346,18 +342,34 @@ def build_music(vo_timings):
 
 # ── escriptura ──────────────────────────────────────────────────────────────
 def write_wav(path, left, right, peak=0.89):
-    l = array.array("h")
-    r = array.array("h")
+    """Escriu un WAV estéreo INTERCALAT (L,R,L,R...). El mòdul wave espera
+    mostres intercalats: escriure tots els L i després tots els R prodüïa un
+    fitxer esbarrat que sonava completament esguerrat."""
+    frames = array.array("h")
     for i in range(N):
         a = max(-1.0, min(1.0, left[i]))
         b = max(-1.0, min(1.0, right[i]))
-        l.append(int(a * 32767))
-        r.append(int(b * 32767))
+        frames.append(int(a * 32767))
+        frames.append(int(b * 32767))
     with wave_open(path) as w:
         w.setnchannels(2)
         w.setsampwidth(2)
         w.setframerate(SR)
-        w.writeframes(l.tobytes() + r.tobytes())
+        w.writeframes(frames.tobytes())
+
+
+def write_wav_mono(path, data):
+    """WAV mono 16 bit (per a la música seca: l'amplada estéreo la crea el
+    filtrat de Haas a la codificació)."""
+    frames = array.array("h")
+    for i in range(N):
+        v = max(-1.0, min(1.0, data[i]))
+        frames.append(int(v * 32767))
+    with wave_open(path) as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(SR)
+        w.writeframes(frames.tobytes())
 
 
 def wave_open(path):
@@ -406,7 +418,7 @@ def main():
     m = max(abs(v) for v in dry) or 1.0
     k = 0.82 / m
     dry = array.array("f", [v * k for v in dry])
-    write_wav(os.path.join(AUDIO, "music_dry.wav"), dry, dry)
+    write_wav_mono(os.path.join(AUDIO, "music_dry.wav"), dry)
 
     # reverberació + EQ + compressió amb ffmpeg
     print("· reverberació i masterització…")
@@ -414,7 +426,7 @@ def main():
     subprocess.run([
         FF, "-y", "-hide_banner", "-loglevel", "error",
         "-i", os.path.join(AUDIO, "music_dry.wav"),
-        "-af", ("aecho=0.88:0.72:37|61|89|131|187:0.42|0.34|0.27|0.21|0.16,"
+        "-af", ("aecho=0.88:0.72:37|61|89|131|187:0.42|0.34|0.27|0.21|0.16,haas=left_delay=9:right_delay=13:side_gain=1.1:level_out=0.95,"
                 "lowpass=f=8200,highpass=f=48,"
                 "equalizer=f=190:t=q:w=1.0:g=-2.0,"
                 "equalizer=f=2400:t=q:w=1.2:g=2.2,"
@@ -429,6 +441,13 @@ def main():
     for seg in timings:
         data, sr = read_wav(seg["file"])
         data = resample(data, sr, SR)
+        # normalització ESTÀTICA (no dinàmica: un normalitzador dinàmic
+        # amplifica el silenci dels extremts i crea soroll al voltant de cada
+        # frase, que es fica per damunt del llit musical).
+        pk = max((abs(v) for v in data), default=0.0)
+        if pk > 0:
+            k = 0.60 / pk
+            data = array.array("f", [v * k for v in data])
         i0 = int(seg["in"] * SR)
         for i, v in enumerate(data):
             if i0 + i >= N:
@@ -440,7 +459,7 @@ def main():
         i0 = int(seg["in"] * SR)
         i1 = min(N, int((seg["in"] + seg["dur"]) * SR))
         ramp = int(0.34 * SR)
-        floor = 0.30
+        floor = 0.25
         for i in range(max(0, i0 - ramp), min(N, i1 + ramp)):
             g = floor
             if i < i0:
@@ -452,20 +471,28 @@ def main():
 
     music, _ = read_wav(wet)
     music = resample(music, SR, SR)
+    # pseudo-estéreo de Haas: la música (mono) s'obre amb un retard curt en un
+    # canal; el senal «mid» (L+R) queda intacte i la veu, al centre.
+    D = int(0.016 * SR)
     fl = buf()
     fr = buf()
     for i in range(N):
         mval = music[i] if i < len(music) else 0.0
-        fl[i] = mval * gain[i] * 0.78 + voice[i] * 1.05
-        fr[i] = mval * gain[i] * 0.78 + voice[i] * 1.05
+        prev = music[i - D] if i >= D else 0.0
+        mid = mval * gain[i] * 0.87
+        side = (mval - prev) * 0.09 * gain[i]
+        fl[i] = mid + side + voice[i] * 1.30
+        fr[i] = mid - side + voice[i] * 1.30
 
+    # limitador SUAU (tanh): un retall dur deformaria els pics de la veu
     for i in range(N):
         a, b = fl[i], fr[i]
         pk = max(abs(a), abs(b))
-        if pk > 0.97:
-            k = 0.97 / pk
-            fl[i] = a * k
-            fr[i] = b * k
+        if pk > 0.72:
+            a = 0.97 * math.tanh(a / 0.97)
+            b = 0.97 * math.tanh(b / 0.97)
+            fl[i] = a
+            fr[i] = b
 
     write_wav(os.path.join(AUDIO, "mix.wav"), fl, fr)
     print("  →", os.path.join(AUDIO, "mix.wav"))

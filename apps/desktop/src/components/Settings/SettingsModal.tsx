@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { X, Globe, Info, SlidersHorizontal, Plug, RefreshCw, Download, HardDrive } from "lucide-react";
+import { X, Globe, Info, SlidersHorizontal, Plug, RefreshCw, Download, HardDrive, Volume2 } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { useT } from "../../i18n";
 import { useUIStore } from "../../stores/uiStore";
 import { useUpdateStore } from "../../stores/updateStore";
+import { FUN_PREVIEW } from "../../utils/funCursors";
+import { playFunDone } from "../../utils/funSound";
 import LanguagePanel from "../Language/LanguagePanel";
 import IntegrationsPanel from "./IntegrationsPanel";
 import PortablePanel from "./PortablePanel";
@@ -73,6 +75,10 @@ export default function SettingsModal() {
   const setZoom = useUIStore((s) => s.setZoom);
   const theme = useUIStore((s) => s.theme);
   const setTheme = useUIStore((s) => s.setTheme);
+  const funCursor = useUIStore((s) => s.funCursor);
+  const setFunCursor = useUIStore((s) => s.setFunCursor);
+  const funSound = useUIStore((s) => s.funSound);
+  const setFunSound = useUIStore((s) => s.setFunSound);
   const { t } = useT();
   const [tab, setTab] = useState<Tab>("general");
   // Versió real de l'app (tauri.conf.json): ja no cal tocar-la en cada bump.
@@ -197,6 +203,40 @@ export default function SettingsModal() {
                       {th.label}
                     </button>
                   ))}
+                </div>
+              </div>
+
+              {/* Diversió: cursor disfressat + so de tasca acabada. Les
+                  miniatures mostren les disfresses reals (SVG de 32 px). */}
+              <div className="setting-row setting-row-col">
+                <span>{t("settings.funSection")}</span>
+                <label className="setting-check">
+                  <input
+                    type="checkbox"
+                    checked={funCursor}
+                    onChange={(e) => setFunCursor(e.target.checked)}
+                  />
+                  {t("settings.funCursor")}
+                </label>
+                <div className="lp-hint">{t("settings.funCursorHint")}</div>
+                <div className="fun-preview">
+                  {FUN_PREVIEW.map((c) => (
+                    <img key={c.name} src={c.img} alt={c.name} title={c.name} />
+                  ))}
+                </div>
+                <label className="setting-check">
+                  <input
+                    type="checkbox"
+                    checked={funSound}
+                    onChange={(e) => setFunSound(e.target.checked)}
+                  />
+                  {t("settings.funSound")}
+                </label>
+                <div className="lp-hint">{t("settings.funSoundHint")}</div>
+                <div>
+                  <button className="btn sm" onClick={() => playFunDone(true)}>
+                    <Volume2 size={12} /> {t("settings.funSoundTest")}
+                  </button>
                 </div>
               </div>
             </div>

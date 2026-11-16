@@ -353,7 +353,10 @@ export const useAIStore = create<AIState>((set, get) => ({
         invoke<LoadedModel[]>("ollama_loaded_models"),
         invoke<string>("ollama_get_keep_alive"),
       ]);
-      set({ loaded: loaded ?? [], keepAlive: keepAlive ?? "" });
+      // «1m» és el recomanat intern: la UI el presenta com l'opció per
+      // defecte (valor buit) perquè no hi hagi dues entrades idèntiques
+      // al selector del gestor de models.
+      set({ loaded: loaded ?? [], keepAlive: keepAlive === "1m" ? "" : (keepAlive ?? "") });
     } catch {
       set({ loaded: [] });
     }

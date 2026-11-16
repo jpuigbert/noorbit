@@ -1,6 +1,6 @@
-# NoOrbit · Guió del spot (53 s)
+# NoOrbit · Guió del spot (65 s)
 
-**Durada:** 53 s · **Formats:** 1920×1080 (16:9) i 1080×1920 (9:16)
+**Durada:** 65 s · **Formats:** 1920×1080 (16:9) i 1080×1920 (9:16)
 **Idioma:** català · **Veus:** Montse (ca-ES) — dos tons per als dos personatges
 **Lloc:** `themes.thepuigberts.com` — el marketplace de temes WordPress
 **Marca:** NoOrbit — IDE d'escriptori amb agent IA local (MIT)
@@ -60,16 +60,21 @@ SVG per a aquest anunci.
 | **1** | **0:00–0:05.6** | **ÀNCOR** | Fons negre. Neix un nucli de llum amb dos anells orbitals. A sota, tres línies que s'escriuen soles. | *Pip:* «Cada disseny comença amb una carpeta buida.» |
 | **2** | **0:05.3–0:10.9** | **FRICCIÓ** | Finestres en desordre es desenfocuen al fons (xats, Figma, Notes.txt). Al davant, una carpeta `tema-ceramica` amb sis `.md` i cap codi. Un segell puntejat hi cau. | *Pip:* «Vint finestres obertes i cap línia de codi.» |
 | **3** | **0:10.6–0:14.0** | **REVELACIÓ** | Un flaix violeta. El logotip **NoOrbit** apareix. I en sortir de la icona, **Orbi salta** al costat i diu el seu nom. | *Orbi:* «NoOrbit!» |
-| **4** | **0:13.5–0:16.6** | **ELS PERSONATGES** | Pip i Orbi en un decorat violeta fosc. Pip avança, rep el focus, línies de velocitat d'anime al darrere. La bombolla s'escriu sincronitzada amb la veu. | *Pip:* «Li pots dir exactament què vols fer.» |
-| **5** | **0:17.0–0:19.8** | | Ara parla Orbi: creix, avança, brillants al voltant. | *Orbi:* «I jo escric el codi. Fitxer a fitxer!» |
-| **6** | **0:20.8–0:22.5** | | Torna Pip. | *Pip:* «I quan la memòria s'acaba?» |
-| **7** | **0:23.4–0:26.5** | **EL MOMENT CLAU** | Orbi, content: explica la compactació. Els dos celebren amb els braços amunt. | *Orbi:* «Condenso el context i continuo! De debò!» |
-| **8** | **0:27.9–0:29.9** | | Pip, desconfiada. | *Pip:* «I el codi surt del meu ordinador?» |
-| **9** | **0:31.1–0:34.9** | | Orbi, segur. | *Orbi:* «Amb un model local, no! Res surt de la teua màquina.» |
-| **10** | **0:35.4–0:43.8** | **LA DEMO** | La finestra de NoOrbit puja. La petició s'escriu sola a la dreta, l'IA contesta, el codi PHP apareix caràcter a caràcter i l'arbre de fitxers es pobla amb els ✓ verds. Cap a 0:41, la barra de **Context** arriba al 100 %, flixeja i es compacta a verd. Un *toast* ho confirma i **continuen apareixent fitxers**. | *Pip (narració):* «De la idea al tema publicat, tot en una sola finestra.» |
-| **11** | **0:43.6–0:46.7** | **PUBLICACIÓ** | El botó «Pujar tema…» s'encén, s'obre el modal real de NoOrbit (3 passos), es prem «Publica el tema» i apareix **«✓ Tema publicat»**. | *Pip:* «Fes-lo, revisa'l i puja'l.» |
-| **12** | **0:46.9–0:49.3** | **LA PROVA** | El modal es fon en un navegador real a **themes.thepuigberts.com** (captura autèntica). Entra una fitxa nova marcada «Nou», amb el tema i el preu. | *Orbi:* «Al marketplace!» |
-| **13** | **0:49.3–0:53.0** | **CRIDA** | Fons net. Logotip, lema, **URL en daurat** amb ratllat que es dibuixa, quatre xips de confiança. Pip i Orbi saluden al costat. | *Pip:* «Trobaràs el teu tema a themes dot thepuigberts dot com.» |
+| **4** | **0:13.9–0:16.6** | **ELS PERSONATGES** | Pip i Orbi en un decorat violeta fosc. Pip avança, rep el focus, línies de velocitat d'anime al darrere. La bombolla s'escriu sincronitzada amb la veu. | *Pip:* «Li pots dir exactament què vols fer.» |
+| **5** | **0:18.6–0:21.4** | | Ara parla Orbi: creix, avança, brillants al voltant. | *Orbi:* «I jo escric el codi. Fitxer a fitxer!» |
+| **6** | **0:23.8–0:25.5** | | Torna Pip. | *Pip:* «I quan la memòria s'acaba?» |
+| **7** | **0:27.6–0:30.6** | **EL MOMENT CLAU** | Orbi explica la compactació. Els dos celebren amb els braços amunt. | *Orbi:* «Condenso el context i continuo! De debò!» |
+| **8** | **0:33.4–0:35.4** | | Pip, desconfiada. | *Pip:* «I el codi surt del meu ordinador?» |
+| **9** | **0:37.8–0:41.6** | | Orbi, segur. | *Orbi:* «Amb un model local, no! Res surt de la teua màquina.» |
+| **10** | **0:42.2–0:53.4** | **LA DEMO** | La finestra de NoOrbit puja. La petició s'escriu sola a la dreta, l'IA contesta, el codi PHP apareix caràcter a caràcter i l'arbre de fitxers es pobla amb els ✓ verds. Cap a 0:47.9, la barra de **Context** arriba al 100 %, flixeja i es compacta a verd. Un *toast* ho confirma i **continuen apareixent fitxers**. | *Pip (narració):* «De la idea al tema publicat, tot en una sola finestra.» (0:44.6–0:48.4) |
+| **11** | **0:51.1–0:56.6** | **PUBLICACIÓ** | El botó «Pujar tema…» s'encén, s'obre el modal real de NoOrbit (3 passos), es prem «Publica el tema» i apareix **«✓ Tema publicat»**. | *Pip:* «Fes-lo, revisa'l i puja'l.» (0:52.2–0:54.4) |
+| **12** | **0:56.5–1:00.0** | **LA PROVA** | El modal es fon en un navegador real a **themes.thepuigberts.com** (captura autèntica). Entra una fitxa nova marcada «Nou», amb el tema i el preu. | *Orbi:* «Al marketplace!» (0:57.2–0:58.4) |
+| **13** | **0:59.9–1:05.0** | **CRIDA** | Fons net. Logotip, lema, **URL en daurat** amb ratllat que es dibuixa, quatre xips de confiança. Pip i Orbi saluden al costat. | *Pip:* «Trobaràs el teu tema a themes dot thepuigberts dot com.» (1:00.2–1:03.6) |
+
+**Per què 65 s i no 30:** el relat el porten dos personatges conversant, i una
+conversa atropellada no s'entén. Entre frase i frase hi ha **2,0–2,8 s de silenci**
+i, a la demo, **3,8 s** on la veu calla i la pantalla treballa sola. La música
+també hi té el seu propi espai (vegeu `DISSENY.md`, §6).
 
 ---
 
@@ -100,7 +105,7 @@ parafrasejar): el vídeo es veu completament en silenci. Textos addicionals:
   captura del marketplace és autèntica.
 - **El «tema» del vídeo és una ficció comercial** (`atelier Ceràmica`, 49 €) que
   il·lustra el fluxe.
-- **Durada de la veu:** 51,5 s de 53 — els darrers 1,5 s són per al cartell final,
+- **Durada de la veu:** 63,6 s de 65 — els darrers 1,4 s són per al cartell final,
   en silenci, amb la música resolent.
 - **Per a un retall de 30 s** es pot fer servir el mateix guió amb els temps comprimits:
   el guió i el disseny estan separats per això (vegeu `build/vo.json` i el

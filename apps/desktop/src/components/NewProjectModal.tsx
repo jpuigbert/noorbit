@@ -18,7 +18,7 @@ export default function NewProjectModal() {
   const setShow = useUIStore((s) => s.setShowNewProject);
   const setShowWp = useUIStore((s) => s.setShowWpTheme);
   const { t } = useT();
-  const [tab, setTab] = useState<"project" | "wp">("project");
+  const [tab, setTab] = useState<"project" | "wp" | "gamestudios">("project");
   const [name, setName] = useState("");
   const [parent, setParent] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +57,24 @@ export default function NewProjectModal() {
     }
   };
 
+  const createGameStudios = async () => {
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const path = await invoke<string>("clone_game_studios", {
+        name: name.trim(),
+        parent: parent.trim() ? parent.trim() : null,
+      });
+      await useWorkspaceStore.getState().openWorkspace(path);
+      close();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="modal-overlay" onClick={close}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -82,6 +100,12 @@ export default function NewProjectModal() {
             onClick={() => setTab("wp")}
           >
             <Palette size={14} /> {t("newProject.tabWpTheme")}
+          </button>
+          <button
+            className={"pm-tab" + (tab === "gamestudios" ? " active" : "")}
+            onClick={() => setTab("gamestudios")}
+          >
+            <FolderPlus size={14} /> {t("newProject.tabGameStudios")}
           </button>
         </div>
         <div className="modal-body">
@@ -147,6 +171,53 @@ export default function NewProjectModal() {
                   }}
                 >
                   <Palette size={13} /> {t("newProject.openWpTheme")}
+                </button>
+              </div>
+            </>
+          )}
+
+          {tab === "gamestudios" && (
+            <>
+              <p className="lp-hint">{t("newProject.gsHint")}</p>
+              <ul className="lp-list">
+                <li>{t("newProject.gsStep1")}</li>
+                <li>{t("newProject.gsStep2")}</li>
+                <li>{t("newProject.gsStep3")}</li>
+              </ul>
+              <div className="field">
+                <label>{t("newProject.name")}</label>
+                <input
+                  placeholder={t("newProject.namePh")}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && createGameStudios()}
+                />
+              </div>
+              <div className="field">
+                <label>{t("newProject.parent")}</label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    style={{ flex: 1 }}
+                    placeholder={t("newProject.parentPh")}
+                    value={parent}
+                    onChange={(e) => setParent(e.target.value)}
+                  />
+                  <button className="btn sm" onClick={() => void browse()}>
+                    <Folder size={12} /> {t("common.browse")}
+                  </button>
+                </div>
+              </div>
+              {error && <div className="si-error">{error}</div>}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+                <button className="btn" onClick={close}>
+                  {t("common.cancel")}
+                </button>
+                <button
+                  className="btn primary"
+                  disabled={!name.trim() || busy}
+                  onClick={() => void createGameStudios()}
+                >
+                  <FolderPlus size={13} /> {t("newProject.createGs")}
                 </button>
               </div>
             </>

@@ -83,6 +83,8 @@
     "nextMatch": "Següent coincidència",
     "prevMatch": "Coincidència anterior",
     "toggleTerminal": "Terminal integrat",
+    "detachTerminal": "Terminal en finestra separada",
+    "detachChat": "Xat en finestra separada",
     "gitPanel": "Control de canvis (Git)",
     "wordWrap": "Alterna l'ajust de línia",
     "minimap": "Mostra/Amaga el minimapa",
@@ -114,7 +116,11 @@
     "vscodeImport": "Importa extensions de VS Code…",
     "vscodeExtensions": "Extensions de VS Code…",
     "zip": "Zip",
-    "zipWpTheme": "Empaqueta tema WordPress…"
+    "zipWpTheme": "Empaqueta tema WordPress…",
+    "gameStudios": "Game Studios (jocs)",
+    "cloneGameStudios": "Clona la plantilla Game Studios",
+    "jam": "Jam autònom (agent en segon pla)",
+    "projectWork": "Treball autopilotat (qualsevol projecte)…"
   },
   "startup": {
     "title": "Benvingut a NoOrbit",
@@ -155,7 +161,13 @@
     "wpStep1": "Expliques què vols crear (el tema, com ha de ser, quines funcions ha de tenir).",
     "wpStep2": "Tries la IA: un model local (Ollama) o una IA en línia amb clau API — fins i tot la pots baixar o configurar allà mateix.",
     "wpStep3": "La IA crea el tema fitxer a fitxer i NoOrbit obre la carpeta perquè hi treballis.",
-    "openWpTheme": "Crea el tema amb la IA"
+    "openWpTheme": "Crea el tema amb la IA",
+    "tabGameStudios": "Game Studios",
+    "gsHint": "Clona la plantilla «Claude Code Game Studios» (joc de navegador a partir d'una idea) i l'obre com a projecte.",
+    "gsStep1": "Es clona el repositori (sense .git) a la carpeta triada.",
+    "gsStep2": "Obre el projecte i tria la IA a l'Agent.",
+    "gsStep3": "Escriu /prototype <idea> per començar.",
+    "createGs": "Clona i obre"
   },
   "sidebar": {
     "title": "Projecte",
@@ -222,7 +234,8 @@
     "errGit": "Error al panell de Git",
     "errProblems": "Error al panell de problemes",
     "errConsole": "Error a la consola",
-    "previewFrame": "Vista prèvia"
+    "previewFrame": "Vista prèvia",
+    "errJam": "Error al panell Jam"
   },
   "problems": {
     "none": "Cap problema detectat",
@@ -339,7 +352,49 @@
     "back": "Enrere",
     "emptyIdea": "Explica primer què vols crear (i el nom del tema).",
     "noAi": "Tria una IA abans de continuar: un model local o una IA en línia amb clau.",
-    "credit": "Fet per"
+    "credit": "Fet per",
+    "workLabel": "Temps de treball extra (millora autopilotada)",
+    "workNone": "Només crear el tema",
+    "workHint": "La IA treballarà aquest temps buscant millores i bugs del tema i implementant tot el que se li acudeixi: rendiment, accessibilitat, SEO, seguretat i noves funcionalitats. Ho fa tot sol, sense que toqueu el PC.",
+    "workStart": "Comença la millora",
+    "workStarting": "Començant la millora autopilotada…",
+    "workStop": "Atura la millora",
+    "workPass": "Passada",
+    "workFiles": "fitxers millorats"
+  },
+  "work": {
+    "elapsed": "Transcorregut",
+    "remaining": "Restant",
+    "finish": "Fin estimada",
+    "calculating": "calculant…",
+    "custom": "Personalitzat…",
+    "customTime": "Temps personalitzat",
+    "unit": "Unitat",
+    "unitMin": "minuts",
+    "unitH": "hores",
+    "unitD": "dies",
+    "customHint": "Tria el temps exacte: mínim 1 minut, màxim 7 dies."
+  },
+  "projectWork": {
+    "title": "Treball autopilotat en qualsevol projecte",
+    "intro": "Tria un projecte existent i un temps de treball. La IA hi buscarà millores i bugs i implementarà tot el que se li acudeixi, sola: cerca informació a internet sense obrir finestres ni demanar permís. No has de tocar el PC per a res.",
+    "dir": "Carpeta del projecte",
+    "dirPh": "Tria la carpeta del projecte…",
+    "pickDir": "Tria la carpeta del projecte",
+    "idea": "Què vols que la IA hi faci?",
+    "ideaPh": "Ex.: millora el rendiment i afegeix tests; o acaba la funcionalitat de login…",
+    "ideaHint": "Descriu l'objectiu: la IA hi treballarà durant tot el temps triat, passada a passada.",
+    "ai": "IA",
+    "aiNone": "No hi ha cap IA configurada. Afegeix un model local o un proveïdor amb clau a Ajustos → IA.",
+    "time": "Temps de treball",
+    "timeHint": "La IA omple aquest temps millorant el projecte (mínim 1 minut, màxim 7 dies).",
+    "start": "Comença el treball autopilotat",
+    "started": "Treball autopilotat en marxa: la IA millora el projecte sola.",
+    "stop": "Atura el treball",
+    "close": "Tanca",
+    "errDir": "Tria primer la carpeta del projecte.",
+    "errIdea": "Explica què vols que la IA faci en el projecte.",
+    "errAi": "Tria una IA abans de continuar."
   },
   "publish": {
     "title": "Pujar tema a themes.thepuigberts.com",
@@ -475,6 +530,10 @@
     "unreal": "Unreal",
     "ai": "IA",
     "ram": "RAM",
+    "funSoundOn": "So de tasca acabada ACTIU: fes clic per silenciar-lo",
+    "funSoundOff": "So de tasca acabada SILENCIAT: fes clic per activar-lo",
+    "funCursorOn": "Cursor divertit ACTIU: fes clic per tornar al cursor normal",
+    "funCursorOff": "Cursor normal: fes clic per activar el cursor divertit",
     "line": "Línia",
     "column": "Columna",
     "bgTasksTitle": "Tasques que han passat a segon pla",
@@ -540,6 +599,15 @@
     "scaffoldHint": "La IA genera tots els fitxers del projecte i els escriu (creant carpetes) a la carpeta oberta. Cal tenir un projecte obert.",
     "materialize": "Crear fitxers d'aquest missatge",
     "materializeHint": "Agafa el codi d'aquest missatge (blocs ``` o fitxers @file:) i escriu-los com a fitxers reals a la carpeta oberta, sense tornar a preguntar a la IA.",
+    "applyFile": "Crea al projecte",
+    "applyFileHint": "Escriu aquest fitxer a la carpeta oberta del projecte, sense tornar a preguntar a la IA.",
+    "applyFileDone": "Creat",
+    "expandCode": "Desplega {n} línies més",
+    "collapseCode": "Plega el codi",
+    "dirNew": "carpeta nova",
+    "dirNewHint": "Carpeta que la IA vol crear al projecte",
+    "delPath": "esborrar",
+    "delPathHint": "Ruta que la IA vol esborrar del projecte",
     "structBtn": "Crear carpetes i fitxers a mà…",
     "structHint": "Obre una llista editable amb els fitxers i carpetes que la IA recomana en aquest missatge (encara que només n'hagi parlat en prosa). Pots afegir, treure o reescriure rutes i crear-les al projecte.",
     "structTitle": "Crear carpetes i fitxers a mà",
@@ -814,7 +882,7 @@
     "ramUnloaded": "Alliberats {n} model(s) de la memòria.",
     "keepAliveTitle": "Temps que el model roman carregat",
     "keepAliveHint": "Quant de temps Ollama manté el model a la RAM després de respondre. Un temps curt allibera memòria quan no treballes (a canvi de recarregar-lo al pròxim missatge).",
-    "keepAliveDefault": "Per defecte d'Ollama (5 min)",
+    "keepAliveDefault": "1 minut (recomanat: estalvia RAM en repòs)",
     "keepAliveZero": "Allibera'l de seguida (màxim estalvi de RAM)",
     "cloudEmpty": "Cap model a la biblioteca d'Ollama.",
     "cloudOffline": "Sense accés a ollama.com; es mostra una selecció de models recomanats.",
@@ -923,7 +991,11 @@
     "activate": "Activa manualment (per a servidors locals no cal token)",
     "deactivate": "Desactiva aquest proveïdor",
     "on": "Actiu",
-    "off": "Inactiu"
+    "off": "Inactiu",
+    "native": "Integrada",
+    "nativeHint": "IA nativa integrada al binari de NoOrbit: funciona només instal·lant, sense baixar cap model ni motor de cap altre lloc.",
+    "nativeUrl": "Integrada al binari · sense descàrregues",
+    "nativeNoToken": "— integrada: no cal token ni descàrrega"
   },
   "skills": {
     "title": "Skills i connectors",
@@ -1018,6 +1090,8 @@
     "engineVersion": "Versió del motor",
     "installations": "Instal·lacions detectades",
     "noInstallations": "No s'ha detectat cap instal·lació d'Unreal Engine.",
+    "rcPort": "Port de Remote Control",
+    "rcPortHint": "És el port que fa servir l'editor (per defecte 30010). Si tens més d'un Unreal obert o el port és ocupat, posa aquí el que surti a l'editor (Window ▸ Virtual Production ▸ Remote Control ▸ HTTP) i desa-ho.",
     "python": "Python",
     "runPython": "Executa Python",
     "blueprint": {
@@ -1108,6 +1182,12 @@
     "themeGray": "Gris",
     "themeGreen": "Verd",
     "themeYellow": "Groc",
+    "funSection": "Diversió",
+    "funCursor": "Cursor divertit",
+    "funCursorHint": "El cursor es transforma segons on apuntes: coet per defecte, robot a l'editor, invasor al terminal, àlien al xat, satèl·lit als fitxers, vareta als botons… Cada 5 minuts canvia de disfressa, i si no fas res durant una estona en surten de noves (ànec, pizza, dònut, gat…).",
+    "funSound": "So en acabar una tasca",
+    "funSoundHint": "Un toc alegre quan la IA o una tasca en segon pla acaba (amb confeti!), un pop suau per a cada «@done» de la checklist i un toc greu si alguna cosa falla.",
+    "funSoundTest": "Prova el so",
     "integrations": "Integracions",
     "portable": {
       "tab": "USB",
@@ -1378,5 +1458,36 @@
     "notEnoughSpace": "El model ({need}) no cap en l'espai lliure del disc ({free}). Tria un altre disc o una quantització més petita.",
     "creditMadeBy": "Fet per",
     "creditProject": "Projecte de"
+  },
+  "jam": {
+    "tab": "Jam",
+    "title": "Autonomous Jam",
+    "live": "en marxa",
+    "brief": "Brief (què vols que faci)",
+    "briefPh": "Ex.: un joc de pesca on el peix rar només pica a la posta de sol",
+    "engine": "Motor",
+    "duration": "Durada",
+    "buildCmd": "Ordre de validació (opcional)",
+    "buildCmdPh": "npm run build",
+    "plan": "Fes el pla",
+    "start": "Comença",
+    "stop": "Atura",
+    "report": "Informe",
+    "finished": "Jam acabada",
+    "errBrief": "Escriu el brief de la Jam.",
+    "openReport": "Obre l'informe"
+  },
+  "panel": {
+    "chatTitle": "Xat de NoOrbit",
+    "terminalTitle": "Terminal de NoOrbit",
+    "reattach": "Torna al programa",
+    "reattachHere": "Torna a enganxar el xat",
+    "detachChat": "Obre el xat en una finestra separada",
+    "detachTerminal": "Obre el terminal en una finestra separada",
+    "detachedHint": "El xat és obert en una finestra separada: pots posar-la a qualsevol pantalla i tornar-lo a enganxar quan vulguis.",
+    "errOpen": "No s'ha pogut obrir la finestra separada"
+  },
+  "layout": {
+    "resizeTip": "Arrossega per redimensionar · doble clic: restablir"
   }
 }

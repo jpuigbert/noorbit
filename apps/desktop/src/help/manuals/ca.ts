@@ -231,7 +231,7 @@ export const manual: Manual = {
       items: [
         "Obre Agent ▸ Unreal Engine al panell dret i selecciona el projecte (.uproject) que vols obrir; NoOrbit el cerca automàticament si no el tries.",
         "Connecta amb Unreal: NoOrbit detecta les instal·lacions, parcheja el .uproject amb PythonScriptPlugin + RemoteControl (guardant una còpia .bak), arrenca l'editor amb la Remote Control API activada i s'hi connecta. Un watchdog comprova la connexió cada 5 s.",
-        "Requisits a l'editor: connectors «Python Editor Script Plugin» i «Remote Control». El port per defecte és 30010.",
+        "Requisits a l'editor: connectors «Python Editor Script Plugin» i «Remote Control». El port per defecte és 30010; si el teu editor en fa servir un altre (més d'un Unreal obert o el port ocupat), escriu-lo al camp «Port de Remote Control» del panell i desa-ho: NoOrbit connectarà contra aquest port i també l'injectarà quan arrenca l'editor.",
         "Accions ràpides: crea un BluePrint, genera un actor a l'escena, compila la il·luminació, captura el viewport o empaqueta el joc (RunUAT/BuildCookRun) amb la sortida en directe.",
         "Edita des del text: escriu al xat de l'Agent què vols fer i prem «Aplica a ▸ Unreal». La IA genera un script Python d'Editor Scripting, l'executa a l'editor i corregeix errors en un segon intent.",
         "Exemples: «Engendra un cub a l'origen i posa'l vermell», «Crea un actor de llum a (0,0,500)», «Importa malla.fbx com a asset».",
@@ -362,7 +362,8 @@ export const manual: Manual = {
         "Una descàrrega de Hugging Bay falla o es talla: el fitxer «.part» es descarta si no passa la verificació SHA-256; torna a prémer Baixa i, si vols, tria un disc extern com a destí.",
         "Blender no connecta: verifica que l'add-on estigui actiu i que el port 9876 no estigui ocupat. Prova «Arrenca Blender» des del panell.",
         "L'«Aplica a Blender/Unreal» falla: assegura't que l'aplicació és oberta i connectada; la IA fa un segon intent sol, però si l'escena no existeix no podrà editar-la.",
-        "Unreal no connecta: assegura't que els connectors Python i Remote Control són actius i que el port 30010 és lliure. La primera connexió triga perquè arrenca l'editor; el watchdog reintenta cada 5 s.",
+        "Unreal no connecta: assegura't que els connectors Python i Remote Control són actius i que el port indicat al panell és el que escolta l'editor (per defecte 30010). La primera connexió triga perquè arrenca l'editor; el watchdog reintenta cada 5 s.",
+        "Unreal «no fa res» i sembla que no passa res: mira el resultat de l'script al panell (a la pestanya Python) o al xat; ara NoOrbit recull el print() i el traceback de l'editor. Si surt buit, l'script no s'ha executat: revisa connectors i port.",
         "La vista prèvia no carrega: comprova que la carpeta oberta contingui un index.html o fitxers web. El servidor només serveix fitxers de dins del projecte: les rutes cap a fora es rebutgen.",
         "El terminal no executa o es penja: prem «Atura la comanda» (mata el grup de processos); les comandes tenen temps límit. Torna a obrir el panell amb ⌘J.",
         "Un panell ha desaparegut o mostra un error: cada panell té la seva xarxa de seguretat; la resta de l'app continua. Torna a obrir la pestanya o reinicia NoOrbit; el detall de l'error és a Treball ▸ Consola.",
@@ -425,6 +426,41 @@ export const manual: Manual = {
         "Les lliçons es poden esborrar una a una (icona de paperera) i tot el registre amb «Esborra tot».",
         "«Exporta el dataset» genera un JSONL amb totes les converses en format de xat: és el material per entrenar un model local (LoRA) amb LLaMA-Factory, Unsloth o Axolotl, quan vulguis que la IA local sigui «teva» de debò.",
         "Privacitat: el registre i les lliçons viuen a la carpeta de dades de NoOrbit (a la mateixa carpeta que la configuració) i no s'envien enlloc. Per buidar-ho tot, «Esborra tot».",
+      ],
+    },
+    {
+      title: "Jam autònom (l'agent treballa sol)",
+      intro:
+        "La Jam deixa l'IA desenvolupar el projecte durant hores sense que " +
+        "tinguis la mà al ratolí, i sense que el Mac es pengi.",
+      items: [
+        "Panell d'Agent ▸ pestanya «Jam» (o IA ▸ Jam autònom).",
+        "Escriu el brief (què vols que faci), tria el motor (Godot 4, Blender, Unreal 5, Unity o web) i la durada.",
+        "«Fes el pla» mostra les tasques que la IA ha decidit fer, amb els criteris d'acceptació de cadascuna.",
+        "«Comença» engega el bucle: per cada tasca, la IA escriu codi (blocs «@file:») que es materialitza al projecte, es verifica (amb l'ordre de validació que hagis posat, p. ex. «npm run build») i es commita.",
+        "La IA que fa la feina és **la que tinguis connectada**: Ollama/llama.cpp locals, OpenAI, Claude, Gemini, DeepSeek, GLM, Grok…",
+        "El registre de la dreta mostra cada pas (tarea iniciada, feta o fallada). «Atura» la Jam en qualsevol moment.",
+        "MEMÒRIA: si una tasca consumeix massa, l'agent s'atura, es reintenta amb menys qualitat i la Jam continua. El Mac no es congela.",
+        "Al final es genera un REPORT.md al projecte amb el pla, els resultats i els commits.",
+        "REQUISIT: el projecte ha de ser un repositori git (la Jam fa commits i pot tornar enrere).",
+      ],
+    },
+    {
+      title: "Game Studios (jocs de navegador)",
+      intro:
+        "Plantilla i flux per crear jocs de navegador a partir d'una idea, compatible amb " +
+        "totes les IA connectades a NoOrbit (local o núvol).",
+      items: [
+        "Fitxer ▸ Nou projecte… ▸ pestanya «Game Studios» clona la plantilla i l'obre.",
+        "IA ▸ Game Studios obre el panell amb totes les dreceres (shortcuts) per IA.",
+        "Flux: /prototype <idea> → preguntes → brief (design/game-brief.md) → primer build a prototypes/<nom>/.",
+        "Després: canvis comprovats, compartir, créixer (Vite+TS) amb /create-stories, /dev-story, /story-done, i /cut per acabar.",
+        "IA local (Ollama/llama.cpp): proves ràpides i barates; demana «construeix-lo a mitjà» per a models petits.",
+        "IA al núvol (OpenAI, Claude, Gemini, DeepSeek, Qwen, GLM, Grok…): millor qualitat i velocitat.",
+        "IA de web: panell «IA de web» per consultar IAs web i materialitzar el codi al projecte.",
+        "Imatges: ComfyUI local o via API; nudge «IMG|» si la IA respon amb prosa.",
+        "3D: per a models 3D usa els panells Blender / Unreal.",
+        "Repo original: https://github.com/donchitos/claude-code-game-studios",
       ],
     },
   ],

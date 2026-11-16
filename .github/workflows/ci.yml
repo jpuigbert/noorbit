@@ -11,6 +11,14 @@ name: CI
 #     lògica pura (Vitest) + detector de selectors zustand inestables
 #     (el patró que ja ha causat DOS cops la pantalla en blanc, React #185).
 #   • backend: cargo check + cargo test (Linux, mateixes deps que release).
+#   • crates/: el workspace de la Autonomous Jam (guardian, jam, planner,
+#     git, persistence…). Són 100 tests purs i NO es compilaven mai a CI:
+#     un canvi a `noorbit-jam` trencava l'app sense que ningú ho veiés.
+#
+# `cargo check --all-targets`, no `cargo check`: el codi `#[cfg(test)]` del
+# backend (els tests dels mòduls) NO es valida amb el check pla, i així és com
+# un nom de funció amb espais va poder quedar-se al repo sense que la CI el
+# veiés (la llibreria sencera era incapaç de compilar els seus tests).
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -97,10 +105,42 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri
 
-      - name: cargo check
+      - name: cargo check (tots els targets, incloent-hi els tests)
         working-directory: apps/desktop/src-tauri
-        run: cargo check
+        run: cargo check --all-targets
 
       - name: cargo test (lògica pura)
         working-directory: apps/desktop/src-tauri
         run: cargo test --lib
+
+  # ── Workspace de crates de la Jam: 100 tests purs, sense Tauri ───────────
+  crates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates
+
+      # Alguns tests fan servir git de veritat (`git init`, commits,
+      # `git clean`): sense autor configurat, `git commit` fallaria a la
+      # runner (cap entorn hi posa un valor per defecte).
+      - name: Configura git per als tests
+        run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@noorbit.local"
+          git config --global init.defaultBranch main
+
+      - name: cargo check --workspace --all-targets
+        working-directory: crates
+        run: cargo check --workspace --all-targets
+
+      - name: cargo test --workspace
+        working-directory: crates
+        run: cargo test --workspace

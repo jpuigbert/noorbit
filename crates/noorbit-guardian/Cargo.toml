@@ -1,0 +1,16 @@
+[package]
+name = "noorbit-guardian"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+tokio-util = "0.7"
+libc = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

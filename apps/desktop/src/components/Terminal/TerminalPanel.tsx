@@ -1,19 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { ChevronDown, Eraser, Square, Terminal as TerminalIcon } from "lucide-react";
+import { ChevronDown, Eraser, ExternalLink, Square, Terminal as TerminalIcon } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useT } from "../../i18n";
 import { useUIStore } from "../../stores/uiStore";
 import { useTerminalStore, currentCallId } from "../../stores/terminalStore";
 import { toastError } from "../../stores/toastStore";
+import { closePanelWindow, detachTerminal, TERM_LABEL } from "../../windowing";
 
 /// Terminal integrat (panell inferior, com VS Code). Executa comandes dins
 /// la carpeta del projecte obert i mostra la sortida mentre va arribant.
 /// ⌘J l'obre/tanca; ↑/↓ naveguen l'historial.
-export default function TerminalPanel() {
+/// Amb «detached» viu en una FINESTRA SEPARADA (per posar-lo a una altra
+/// pantalla): sempre obert, omple la finestra i el botó de tancar el torna
+/// al programa principal.
+export default function TerminalPanel({ detached = false }: { detached?: boolean }) {
   const { t } = useT();
-  const open = useUIStore((s) => s.terminalOpen);
+  const openStore = useUIStore((s) => s.terminalOpen);
   const setOpen = useUIStore((s) => s.setTerminalOpen);
+  const open = detached || openStore;
   const { lines, running, history, run, clear } = useTerminalStore(
     useShallow((st) => ({
       lines: st.lines,
@@ -72,13 +77,27 @@ export default function TerminalPanel() {
   };
 
   return (
-    <div className="terminal-panel">
+    <div
+      className="terminal-panel"
+      /* En finestra separada omple la finestra (la mida la dona l'usuari
+         movent la finestra, no la nansa del panell inferior). */
+      style={detached ? { height: "100%", minHeight: 0 } : undefined}
+    >
       <div className="terminal-head">
         <span className="terminal-title">
           <TerminalIcon size={12} /> {t("terminal.title")}
           {running && <span className="terminal-running">{t("terminal.running")}</span>}
         </span>
         <div className="terminal-tools">
+          {!detached && (
+            <button
+              className="btn sm"
+              onClick={() => void detachTerminal()}
+              title={t("panel.detachTerminal")}
+            >
+              <ExternalLink size={12} />
+            </button>
+          )}
           {running && (
             <button
               className="btn sm"
@@ -98,8 +117,12 @@ export default function TerminalPanel() {
           </button>
           <button
             className="btn sm"
-            onClick={() => setOpen(false)}
-            title={t("terminal.close")}
+            onClick={() => {
+              // En finestra separada, tancar = tornar al programa principal.
+              if (detached) void closePanelWindow(TERM_LABEL);
+              else setOpen(false);
+            }}
+            title={detached ? t("panel.reattach") : t("terminal.close")}
           >
             <ChevronDown size={12} />
           </button>

@@ -70,6 +70,17 @@ en viu (bloqueja Blender): NoOrbit renderitza headless i dona la ruta .mp4.
 amb scene.sequence_editor_create() + sequences.new_sound; la veu parlada es
 fa amb el TTS del sistema (macOS «say», Linux «espeak-ng», Windows SAPI) i
 la boca es pot animar amb keyframes aleatoris mentre sona la veu.
+- «RUN|UNREAL|» SEMPRE és codi Python de l'Editor Scripting d'Unreal 5: comença per «import unreal» i acaba amb un print() en català amb el que has fet. POT ocupar varies línies: escriu l'script sencer a sota de la directriu (o dins d'un bloc ```python), sense prosa al voltant. Exemple:
+RUN|UNREAL|
+import unreal
+actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors()
+print('Actors a l'escena: %d' % len(actors))
+MAI hi posis una frase en llenguatge natural.
+- Usa l'API ACTUAL d'Unreal 5 (les deprecades NO fan res i la resposta HTTP no avisa'n pas): «unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)» (get_editor_world, build_light_maps), «unreal.get_editor_subsystem(unreal.EditorActorSubsystem)» (get_all_level_actors, spawn_actor_from_class, destroy_actor, get_actor_reference), «unreal.get_editor_subsystem(unreal.EditorAssetSubsystem)» (save_loaded_asset amb l'Object i list_assets) i «unreal.AssetToolsHelpers.get_asset_tools().import_assets_automated(unreal.AutomatedAssetImportData(...))» per importar FBX/GLB. Per MOURE un actor usa el seu mètode: «actor.set_actor_location(unreal.Vector(x, y, z), False, True)». NO usis «EditorLevelLibrary» ni «EditorAssetLibrary»: estan deprecades.
+- Per crear o moure actors fan falta RUTES REALS («/Script/Engine.StaticMeshActor», «/Game/Personatge/BP_Jugador»). Si no les saps, primer emet un «RUN|UNREAL|» que LLISTI el que hi ha (level_actors, assets d'una carpeta) i després actua amb les rutes que has vist: endevinar-les dona un error silenciós.
+- Un text/títol visible a la pantalla es pot fer amb un actor «TextRenderActor» (spawn_actor_from_class + set the text on the TextRender component); un UWidget de HUD no es pot muntar sencer des de script.
+- Les accions llargues (build d'il·luminació, importació massiva, compile de blueprint) poden trigar minuts: NoOrbit espera la resposta de l'editor i et torna la sortida o el traceback.
+- Amb Unreal, mai diguis «fet» sense haver vist la sortida del print() al missatge «RUN|RESULTAT| UNREAL|»: la resposta HTTP no conté mai el que ha fet l'script.
 - Una directriu per torn; llegix «RUN|RESULTAT|…» abans del pas següent. Si \
 falla: corregeix amb @file: i torna a executar; mai no declare èxit sense \
 haver vist eixir=0.\n\
@@ -864,56 +875,147 @@ frase en llenguatge natural.",
                 }
             }
             RunAction::Unreal(arg) => {
-                use crate::unreal::{client::UnrealClient, launcher};
+                use crate::unreal::{client::UnrealClient, launcher, python};
                 progress(app, &format!("Unreal: {}", clip(arg, 80)), true);
-                let client = UnrealClient::new();
-                if client.ping().await.unwrap_or(false) {
-                    match client.execute_python(arg).await {
-                        Ok(v) => format!(
-                            "RUN|RESULTAT| UNREAL| eixit=0 — {}",
-                            clip(&v.to_string(), 1500)
+                // .py del projecte o codi literal (com a Blender): la IA pot
+                // escriure l'script dins del projecte i executar-lo després.
+                let code = match (&root, arg.trim().ends_with(".py")) {
+                    (Some(r), true) => {
+                        let rel = arg.trim().replace('\\', "/");
+                        let rel = rel.trim_start_matches("./").to_string();
+                        std::fs::read_to_string(r.join(&rel)).unwrap_or_else(|_| arg.clone())
+                    }
+                    _ => arg.clone(),
+                };
+                // Guarda: mai enviem a l'editor text que no sigui Python. Abans
+                // una frase en prosa arribava a l'interpretador d'Unreal i la
+                // resposta HTTP no deia res d'error: la IA afirmava «fet» sense
+                // que hagués canviat res a l'escena.
+                if let Err(e) = crate::unreal::guard_python(&code) {
+                    progress(
+                        app,
+                        "Unreal: el model ha enviat una descripció; l'agent d'Unreal hi posa el codi…",
+                        true,
+                    );
+                    let desc = code.trim().to_string();
+                    let task = if user_prompt.trim().is_empty() {
+                        desc.clone()
+                    } else {
+                        format!("{}\n\n{}\n", user_prompt.trim(), desc)
+                    };
+                    let orch =
+                        crate::agent::AgentOrchestrator::new(crate::agent::AgentConfig::default());
+                    let config = crate::unreal::commands::UnrealConfig::default();
+                    match orch.apply_unreal(ai, app, &task, &config).await {
+                        Ok((msg, ok)) => format!(
+                            "RUN|RESULTAT| UNREAL| {} {}",
+                            if ok { "eixit=0 —" } else { "sense aplicar:" },
+                            clip(&msg, 1800)
                         ),
-                        Err(e) => format!("RUN|RESULTAT| UNREAL| error Python: {}", e),
+                        Err(e2) => format!(
+                            "RUN|RESULTAT| UNREAL| NO EXECUTADA: {} L'agent d'Unreal \
+tampoc ho ha pogut aplicar ({}). Torna a emetre «RUN|UNREAL|» amb l'script \
+Python REAL (comença per «import unreal» i acaba amb un print()), no amb una \
+frase en llenguatge natural.",
+                            e, e2
+                        ),
                     }
                 } else {
-                    // Escaneig del disc (pot trigar): en un fil a part.
-                    let engines =
-                        tauri::async_runtime::spawn_blocking(launcher::detect_engine_installations)
-                            .await
-                            .unwrap_or_default();
-                    let uproject = root.as_ref().and_then(|r| find_uproject(r));
-                    if engines.is_empty() {
-                        "RUN|RESULTAT| UNREAL| Unreal Engine no està instal·lat. Obri \
-                         l'editor amb un projecte i activa Remote Control (port 30010)."
-                            .to_string()
-                    } else if uproject.is_none() {
-                        "RUN|RESULTAT| UNREAL| l'editor no respon al port 30010 i no hi \
-                         ha cap .uproject al projecte obert per connectar-s'hi. Obri \
-                         Unreal amb el projecte o indica la ruta.".to_string()
+                    // Models locals: sovint obliden la importació (inocu si ja hi és).
+                    let code = if !code.contains("import unreal") && !code.contains("from unreal")
+                    {
+                        format!("import unreal\n{}", code)
                     } else {
-                        let proj = uproject.unwrap();
-                        match launcher::auto_connect(&proj, 90).await {
-                            Ok(_) => {
-                                let c2 = UnrealClient::new();
-                                if c2.ping().await.unwrap_or(false) {
-                                    match c2.execute_python(arg).await {
-                                        Ok(v) => format!(
-                                            "RUN|RESULTAT| UNREAL| connectat — {}",
-                                            clip(&v.to_string(), 1500)
-                                        ),
-                                        Err(e) => {
-                                            format!("RUN|RESULTAT| UNREAL| error Python: {}", e)
-                                        }
+                        code
+                    };
+                    // UnrealClient::new() ja fa servir el port configurat
+                    // (`unreal.rc_port`), no sempre el 30010 fixe.
+                    let client = UnrealClient::new();
+                    let mut editor = client.ping().await.unwrap_or(false);
+                    if !editor {
+                        // Escaneig del disc (pot trigar): en un fil a part.
+                        let engines = tauri::async_runtime::spawn_blocking(
+                            launcher::detect_engine_installations,
+                        )
+                        .await
+                        .unwrap_or_default();
+                        let uproject = root.as_ref().and_then(|r| find_uproject(r));
+                        if engines.is_empty() {
+                            return format!(
+                                "RUN|RESULTAT| UNREAL| Unreal Engine no està instal·lat. \
+Obre l'editor amb un projecte i activa «Window → Virtual Production → Remote \
+Control» (port {}).",
+                                client.port()
+                            );
+                        }
+                        match uproject {
+                            None => {
+                                return format!(
+                                    "RUN|RESULTAT| UNREAL| l'editor no respon al port {} i \
+no hi ha cap .uproject al projecte obert per connectar-s'hi. Obre Unreal amb \
+el projecte o indica'n la ruta.",
+                                    client.port()
+                                )
+                            }
+                            Some(proj) => {
+                                progress(app, "Unreal: arrencant l'editor amb el projecte…", true);
+                                match launcher::auto_connect(&proj, 90).await {
+                                    Ok(_) => editor = client.ping().await.unwrap_or(false),
+                                    Err(e) => {
+                                        return format!(
+                                            "RUN|RESULTAT| UNREAL| no s'ha pogut connectar: {}",
+                                            e
+                                        )
                                     }
-                                } else {
-                                    "RUN|RESULTAT| UNREAL| he arrencat l'editor però \
-                                     Remote Control no respon encara; torna a provar-ho \
-                                     en uns segons.".to_string()
                                 }
                             }
-                            Err(e) => {
-                                format!("RUN|RESULTAT| UNREAL| no s'ha pogut connectar: {}", e)
+                        }
+                    }
+                    if !editor {
+                        return "RUN|RESULTAT| UNREAL| he arrencat l'editor però Remote \
+Control no respon encara; torna a provar-ho en uns segons."
+                            .to_string();
+                    }
+                    // Execució amb captura REAL de sortida i traceback (fitxer
+                    // temporal compartit): la resposta HTTP d'Unreal no en porta
+                    // mai, així que sense això l'agent no sap què ha passat.
+                    match python::run_script(&client, &code).await {
+                        Ok(res) if res.success => {
+                            progress(app, "Unreal: canvis aplicats", true);
+                            let out = res.output.join("\n");
+                            let mut s = String::from("RUN|RESULTAT| UNREAL| eixit=0 — sortida de l'editor:\n");
+                            if out.trim().is_empty() {
+                                s.push_str(" (cap sortida: l'script no ha imprès res; \
+                          afegeix-hi un print() per verificar el que ha fet)");
+                            } else {
+                                s.push_str(&clip(out.trim(), 2000));
                             }
+                            s
+                        }
+                        Ok(res) => {
+                            progress(app, "Unreal: l'script ha fallat", false);
+                            let mut s = String::from("RUN|RESULTAT| UNREAL| error Python:\n");
+                            s.push_str(&clip(&res.errors.join("\n"), 1800));
+                            let out = res.output.join("\n");
+                            if !out.trim().is_empty() {
+                                s.push_str("\nSORTIDA ABANS DE L'ERROR:\n");
+                                s.push_str(&clip(out.trim(), 600));
+                            }
+                            s.push_str(
+                                "\nCorrigeix l'script i torna a emetre «RUN|UNREAL|»; mai \
+declaris èxit sense haver vist la sortida.",
+                            );
+                            s
+                        }
+                        Err(e) => {
+                            // `e` és un `anyhow::Error` (no un `String`): no es
+                            // converteix sol a `&str`, cal materialitzar-lo.
+                            progress(
+                                app,
+                                &format!("Unreal: {}", clip(&e.to_string(), 70)),
+                                false,
+                            );
+                            format!("RUN|RESULTAT| UNREAL| error: {}", e)
                         }
                     }
                 }

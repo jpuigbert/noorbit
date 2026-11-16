@@ -394,6 +394,13 @@ html[data-fmt="v"] .end-sub{font-size:19px;text-align:center;max-width:900px}
 html[data-fmt="v"] .end-chips{flex-wrap:wrap;justify-content:center;max-width:900px}
 html[data-fmt="v"] .end-chars{bottom:170px;gap:20px}
 html[data-fmt="v"] .subtitle span{font-size:22px;max-width:960px;padding:8px 18px}
+html[data-fmt="v"] .bub{width:520px;font-size:20px;padding:16px 20px 20px;border-radius:22px}
+html[data-fmt="v"] .bub .who{font-size:12px;margin-bottom:5px}
+html[data-fmt="v"] .bub.pip .tail{left:34%}
+html[data-fmt="v"] .bub.orbi .tail{right:34%}
+html[data-fmt="v"] .focus{width:640px;height:640px;margin-left:-320px;margin-top:-320px}
+html[data-fmt="v"] .speed{width:1500px;height:1500px;margin:-750px 0 0 -750px}
+html[data-fmt="v"] #revealOrb{width:130px;height:149px;margin-left:-4px}
 </style>
 </head>
 <body>
@@ -913,7 +920,7 @@ const FILES=["style.css","functions.php","index.php","header.php","footer.php","
 const REQ="Fes-me un tema WordPress per a un taller de ceràmica. Net, càlid, amb pàgina de taller i botiga. Tot en català.";
 const ANS="D'acord. Comencem pel capçalera del tema i la funció de configuració.";
 /* moments d'aparició dels fitxers: 8 al primer bloc, 6 després de la compactació */
-const FILE_T=[...Array(8)].map((_,i)=>37.6+i*0.62).concat([41.8,42.4,43.0,43.6,44.2,44.8]);
+const FILE_T=[...Array(8)].map((_,i)=>44.35+i*0.62).concat([48.55,49.15,49.75,50.35,50.95,51.55]);
 
 const el={
   s1:$("#s1"),s2:$("#s2"),s3:$("#s3"),s4:$("#s4"),app:$("#app"),s8:$("#s8"),s9:$("#s9"),
@@ -940,14 +947,30 @@ const el={
 };
 const HOOKS=[[el.h1,"Una idea"],[el.h2,"Un termini"],[el.h3,"I una carpeta buida"]];
 
+/* format: "wide" (16:9) o "v" (9:16) — es llegeix de ?fmt= */
+const FMT = new URLSearchParams(location.search).get("fmt") || "wide";
+if (FMT === "v") document.documentElement.setAttribute("data-fmt", "v");
+const V = FMT === "v";
+
+/* posicions de l'escena de diàleg, adaptades a cada format */
+const POS = V
+  ? { pip:{x:80,y:800}, orb:{x:620,y:880},
+      bubPip:{x:268,y:560}, bubOrb:{x:818,y:645},
+      focPip:{x:262,y:975}, focOrb:{x:810,y:1075},
+      sPip:1.12, sOrb:1.08 }
+  : { pip:{x:420,y:330}, orb:{x:1090,y:360},
+      bubPip:{x:570,y:222}, bubOrb:{x:1255,y:272},
+      focPip:{x:570,y:470}, focOrb:{x:1255,y:470},
+      sPip:1, sOrb:1 };
+
 /* ── diàleg dels personatges (temps de la veu, text i qui parla) ───────── */
 const TALK=[
-  {id:"n4", who:"pip", in:13.70, dur:2.66, text:"Li pots dir exactament què vols fer."},
-  {id:"n5", who:"orb", in:17.00, dur:2.77, text:"I jo escric el codi. Fitxer a fitxer!"},
-  {id:"n6", who:"pip", in:20.80, dur:1.74, text:"I quan la memòria s'acaba?"},
-  {id:"n7", who:"orb", in:23.40, dur:3.04, text:"Condenso el context i continuo! De debò!"},
-  {id:"n8", who:"pip", in:27.90, dur:2.04, text:"I el codi surt del meu ordinador?"},
-  {id:"n9", who:"orb", in:31.10, dur:3.82, text:"Amb un model local, no! Res surt de la teua màquina."}
+  {id:"n4", who:"pip", in:13.90, dur:2.66, text:"Li pots dir exactament què vols fer."},
+  {id:"n5", who:"orb", in:18.60, dur:2.77, text:"I jo escric el codi. Fitxer a fitxer!"},
+  {id:"n6", who:"pip", in:23.80, dur:1.74, text:"I quan la memòria s'acaba?"},
+  {id:"n7", who:"orb", in:27.60, dur:3.04, text:"Condenso el context i continuo! De debò!"},
+  {id:"n8", who:"pip", in:33.40, dur:2.04, text:"I el codi surt del meu ordinador?"},
+  {id:"n9", who:"orb", in:37.80, dur:3.82, text:"Amb un model local, no! Res surt de la teua màquina."}
 ];
 let CAPTIONS=[];
 window.__setCaptions=a=>{CAPTIONS=a};
@@ -1033,7 +1056,7 @@ function render(t){
   }
 
   /* ───────── S4 · ELS PERSONATGES EXPLIQUEN ───────── */
-  const s4o=seg(t,13.5,14.1)*(1-seg(t,35.05,35.45));
+  const s4o=seg(t,13.5,14.1)*(1-seg(t,41.7,42.1));
   show(el.s4,s4o);
   if(s4o>0){
     // qui parla ara?
@@ -1044,18 +1067,21 @@ function render(t){
     const orbTalking = cur && cur.who==="orb" && t>=cur.in-0.12 && t<=cur.in+cur.dur+0.15;
 
     // convenció anime: el qui parla AVANÇA i creix; l'altre es queda enrere
-    const pScale=pipTalking?1.13:0.93, oScale=orbTalking?1.13:0.93;
+    const pScale=(pipTalking?1.13:0.93)*POS.sPip, oScale=(orbTalking?1.13:0.93)*POS.sOrb;
     const pDx=pipTalking?74:-46, oDx=orbTalking?-74:46;
+    el.pipSlot.style.left=POS.pip.x+"px"; el.pipSlot.style.top=POS.pip.y+"px";
+    el.orbSlot.style.left=POS.orb.x+"px"; el.orbSlot.style.top=POS.orb.y+"px";
     el.pipSlot.style.transform=`translate(${pDx}px,0) scale(${pScale})`;
     el.orbSlot.style.transform=`translate(${oDx}px,0) scale(${oScale})`;
     el.pipSlot.style.opacity=inS*(pipTalking?1:0.72);
     el.orbSlot.style.opacity=inS*(orbTalking?1:0.72);
 
     // focus + línies de velocitat sobre el qui parla
-    const fx=orbTalking?1255:(pipTalking?570:960);
-    el.focus.style.left=fx+"px"; el.focus.style.top=470+"px";
+    const fx=orbTalking?POS.focOrb.x:POS.focPip.x;
+    const fy=orbTalking?POS.focOrb.y:POS.focPip.y;
+    el.focus.style.left=fx+"px"; el.focus.style.top=fy+"px";
     el.focus.style.opacity=(cur?0.85:0.25)*(s4o);
-    el.speed.style.left=fx+"px"; el.speed.style.top=470+"px";
+    el.speed.style.left=fx+"px"; el.speed.style.top=fy+"px";
     el.speed.style.opacity=(cur?0.20:0.05);
     el.speed.style.transform=`rotate(${-t*4}deg)`;
 
@@ -1068,8 +1094,8 @@ function render(t){
     };
     el.bubPip.style.opacity=showPip?bubIn(cur):0;
     el.bubOrb.style.opacity=showOrb?bubIn(cur):0;
-    el.bubPip.style.left="570px"; el.bubPip.style.top="222px";
-    el.bubOrb.style.left="1255px"; el.bubOrb.style.top="272px";
+    el.bubPip.style.left=POS.bubPip.x+"px"; el.bubPip.style.top=POS.bubPip.y+"px";
+    el.bubOrb.style.left=POS.bubOrb.x+"px"; el.bubOrb.style.top=POS.bubOrb.y+"px";
     const bOff=(node,line)=>{
       const o=line?eOut(seg(t,line.in-0.18,line.in+0.10)):0;
       node.style.transform=`translateX(-50%) translateY(${(1-o)*16}px) scale(${0.9+o*0.1})`;
@@ -1083,8 +1109,8 @@ function render(t){
     // personatges
     el.pipSlot.style.opacity=inS;
     el.orbSlot.style.opacity=inS;
-    const cheer=t>24.6&&t<25.6;
-    const cheer2=t>46.3&&t<48.2;
+    const cheer=t>29.4&&t<30.7;
+    const cheer2=t>53.1&&t<55.2;
     chrState(el.pipSvg, t, !!pipTalking, cheer||cheer2, 0);
     chrState(el.orbSvg, t, !!orbTalking, cheer||cheer2, 1.7);
 
@@ -1100,9 +1126,9 @@ function render(t){
   }
 
   /* ───────── APP ───────── */
-  const appIn=eBack(seg(t,35.45,36.4));
-  const appOut=seg(t,46.7,47.3);
-  const appVis=seg(t,35.45,35.85)*(1-appOut);
+  const appIn=eBack(seg(t,42.2,43.2));
+  const appOut=seg(t,56.3,56.9);
+  const appVis=seg(t,42.2,42.6)*(1-appOut);
   el.app.style.opacity=appVis;
   el.app.style.visibility=appVis>0.002?"visible":"hidden";
   if(appIn<0.999||appVis<0.999){
@@ -1112,8 +1138,8 @@ function render(t){
     el.app.style.transform=""; el.app.style.filter="";
   }
   if(appVis>0.002){
-    const showCss=t>43.4;
-    const phpT=seg(t,37.4,41.6), cssT=seg(t,43.6,45.3);
+    const showCss=t>50.15;
+    const phpT=seg(t,44.15,48.35), cssT=seg(t,50.35,52.05);
     el.tabPhp.classList.toggle("on",!showCss);
     el.tabCss.classList.toggle("on",showCss);
     if(showCss) renderLines(el.code,CSS,Math.floor(cssT*CSS_N));
@@ -1127,24 +1153,24 @@ function render(t){
       n.querySelector(".ck").style.opacity=eOut(seg(t,t0+0.26,t0+0.58));
     });
 
-    const uT=seg(t,36.3,37.3);
+    const uT=seg(t,43.05,44.05);
     el.bubU.style.opacity=eOut(uT);
     el.bubU.style.transform=`translateY(${(1-eOut(uT))*10}px)`;
     el.bubU.textContent=REQ.slice(0,Math.floor(clamp((uT-0.04)/0.96)*REQ.length));
-    const aT=seg(t,37.45,37.9);
+    const aT=seg(t,44.2,44.65);
     el.bubA.style.opacity=eOut(aT);
     el.bubA.style.transform=`translateY(${(1-eOut(aT))*10}px)`;
     el.bubAText.textContent=ANS.slice(0,Math.floor(clamp((aT-0.04)/0.96)*ANS.length));
-    const cT=seg(t,38.1,40.4);
+    const cT=seg(t,44.85,47.15);
     el.bubCode.style.opacity=eOut(cT);
     el.bubCode.style.transform=`translateY(${(1-eOut(cT))*10}px)`;
     if(cT>0) renderMini(el.miniCode,MINI,Math.floor(clamp((cT-0.05)/0.95)*MINI_N));
-    el.thinking.style.opacity=seg(t,37.95,38.2)*(1-seg(t,41.5,41.8));
-    el.thinkingTxt.textContent=`Treballant… ${Math.max(1,Math.floor(t-37.4))}s · RAM ${34+Math.floor(Math.sin(t*3)*3)}%`;
+    el.thinking.style.opacity=seg(t,44.7,44.95)*(1-seg(t,48.25,48.55));
+    el.thinkingTxt.textContent=`Treballant… ${Math.max(1,Math.floor(t-44.15))}s · RAM ${34+Math.floor(Math.sin(t*3)*3)}%`;
 
-    const ctxIn=seg(t,40.45,40.7);
+    const ctxIn=seg(t,47.2,47.45);
     el.ctxbar.style.opacity=ctxIn;
-    const compact=seg(t,41.15,41.75);
+    const compact=seg(t,47.9,48.5);
     el.ctxLbl.textContent=compact>0.12?"Context compactat":"Context";
     el.ctxVal.textContent=compact>0.12?"8,4k → 1,2k":"100%";
     el.ctxFill.style.width=(lerp(100,20,eIO(compact)))+"%";
@@ -1153,15 +1179,15 @@ function render(t){
     el.ctxbar.style.borderColor=compact>0.12?"rgba(74,222,128,.45)":"rgba(251,191,36,.35)";
     el.sbWork.textContent=compact>0.12?"Context compactat · la IA continua":"La IA està treballant…";
 
-    const toastIn=seg(t,41.2,41.5), toastOut=seg(t,43.1,43.4);
+    const toastIn=seg(t,47.95,48.25), toastOut=seg(t,49.85,50.15);
     el.toast.style.opacity=eOut(toastIn)*(1-toastOut);
     el.toast.style.transform=`translateX(-50%) translateY(${(1-eOut(toastIn))*-14}px)`;
 
-    const lbIn=seg(t,41.9,42.2), lbOut=seg(t,43.3,43.6);
+    const lbIn=seg(t,48.65,48.95), lbOut=seg(t,50.05,50.35);
     el.badgeLocal.style.opacity=eOut(lbIn)*(1-lbOut);
     el.badgeLocal.style.transform=`translateY(${(1-eOut(lbIn))*16}px)`;
 
-    el.tasks.style.opacity=seg(t,37.2,37.6);
+    el.tasks.style.opacity=seg(t,43.95,44.35);
     if(!el.taskRows.children.length){
       FILES.forEach(f=>{const d=document.createElement("div");d.className="trow";d.dataset.f=f;
         d.innerHTML='<span class="bx">✓</span><span>'+f+'</span>';el.taskRows.appendChild(d)});
@@ -1174,41 +1200,41 @@ function render(t){
       r.querySelector(".bx").style.opacity=d>0.5?1:(d>0?1:0.28);
     });
 
-    const hl=seg(t,44.0,44.4);
+    const hl=seg(t,50.75,51.15);
     el.publishBtn.style.boxShadow=hl>0?`0 0 0 ${3+Math.sin(t*9)*1.8}px rgba(124,92,255,${0.16+hl*0.3})`:"";
     el.publishBtn.style.transform=hl>0?`scale(${1+Math.sin(t*9)*0.02})`:"";
   }
 
   /* ───────── MODAL ───────── */
-  const mIn=seg(t,44.35,44.85), mOut=seg(t,46.6,47.0);
+  const mIn=seg(t,51.1,51.6), mOut=seg(t,56.2,56.6);
   const mVis=mIn*(1-mOut);
   el.modalWrap.style.opacity=mVis;
   el.modalWrap.style.visibility=mVis>0.002?"visible":"hidden";
   if(mVis>0.002){
     el.modal.style.transform=`scale(${lerp(0.93,1,eBack(mIn))}) translateY(${(1-eBack(mIn))*22}px)`;
-    el.st1.classList.toggle("ok",t>44.95);
-    el.st2.classList.toggle("ok",t>45.25);
-    el.st3.classList.toggle("ok",t>45.55);
-    el.zipOk.style.opacity=seg(t,44.95,45.2);
-    el.accOk.style.opacity=seg(t,45.25,45.5);
-    const press=seg(t,45.75,45.95);
+    el.st1.classList.toggle("ok",t>51.7);
+    el.st2.classList.toggle("ok",t>52.0);
+    el.st3.classList.toggle("ok",t>52.3);
+    el.zipOk.style.opacity=seg(t,51.7,51.95);
+    el.accOk.style.opacity=seg(t,52.0,52.25);
+    const press=seg(t,52.5,52.7);
     el.pubBtn.textContent=press>0.5?"Publicant…":"Publica el tema";
     el.pubBtn.style.background=press>0.5?"#5b5b70":"";
     el.prog.style.opacity=press>0?1:0;
-    el.progFill.style.width=(clamp(seg(t,45.8,46.5))*100)+"%";
-    el.pubDone.style.opacity=seg(t,46.45,46.7);
-    el.priceBox.style.opacity=1-seg(t,46.3,46.6);
+    el.progFill.style.width=(clamp(seg(t,52.55,53.25))*100)+"%";
+    el.pubDone.style.opacity=seg(t,53.2,53.45);
+    el.priceBox.style.opacity=1-seg(t,53.05,53.35);
   }
 
   /* ───────── S8 · MARKETPLACE ───────── */
-  const s8o=seg(t,46.9,47.5)*(1-seg(t,49.3,49.8));
+  const s8o=seg(t,56.5,57.1)*(1-seg(t,60.0,60.5));
   show(el.s8,s8o);
   if(s8o>0){
-    const b=eBack(seg(t,46.9,47.6));
+    const b=eBack(seg(t,56.5,57.2));
     el.browser.style.transform=`translateY(${(1-b)*56}px) scale(${lerp(0.9,1,b)})`;
-    el.browser.style.filter=`blur(${(1-eOut(seg(t,46.9,47.6)))*11}px)`;
-    const ci=seg(t,47.6,48.2);
-    const zi=seg(t,48.3,49.3);
+    el.browser.style.filter=`blur(${(1-eOut(seg(t,56.5,57.2)))*11}px)`;
+    const ci=seg(t,57.2,57.8);
+    const zi=seg(t,57.9,59.9);
     el.newcard.style.opacity=eOut(ci);
     el.marketImg.style.transform=`translateY(${-zi*16}px) scale(${1+zi*0.05})`;
     el.newcard.style.transform=
@@ -1216,23 +1242,23 @@ function render(t){
   }
 
   /* ───────── S9 · END CARD ───────── */
-  const s9o=seg(t,49.3,49.9);
+  const s9o=seg(t,59.9,60.5);
   show(el.s9,s9o);
   if(s9o>0){
-    const g=eOut(seg(t,49.3,50.0));
+    const g=eOut(seg(t,59.9,60.6));
     el.s9core.style.opacity=0;
     el.s9ring.style.opacity=g*.2;
     el.s9ring.style.transform=`rotate(${t*7}deg) scale(${lerp(1.1,1.95,g)})`;
-    el.endLogo.style.opacity=eOut(seg(t,49.4,50.0));
-    el.endLogo.style.transform=`translateY(${(1-eOut(seg(t,49.4,50.0)))*16}px)`;
-    el.endTag.style.opacity=eOut(seg(t,49.75,50.25));
-    el.endTag.style.transform=`translateY(${(1-eOut(seg(t,49.75,50.25)))*10}px)`;
-    el.endUrl.style.opacity=eOut(seg(t,50.1,50.55));
-    el.endUrl.style.transform=`translateY(${(1-eOut(seg(t,50.1,50.55)))*12}px)`;
-    el.endUrl.style.setProperty("--w",seg(t,50.4,51.1));
-    el.endSub.style.opacity=eOut(seg(t,50.4,50.85));
-    el.endChips.style.opacity=eOut(seg(t,50.65,51.15));
-    const ci=seg(t,49.9,50.8);
+    el.endLogo.style.opacity=eOut(seg(t,60.0,60.6));
+    el.endLogo.style.transform=`translateY(${(1-eOut(seg(t,60.0,60.6)))*16}px)`;
+    el.endTag.style.opacity=eOut(seg(t,60.35,60.85));
+    el.endTag.style.transform=`translateY(${(1-eOut(seg(t,60.35,60.85)))*10}px)`;
+    el.endUrl.style.opacity=eOut(seg(t,60.7,61.15));
+    el.endUrl.style.transform=`translateY(${(1-eOut(seg(t,60.7,61.15)))*12}px)`;
+    el.endUrl.style.setProperty("--w",seg(t,61.0,61.7));
+    el.endSub.style.opacity=eOut(seg(t,61.0,61.45));
+    el.endChips.style.opacity=eOut(seg(t,61.25,61.75));
+    const ci=seg(t,60.5,61.4);
     el.endChars.style.opacity=eOut(ci);
     el.endChars.style.transform=`translateY(${(1-eOut(ci))*26}px)`;
     chrState(el.endPip.querySelector("svg"), t, false, true, 0.4);

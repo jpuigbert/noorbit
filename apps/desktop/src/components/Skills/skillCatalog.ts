@@ -33,6 +33,20 @@ export const SKILL_CATALOG: SkillSearchResult[] = [
     source: "catalog",
   },
   {
+    repo: "donchitos/claude-code-game-studios",
+    name: "Game Studios (jocs de navegador)",
+    description:
+      "Plantilla i flux: idea → preguntes → brief → primer build en navegador, canvis comprovats, créixer (Vite+TS) i acabar. Compatible amb totes les IA de NoOrbit.",
+    source: "catalog",
+  },
+  {
+    repo: "hyperionaidev/smolmaxxing",
+    name: "smolmaxxing (models a l'edge, ~1 GB)",
+    description:
+      "Pedaç de llama.cpp per fer córrer models de 260K a 16B en dispositius amb ~1 GB de RAM (TV box, iPad vell). Cost 0, tot local.",
+    source: "catalog",
+  },
+  {
     repo: "docker/awesome-compose",
     name: "Exemples de Compose",
     description:

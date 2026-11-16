@@ -1,0 +1,13 @@
+[package]
+name = "noorbit-worktree"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+noorbit-jam = { path = "../noorbit-jam" }
+tracing = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

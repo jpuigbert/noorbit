@@ -9,6 +9,7 @@ import { saveCurrentFile, useWorkspaceStore } from "./stores/workspaceStore";
 import { useUIStore } from "./stores/uiStore";
 import { toastSuccess, toastError, toastInfo } from "./stores/toastStore";
 import { usePreviewStore } from "./stores/previewStore";
+import { detachChat, detachTerminal, reattachChat, reattachTerminal } from "./windowing";
 
 const rawActions = {
   // Fitxer
@@ -65,6 +66,10 @@ const rawActions = {
   "view.searchProject": () => useUIStore.getState().setShowSearch(true),
   "view.sidebar": () => useUIStore.getState().toggleSidebar(),
   "view.rightPanel": () => useUIStore.getState().toggleRightPanel(),
+  // Xat en FINESTRA SEPARADA (posable a qualsevol pantalla); si ja hi és,
+  // el torna a enganxar al programa.
+  "view.detachChat": () =>
+    void (useUIStore.getState().chatDetached ? reattachChat() : detachChat()),
   "view.wordWrap": ed.toggleWordWrap,
   "view.minimap": ed.toggleMinimap,
   "view.zoomIn": () => useUIStore.getState().zoomIn(),
@@ -101,8 +106,16 @@ const rawActions = {
     void invoke("open_terminal", { path: useWorkspaceStore.getState().root }).catch(
       () => undefined
     ),
-  // ⌘J: terminal integrat (panell inferior), com a VS Code.
-  "terminal.toggle": () => useUIStore.getState().toggleTerminal(),
+  // ⌘J: terminal integrat (panell inferior), com a VS Code. Si el terminal
+  // està en finestra separada, ⌘J el torna al programa.
+  "terminal.toggle": () => {
+    const ui = useUIStore.getState();
+    if (ui.terminalDetached) void reattachTerminal();
+    else ui.toggleTerminal();
+  },
+  // Terminal en FINESTRA SEPARADA (posable a qualsevol pantalla).
+  "terminal.detach": () =>
+    void (useUIStore.getState().terminalDetached ? reattachTerminal() : detachTerminal()),
 
   // Git (obre la pestanya de control de canvis del panell dret)
   "git.open": () => {
@@ -134,6 +147,14 @@ const rawActions = {
     }
   },
   "ai.vscodeExtensions": () => useUIStore.getState().setShowVsCodeExtensions(true),
+  "ai.gameStudios": () => useUIStore.getState().setShowGameStudios(true),
+  // Millora autopilotada de QUALSEVOL projecte (temps de treball personalitzable).
+  "ai.projectWork": () => useUIStore.getState().setShowProjectWork(true),
+  // Panell «Jam» (agent autònom): es viu DINS de l'Agent.
+  "ai.jam": () => {
+    usePreviewStore.getState().setRightTab("agent");
+    usePreviewStore.getState().setAgentSub("jam");
+  },
   "ai.agent": () => usePreviewStore.getState().setRightTab("agent"),
   // Sub-pestanyes DINS de la pestanya Agent (les «Integracions» ja no són
   // una pestanya a part: sempre es veuen servides al costat del xat).
@@ -242,6 +263,9 @@ export const commandList: CommandDef[] = [
   { id: "ai.plugins", labelKey: "plugins.title" },
   { id: "ai.vscodeImport", labelKey: "menu.vscodeImport" },
   { id: "ai.vscodeExtensions", labelKey: "menu.vscodeExtensions" },
+  { id: "ai.gameStudios", labelKey: "menu.gameStudios" },
+  { id: "ai.projectWork", labelKey: "menu.projectWork" },
+  { id: "ai.jam", labelKey: "menu.jam" },
   { id: "ai.agent", labelKey: "rightPanel.agent" },
   { id: "ai.computer", labelKey: "rightPanel.computer" },
   { id: "ai.experts", labelKey: "rightPanel.experts" },

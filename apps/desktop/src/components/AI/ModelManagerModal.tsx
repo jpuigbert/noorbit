@@ -844,10 +844,9 @@ export default function ModelManagerModal() {
                 onChange={(e) => void setKeepAlive(e.target.value)}
               >
                 <option value="">{t("ai.keepAliveDefault")}</option>
-                <option value="5m">5 min</option>
-                <option value="2m">2 min</option>
-                <option value="1m">1 min</option>
                 <option value="0">{t("ai.keepAliveZero")}</option>
+                <option value="2m">2 min</option>
+                <option value="5m">5 min</option>
               </select>
             </div>
           </div>

@@ -26,7 +26,7 @@ pub struct AiConfig {
     pub models_dir_applied: String,
     /// Quant de temps Ollama manté el model carregat a la RAM després de
     /// respondre ("5m", "2m", "1m" o "0" = allibera'l de seguida). Buit =
-    /// valor per defecte d'Ollama. Menys temps = menys RAM en repòs.
+    /// el recomanat «1m»: menys RAM en repòs que el valor d'Ollama.
     #[serde(default)]
     pub keep_alive: String,
     /// Carpeta on es desen els models GGUF (Hugging Bay) i el motor local
@@ -55,7 +55,7 @@ impl Default for AiConfig {
             backend_3d: String::new(),
             models_dir: String::new(),
             models_dir_applied: String::new(),
-            keep_alive: String::new(),
+            keep_alive: "1m".into(),
             gguf_dir: String::new(),
             llamacpp_dir: String::new(),
         }

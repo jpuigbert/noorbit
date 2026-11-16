@@ -44,6 +44,29 @@ def port_is_open(port, timeout=0.5):
         return False
 
 
+def editor_world():
+    """Context per a les comandes de consola.
+
+    `EditorLevelLibrary` està DEPRECADA des de UE 5.0 (omple el log d'avissos
+    i a les versions noves pot desaparèixer): primer el subsistema actual, i
+    la libreria vella només com a reserva.
+    """
+    try:
+        sub = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
+        world = sub.get_editor_world()
+        if world is not None:
+            return world
+    except Exception:
+        pass
+    lib = getattr(unreal, "EditorLevelLibrary", None)
+    if lib is not None:
+        try:
+            return lib.get_editor_world()
+        except Exception:
+            pass
+    return None
+
+
 def try_console_commands():
     """Mètode 1: comandes de consola del plugin Remote Control (UE 5.x).
 
@@ -52,12 +75,7 @@ def try_console_commands():
     resultat es CONFIRMA obrint el port: així el «Remote Control hauria
     d'estar escoltant» no és un èxit fals.
     """
-    ctx = None
-    if hasattr(unreal, "EditorLevelLibrary"):
-        try:
-            ctx = unreal.EditorLevelLibrary.get_editor_world()
-        except Exception:
-            ctx = None
+    ctx = editor_world()
     cmds = [
         "RemoteControl.EnableServer",
         "RemoteControl.Enable",

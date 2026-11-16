@@ -372,6 +372,24 @@ Fluxos clau:
 
 ---
 
+## Jam autònom (l'agent treballa sol)
+
+El panell **Agent ▸ Jam** deixa la IA desenvolupar el projecte durant hores:
+brief → pla → codi → verificació → commit, tasca a tasca.
+
+- Usa **la IA que l'usuari tingui connectada** (local o núvol): la mateixa que
+  fa servir el xat, sense cap configuració extra.
+- **Protecció de memòria**: si una tasca consumeix massa, l'agent s'atura i
+  es reintenta amb menys qualitat. El Mac no es congela.
+- Cada pas es materialitza al projecte (blocs `@file:`), es verifica amb l'ordre
+  que vulguis (`npm run build`, `godot --headless`, …) i es commiteja.
+- Al final es genera `REPORT.md` amb el pla, els resultats i els commits.
+
+La lògica viu als crates de [`crates/`](crates/) (`noorbit-guardian`,
+`noorbit-jam`, `noorbit-planner`, `noorbit-git`, `noorbit-reporter`, …).
+
+---
+
 ## Game Studios (site)
 
 La plantilla i el flux «Claude Code Game Studios» (jocs de navegador a partir d'una idea)

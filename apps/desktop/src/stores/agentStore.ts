@@ -715,6 +715,11 @@ const liveWritten = new Map<string, string>();
 let liveTimer: ReturnType<typeof setTimeout> | null = null;
 let liveBusy = false;
 let livePendingRaw: string | null = null;
+/// Cua del stream que es parseja en cerca de blocs @file: acabats de tancar.
+/// Els tancaments sempre són al final del text: parsejar-lo SENÇER a cada
+/// passada era O(n) creixent amb la resposta (un model ràpid i una resposta
+/// llarga feien treballar el webview en va).
+const LIVE_TAIL = 60_000;
 /// Generació del run «en viu». `resetLiveMaterialize` la incrementa: el run
 /// que ja hi ha en marxa veu que el seu torn ja no és el vigent i abandona
 /// (abans, en reset es posava `liveBusy = false` mentre hi havia una
@@ -761,7 +766,10 @@ async function runLiveMaterialize() {
   if (!root) return;
   const base = root.replace(/\/+$/, "");
   // Només blocs estrictes @file: (els de prosa podrien ser prosa incompleta).
-  const blocks = parseFileBlocks(raw);
+  // Parsegem la cua del stream: un bloc que ACABA de tancar-se sempre hi és,
+  // i els blocs anteriors o ja estan escrits o els reescriu «autoMaterialize»
+  // al final del torn.
+  const blocks = parseFileBlocks(raw.length > LIVE_TAIL ? raw.slice(raw.length - LIVE_TAIL) : raw);
   if (blocks.length === 0) return;
   liveBusy = true;
   let anyNew = false;
@@ -804,6 +812,39 @@ async function runLiveMaterialize() {
   }
   // Si han arribat fragments mentre escrivíem, refar amb l'últim text.
   if (livePendingRaw) scheduleLiveMaterialize(livePendingRaw);
+}
+
+// ── THROTTLE DEL STREAM EN DIRECTE (un sol render per tros de text) ──────
+// Ollama emet un fragment PER TOKEN: aplicar-los un a un re-renderitzava el
+// panell del xat desenes de cops per segon mentre la IA escrivia, i el text
+// s'hi concatenava amb un cost creixent. Acumulem els fragments per xat i els
+// aboquem junts cada 80 ms: la UI continua sent «en directe» però amb una
+// fracció del treball (i de RAM del webview).
+const streamBuf = new Map<string, string>();
+const streamTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const STREAM_FLUSH_MS = 80;
+
+function flushStream(sid: string) {
+  const t = streamTimers.get(sid);
+  if (t) clearTimeout(t);
+  streamTimers.delete(sid);
+  const acc = streamBuf.get(sid) ?? "";
+  streamBuf.delete(sid);
+  if (!acc) return;
+  const st = useAgentStore.getState();
+  // Xat tancat mentre escrivia: el text no té on anar.
+  if (!st.sessions.some((x) => x.id === sid)) return;
+  useAgentStore.setState((s) => ({
+    sessions: s.sessions.map((x) =>
+      x.id === sid ? { ...x, stream: (x.stream ?? "") + acc } : x
+    ),
+  }));
+  // Materialització en viu: una passada per abocament, no per fragment.
+  if (useWorkspaceStore.getState().root) {
+    const stream =
+      useAgentStore.getState().sessions.find((x) => x.id === sid)?.stream ?? "";
+    scheduleLiveMaterialize(stream);
+  }
 }
 
 interface PersistedChat {
@@ -2094,20 +2135,16 @@ export const useAgentStore = create<AgentState>((set, get) => {
     },
 
     // Fragment de text rebut via event "ai://chunk" del xat que genera.
-    // Acumula AL XAT i, de pas, va escrivint els fitxers @file: ja acabats
-    // perquè l'editor els mostre en directe (materialització «en viu»).
+    // S'acumula al xat AMB THROTTLE (vegeu «flushStream»): un set() per
+    // fragment re-renderitzava tot el panell per cada token del model.
     appendStream: (sessionId, chunk) => {
       if (!sessOf(sessionId)) return;
-      set((s) => ({
-        sessions: s.sessions.map((x) =>
-          x.id === sessionId ? { ...x, stream: (x.stream ?? "") + chunk } : x
-        ),
-      }));
-      // Materialització en viu: només si hi ha projecte obert; ignora errors
-      // (el torn final amb «autoMaterialize» torna a escriure el definitiu).
-      if (useWorkspaceStore.getState().root) {
-        const stream = sessOf(sessionId)?.stream ?? "";
-        scheduleLiveMaterialize(stream);
+      streamBuf.set(sessionId, (streamBuf.get(sessionId) ?? "") + chunk);
+      if (!streamTimers.has(sessionId)) {
+        streamTimers.set(
+          sessionId,
+          setTimeout(() => flushStream(sessionId), STREAM_FLUSH_MS)
+        );
       }
     },
 
@@ -2115,6 +2152,10 @@ export const useAgentStore = create<AgentState>((set, get) => {
     // cada «run»: el backend condueix eixes sessions i ningú més les tanca,
     // així sense eixò el text de runs anteriors s'hi acumularia a l'infinit).
     clearStream: (sessionId) => {
+      const t = streamTimers.get(sessionId);
+      if (t) clearTimeout(t);
+      streamTimers.delete(sessionId);
+      streamBuf.delete(sessionId);
       if (!sessOf(sessionId)) return;
       set((s) => ({
         sessions: s.sessions.map((x) => (x.id === sessionId ? { ...x, stream: null } : x)),
@@ -2722,6 +2763,12 @@ export const useAgentStore = create<AgentState>((set, get) => {
       // Torn nou: llença l'estat de la materialització en viu (mapa de
       // fitxers ja escrits i reprogramacions pendents del torn anterior).
       resetLiveMaterialize();
+      // Descarta els fragments pendents del torn anterior (un flush tardà
+      // reescriuria el «stream: null» que tot seguit posem).
+      const pendingT = streamTimers.get(id);
+      if (pendingT) clearTimeout(pendingT);
+      streamTimers.delete(id);
+      streamBuf.delete(id);
       set((s) => ({
         sessions: s.sessions.map((x) =>
           x.id === id
@@ -2752,6 +2799,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
     },
 
     finalizeTurn: (id) => {
+      // Aboca els darrers fragments pendents: el «done» del backend pot
+      // arribar abans que el flush de 80 ms.
+      flushStream(id);
       const g = sessOf(id);
       if (!g) return;
       const text = g.lastResult ?? g.error ?? "";
@@ -2875,6 +2925,25 @@ useWorkspaceStore.subscribe((state, prev) => {
   if (state.root === prev.root) return;
   switchChatBucket(state.root);
 });
+
+/// Recarrega el calaix ACTUAL des de localStorage sense canviar de projecte.
+/// El fa servir el programa principal quan el xat torna d'una FINESTRA
+/// SEPARADA: els missatges escrits allà hi estan desats i cal mostrar-los.
+export function reloadChatsFromStorage() {
+  useAgentStore.setState(loadChats(chatLsKey(currentBucket)));
+}
+
+/// Alinya el calaix de xats amb el projecte del workspace. El fa servir la
+/// finestra separada del xat: rep el projecte per l'URL ABANS de carregar
+/// aquest mòdul (així «initialChats» ja neix correcte), però el bucket de
+/// memòria encara és buit i cal fixar-lo sense passar per «switchChatBucket»
+/// (que primer desaria els xats nous al calaix d'origen).
+export function alignChatBucket() {
+  const root = useWorkspaceStore.getState().root;
+  if (root === currentBucket) return;
+  currentBucket = root;
+  useAgentStore.setState(loadChats(chatLsKey(root)));
+}
 
 /// Veritat si QUALSEVOL xat està generant ara mateix (per a indicadors
 /// globals com la barra d'estat).

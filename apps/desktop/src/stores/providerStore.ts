@@ -4,8 +4,9 @@ import { OLLAMA_CLOUD_URL } from "./aiStore";
 import { toastError } from "./toastStore";
 
 export type AuthScheme = "bearer" | "header" | "none";
-/// Format d'API del proveïdor: compatible OpenAI o Anthropic (Claude).
-export type ProviderKind = "openai" | "anthropic";
+/// Format d'API del proveïdor: compatible OpenAI, Anthropic (Claude) o
+/// «native» (la IA nativa integrada al binari, sense token ni descàrregues).
+export type ProviderKind = "openai" | "anthropic" | "native";
 
 export interface ProviderPublic {
   id: string;
@@ -132,7 +133,9 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
           name: p.name,
           baseUrl: p.base_url,
           model: p.model,
-          kind: (p.kind === "anthropic" ? "anthropic" : "openai") as ProviderKind,
+          // kind-safe: conserva «native» (la IA integrada) tal qual; forçar
+          // openai/anthropic ací corrompria el proveïdor natiu en activar-lo.
+          kind: p.kind as ProviderKind,
           auth: p.auth,
           headerName: p.header_name,
           enabled,

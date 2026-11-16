@@ -29,7 +29,40 @@ permissions:
   contents: write
 
 jobs:
+  # ── Portes de qualitat ABANS de construir res ─────────────────────────
+  # Publicar un instal·rador vol dir que milers de persones se'l descarreguen:
+  # si la Jam o el guardian no passen els seus tests, el tag NO mereix un
+  # release i talla la matriu de build de 3 SO (que és llarga i cara).
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates
+
+      - name: Configura git per als tests
+        run: |
+          git config --global user.name "Release Bot"
+          git config --global user.email "release@noorbit.local"
+          git config --global init.defaultBranch main
+
+      # Els crates de la Jam (guardian, jam, planner, persistence…) es proven
+      # sols: són el nucli de l'agent autònom, no depenen de Tauri i per tant
+      # es poden validar aquí en segons. El backend es compila igualment a la
+      # matriu de build (i a la CI de `main` amb les deps de WebKit).
+      - name: Tests dels crates de la Jam
+        working-directory: crates
+        run: cargo test --workspace
+
   build:
+    needs: gate
     strategy:
       fail-fast: false
       matrix:
