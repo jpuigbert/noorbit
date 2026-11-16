@@ -44,7 +44,9 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # jsdom 31 (entorn dels tests Vitest) exigeix Node ^22.22.2 ||
+          # ^24.15.0 || >=26: amb Node 20, undici peta en carregar-se.
+          node-version: 24
           cache: pnpm
 
       - name: pnpm install
@@ -104,6 +106,27 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri
+
+      # `tauri::generate_context!()` exigeix que `frontendDist` (../dist)
+      # existeixi en temps de compilació: sense el build de vite, el
+      # proc-macro peta amb «path doesn't exist». Es construeix el frontend
+      # ABANS del cargo check (dist/ no es comiteja).
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend (dist/ per a generate_context!)
+        run: pnpm build
 
       - name: cargo check (tots els targets, incloent-hi els tests)
         working-directory: apps/desktop/src-tauri

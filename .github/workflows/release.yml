@@ -93,7 +93,8 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # jsdom 31 (tests) exigeix Node >=22.22.2/24.15: mateix Node que CI.
+          node-version: 24
           cache: pnpm
 
       - name: Setup Rust
