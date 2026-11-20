@@ -237,23 +237,26 @@ fn trim_log_if_needed(path: &Path) {
     let Ok(content) = std::fs::read_to_string(path) else { return };
     let lines: Vec<&str> = content.lines().collect();
     let keep = lines.len().saturating_sub(KEEP_LINES_ON_TRIM);
-    let mut out = String::from("=== registre retallat (s'han conservat les darreres línies) ===\n");
+    let header = "=== registre retallat (s'han conservat les darreres línies) ===\n";
+    // Pressupost per al cos del registre: el capçal no es pot retallar.
+    let budget = (MAX_LOG_BYTES as usize).saturating_sub(header.len());
+    let mut body = String::new();
     for line in &lines[keep..] {
-        out.push_str(line);
-        out.push('\n');
+        body.push_str(line);
+        body.push('\n');
     }
-    // Una línia gegant (o moltes) pot fer que el resultat torni a ser massa
-    // gran: en aquest cas es tallen els últims bytes.
-    let limit = MAX_LOG_BYTES as usize;
-    if out.len() > limit {
-        let bytes = out.as_bytes();
-        let mut start = bytes.len() - limit;
-        // Comencem en un límit de caràcter UTF-8 (no el trenquem).
-        while start < bytes.len() && !out.is_char_boundary(start) {
+    // Una línia gegant (o moltes) pot fer que el cos torni a ser massa gran:
+    // en aquest cas es tallen els últims bytes (en un límit de caràcter UTF-8).
+    if body.len() > budget {
+        let bytes = body.as_bytes();
+        let mut start = bytes.len() - budget;
+        while start < bytes.len() && !body.is_char_boundary(start) {
             start += 1;
         }
-        out = String::from_utf8_lossy(&bytes[start..]).to_string();
+        body = String::from_utf8_lossy(&bytes[start..]).to_string();
     }
+    let mut out = String::from(header);
+    out.push_str(&body);
     let _ = std::fs::write(path, out);
 }
 
@@ -361,16 +364,21 @@ pub fn build_report(data_dir: Option<&Path>) -> CrashReport {
     let content = read_log(data_dir);
     let blocks = parse_blocks(&content);
     let markers = content.lines().filter(|l| l.starts_with(SESSION_MARKER)).count() as i64;
-    // Sense cap marca de sessió, totes les fallides són de sessions anteriors.
-    let current_session = markers - 1;
+    // Sense cap marca de sessió (registre antic o carpeta no escribible), totes
+    // les fallides són de sessions anteriors.
+    let current_session = if markers == 0 {
+        None
+    } else {
+        Some(markers - 1)
+    };
 
     let session_blocks: Vec<&LogBlock> = blocks
         .iter()
-        .filter(|b| b.session == current_session)
+        .filter(|b| current_session == Some(b.session))
         .collect();
     let previous_blocks: Vec<&LogBlock> = blocks
         .iter()
-        .filter(|b| b.session < current_session)
+        .filter(|b| current_session.map_or(true, |c| b.session < c))
         .collect();
 
     let last = blocks.last();
@@ -560,6 +568,21 @@ mod tests {
     }
 
     #[test]
+    fn un_registre_sense_marca_de_sessio_tot_son_fallides_anteriors() {
+        let dir = tempfile::tempdir().expect("temp");
+        // Registre antic (cap marca «=== sessió iniciada»): la fallida no és
+        // d'aquesta sessió, sinó d'una sessió anterior.
+        std::fs::write(
+            dir.path().join(LOG_FILE),
+            "[2026-11-19 09:00:00] panicked at 'vella', src/a.rs:3:4\n",
+        )
+        .expect("escriu");
+        let report = build_report(Some(dir.path()));
+        assert_eq!(report.session_panics, 0);
+        assert_eq!(report.previous_panics, 1);
+    }
+
+    #[test]
     fn el_registre_es_retalla_quan_cresc_be() {
         let dir = tempfile::tempdir().expect("temp");
         let path = dir.path().join(LOG_FILE);
@@ -567,7 +590,7 @@ mod tests {
         std::fs::write(&path, gran).expect("escriu");
         trim_log_if_needed(&path);
         let out = std::fs::read_to_string(&path).expect("llegeix");
-        assert!(out.len() < MAX_LOG_BYTES as usize);
+        assert!(out.len() <= MAX_LOG_BYTES as usize);
         assert!(out.contains("registre retallat"));
     }
 }

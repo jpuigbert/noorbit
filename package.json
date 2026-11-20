@@ -1,6 +1,6 @@
 {
   "name": "noorbit",
-  "version": "0.71.10-alpha",
+  "version": "0.71.13-alpha",
   "private": true,
   "description": "NoOrbit — IDE amb agent IA local, Blender i Unreal Engine 5",
   "scripts": {
