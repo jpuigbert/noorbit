@@ -1,14 +1,25 @@
 import { useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { Code2, Boxes, Lightbulb, Video, Package, Play } from "lucide-react";
+import {
+  Bot,
+  Code2,
+  Boxes,
+  Lightbulb,
+  Package,
+  Play,
+  Video,
+} from "lucide-react";
 import { useT } from "../../i18n";
 import { useUnrealStore } from "../../stores/unrealStore";
 import UnrealConnectButton from "./UnrealConnectButton";
 import UnrealLiveView from "./UnrealLiveView";
 import UnrealBuildPanel from "./UnrealBuildPanel";
+import UnrealSetupButton from "./UnrealSetupButton";
+import UnrealToolsDiscovery from "./UnrealToolsDiscovery";
+import UnrealAgentChat from "./UnrealAgentChat";
 import "./Unreal.css";
 
-type Tab = "python" | "objects" | "lighting" | "live" | "build";
+type Tab = "python" | "objects" | "lighting" | "live" | "build" | "agent";
 
 export default function UnrealPanel() {
   const { t } = useT();
@@ -37,6 +48,7 @@ export default function UnrealPanel() {
   const [quality, setQuality] = useState("Medium");
 
   const tabs: { key: Tab; label: string; icon: ReactNode }[] = [
+    { key: "agent", label: t("unreal.agent.title"), icon: <Bot size={13} /> },
     { key: "python", label: t("unreal.python"), icon: <Code2 size={13} /> },
     { key: "objects", label: t("unreal.blueprint.title"), icon: <Boxes size={13} /> },
     { key: "lighting", label: t("unreal.lighting.title"), icon: <Lightbulb size={13} /> },
@@ -70,8 +82,35 @@ export default function UnrealPanel() {
       </div>
 
       <div className="ue-content">
-        {!connected && tab !== "build" && (
+        {!connected && tab !== "build" && tab !== "agent" && (
           <div className="empty-hint">{t("unreal.notConnected")}</div>
+        )}
+
+        {tab === "agent" && (
+          <div className="ue-agent">
+            <p className="ue-agent-desc">{t("unreal.agent.desc")}</p>
+
+            <section className="ue-agent__section">
+              <h3 className="ue-agent__section-title">
+                1 · {t("unreal.agent.setup.title")}
+              </h3>
+              <UnrealSetupButton />
+            </section>
+
+            <section className="ue-agent__section">
+              <h3 className="ue-agent__section-title">
+                2 · {t("unreal.agent.tools.title")}
+              </h3>
+              <UnrealToolsDiscovery />
+            </section>
+
+            <section className="ue-agent__section">
+              <h3 className="ue-agent__section-title">
+                3 · {t("unreal.agent.chat.title")}
+              </h3>
+              <UnrealAgentChat />
+            </section>
+          </div>
         )}
 
         {connected && tab === "python" && (

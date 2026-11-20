@@ -1,6 +1,11 @@
-import { X, Gamepad2, Zap, Cloud, Bot, Globe, Image as ImageIcon, Box } from "lucide-react";
+import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  X, Gamepad2, Zap, Cloud, Bot, Globe, Image as ImageIcon, Box, Rocket, Loader2, AlertTriangle,
+} from "lucide-react";
 import { useT } from "../../i18n";
 import { useUIStore } from "../../stores/uiStore";
+import { usePreviewStore } from "../../stores/previewStore";
 
 const SHORTCUTS: { icon: any; title: string; items: string[] }[] = [
   {
@@ -67,6 +72,38 @@ export default function GameStudiosModal() {
   const show = useUIStore((s) => s.showGameStudios);
   const setShow = useUIStore((s) => s.setShowGameStudios);
   const { t } = useT();
+  // Formulari de creació automàtica: la idea del joc + motor. La Jam
+  // autònoma construeix el joc SOLA (sense tocar el PC) i el panell Jam
+  // en mostra la feina en viu.
+  const [desc, setDesc] = useState("");
+  const [engine, setEngine] = useState("custom");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const createGame = async () => {
+    if (!desc.trim()) {
+      setErr(t("gameStudios.errDesc"));
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      await invoke("jam_start", {
+        request: { brief: desc.trim(), engine, durationSecs: 60 * 60, buildCmd: null },
+      });
+      setShow(false);
+      setDesc("");
+      // Mostra la feina en viu al panell Jam de la pestanya Agent (obrint
+      // també el panell dret per si l'usuari el tenia plegat).
+      useUIStore.getState().setRightPanelOpen(true);
+      usePreviewStore.getState().setRightTab("agent");
+      usePreviewStore.getState().setAgentSub("jam");
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   if (!show) return null;
 
@@ -87,6 +124,50 @@ export default function GameStudiosModal() {
             Plantilla i flux per crear jocs de navegador a partir d'una idea, compatible amb
             totes les IA connectades a NoOrbit. Repo original: donchitos/claude-code-game-studios.
           </p>
+
+          {/* ── CREACIÓ AUTOMÀTICA: escriu la idea i la Jam construeix el joc
+                 sola (cerca informació a internet sense obrir finestres ni
+                 demanar permís). ── */}
+          <div className="gs-create">
+            <div className="field">
+              <label>{t("gameStudios.desc")}</label>
+              <textarea
+                rows={3}
+                value={desc}
+                placeholder={t("gameStudios.descPh")}
+                onChange={(e) => setDesc(e.target.value)}
+              />
+            </div>
+            <div className="jam-row" style={{ marginTop: 8 }}>
+              <div className="field" style={{ flex: 1 }}>
+                <label>{t("gameStudios.engine")}</label>
+                <select value={engine} onChange={(e) => setEngine(e.target.value)}>
+                  <option value="custom">🌐 Web / HTML (navegador)</option>
+                  <option value="godot4">🎮 Godot 4</option>
+                  <option value="bevy">🦀 Bevy (Rust)</option>
+                </select>
+              </div>
+            </div>
+            <div className="lp-hint" style={{ marginTop: 6 }}>
+              {t("gameStudios.hint")}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+              <button
+                className="btn primary"
+                disabled={busy || !desc.trim()}
+                onClick={() => void createGame()}
+              >
+                {busy ? <Loader2 size={14} className="spin" /> : <Rocket size={14} />}{" "}
+                {t("gameStudios.create")}
+              </button>
+            </div>
+            {err && (
+              <div className="si-error" style={{ marginTop: 8 }}>
+                <AlertTriangle size={12} /> {err}
+              </div>
+            )}
+          </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
             {SHORTCUTS.map((s, i) => {
               const Icon = s.icon;

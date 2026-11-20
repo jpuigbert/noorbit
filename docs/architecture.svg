@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="580" viewBox="0 0 1200 580" role="img" aria-label="Arquitectura de NoOrbit: frontend React, IPC de Tauri, backend Rust, crates compartits i motors de joc">
+  <title>Arquitectura de NoOrbit</title>
+  <defs>
+    <linearGradient id="abox" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#14294a"/>
+      <stop offset="1" stop-color="#0d1c33"/>
+    </linearGradient>
+    <linearGradient id="abox2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#123a2f"/>
+      <stop offset="1" stop-color="#0c241d"/>
+    </linearGradient>
+    <linearGradient id="abox3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a2b52"/>
+      <stop offset="1" stop-color="#241a35"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#6ea8e8"/>
+    </marker>
+    <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#5ec9a8"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="580" fill="#080f1c"/>
+
+  <!-- FRONTEND -->
+  <rect x="30" y="40" width="330" height="200" rx="16" fill="url(#abox)" stroke="#2f7ad6" stroke-width="2"/>
+  <text x="195" y="72" text-anchor="middle" font-family="-apple-system, 'Segoe UI', sans-serif" font-size="21" font-weight="700" fill="#8fc4ff">Frontend · React 19 + TypeScript</text>
+  <g font-family="-apple-system, 'Segoe UI', sans-serif" font-size="15" fill="#cfe4ff">
+    <text x="56" y="104">🧩 Monaco Editor (multi-cursor, paleta)</text>
+    <text x="56" y="130">💬 Xat IA multi-sessió (streaming)</text>
+    <text x="56" y="156">🗂 Zustand · estat global + panells</text>
+    <text x="56" y="182">🖥 Terminal PTY multi-sesió</text>
+    <text x="56" y="208">🌐 i18n · català com a idioma base</text>
+  </g>
+
+  <!-- IPC -->
+  <rect x="415" y="105" width="120" height="70" rx="12" fill="#0f2039" stroke="#4a90e2" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="475" y="135" text-anchor="middle" font-family="-apple-system, 'Segoe UI', sans-serif" font-size="15" font-weight="700" fill="#9fc6f2">IPC</text>
+  <text x="475" y="156" text-anchor="middle" font-family="-apple-system, 'Segoe UI', sans-serif" font-size="13" fill="#8fb4d8">invoke · events</text>
+  <path d="M360 140 H415" stroke="#6ea8e8" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <path d="M535 140 H590" stroke="#6ea8e8" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+  <!-- BACKEND -->
+  <rect x="590" y="40" width="580" height="200" rx="16" fill="url(#abox)" stroke="#2f7ad6" stroke-width="2"/>
+  <text x="880" y="72" text-anchor="middle" font-family="-apple-system, 'Segoe UI', sans-serif" font-size="21" font-weight="700" fill="#8fc4ff">Backend · Rust + Tauri v2</text>
+  <g font-family="-apple-system, 'Segoe UI', sans-serif" font-size="15" fill="#cfe4ff">
+    <text x="616" y="104">🧠 ai/ · IA nativa (3 nivells) + proveïdors</text>
+    <text x="616" y="130">🤖 agent/ · especialistes, delegació, @use:</text>
+    <text x="616" y="156">🎬 engine_tools/ · directrius de motor</text>
+    <text x="616" y="182">🎥 video/ · muntatge i render amb ffmpeg</text>
+    <text x="616" y="208">📱 mobile/ · Android/iOS natius + emuladors</text>
+    <text x="950" y="104">🔌 commands/ · API Tauri (IPC)</text>
+    <text x="950" y="130">🛡 guardian/ · watchdog de processos</text>
+    <text x="950" y="156">📦 persistence/ · dades i lliçons</text>
+    <text x="950" y="182">🧬 native_llm/ · llama.cpp + GGUF</text>
+    <text x="950" y="208">🔊 voice/ · dictat al xat</text>
+  </g>
+
+  <!-- CRATES -->
+  <rect x="30" y="300" width="1140" height="110" rx="16" fill="url(#abox2)" stroke="#3fae8a" stroke-width="2"/>
+  <text x="600" y="330" text-anchor="middle" font-family="-apple-system, 'Segoe UI', sans-serif" font-size="20" font-weight="700" fill="#7ee0bd">crates/ · biblioteques compartides (Rust puro, sense Tauri)</text>
+  <g font-family="-apple-system, 'Segoe UI', sans-serif" font-size="14" fill="#bdf0dd">
+    <text x="56" y="362">noorbit-jam</text>
+    <text x="180" y="362">noorbit-planner</text>
+    <text x="330" y="362">noorbit-git</text>
+    <text x="450" y="362">noorbit-guardian</text>
+    <text x="600" y="362">noorbit-persistence</text>
+    <text x="790" y="362">noorbit-reporter</text>
+    <text x="940" y="362">noorbit-lessons</text>
+    <text x="1070" y="362">noorbit-memguard</text>
+    <text x="56" y="392">noorbit-blender-import</text>
+    <text x="270" y="392">noorbit-signal</text>
+    <text x="420" y="392">noorbit-worktree</text>
+    <text x="590" y="392">noorbit-llm-openai</text>
+    <text x="780" y="392">noorbit-jam (procés fill)</text>
+  </g>
+  <path d="M880 240 V300" stroke="#5ec9a8" stroke-width="2.5" marker-end="url(#arrow2)"/>
+
+  <!-- MOTORS -->
+  <rect x="30" y="450" width="1140" height="100" rx="16" fill="url(#abox3)" stroke="#8a6fd0" stroke-width="2"/>
+  <text x="600" y="480" text-anchor="middle" font-family="-apple-system, 'Segoe UI', sans-serif" font-size="20" font-weight="700" fill="#c3b0f5">Motors i eines que NoOrbit pilota</text>
+  <g font-family="-apple-system, 'Segoe UI', sans-serif" font-size="15" fill="#ded2ff">
+    <text x="56" y="512">🧊 Blender (add-on Python)</text>
+    <text x="290" y="512">🎬 Unreal Engine 5 (Remote Control API)</text>
+    <text x="600" y="512">🎮 Godot 4 (headless)</text>
+    <text x="830" y="512">🦀 Bevy (Rust + cargo)</text>
+    <text x="1030" y="512">🖌 ComfyUI</text>
+    <text x="56" y="538">🧠 Ollama · llama.cpp · Claude · DeepSeek</text>
+    <text x="400" y="538">📱 Android (Compose) · iOS (SwiftUI)</text>
+    <text x="790" y="538">🎞️ Kdenlive · ffmpeg · DaVinci</text>
+  </g>
+  <path d="M880 410 V450" stroke="#8a6fd0" stroke-width="2.5" marker-end="url(#arrow)"/>
+
+  <!-- peu -->
+  <text x="30" y="572" font-family="-apple-system, 'Segoe UI', sans-serif" font-size="13" fill="#6f88a8">Estat global: Zustand (front) · tokio + IPC (back) · crates purs compartits entre l'app i la Jam</text>
+</svg>

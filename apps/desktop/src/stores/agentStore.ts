@@ -61,7 +61,9 @@ import {
   MEMORY_SYSTEM,
   CONTEXT_SYSTEM,
   CONSOLIDATION_SYSTEM,
+  rosterContext,
 } from "./agent/prompts";
+import { skillsCatalogContext } from "./agent/skillsContext";
 import {
   parseManifest,
   stripUiArtifacts,
@@ -82,6 +84,7 @@ import {
   stripAgentDirectiveLines,
   parseUseDirectives,
   parseTodoDirectives,
+  matchExpert,
 } from "./agent/directives";
 
 export type {
@@ -151,6 +154,16 @@ function selectedModelLocal(): string | null {
   } catch {
     return null;
   }
+}
+
+/// Carrega els especialistes des del disc si el panell no s'ha muntat mai i
+/// retorna la llista. La USSEM ABANS de cada enviament al model: sense veure
+/// els noms reals, la IA no pot emetre «@use:» (les instruccions diuen «nom
+/// exacte» però el model no havia vist mai cap nom — per això mai delegava).
+async function ensureExpertsLoaded(): Promise<{ name: string; role: string }[]> {
+  const store = useExpertStore.getState();
+  if (store.experts.length === 0) await store.load();
+  return useExpertStore.getState().experts.map((e) => ({ name: e.name, role: e.role }));
 }
 
 /// Crea (o detecta com a existents) els agents que la IA ha demanat amb
@@ -237,15 +250,18 @@ async function applyDelegateDirectives(raw: string, sid: string): Promise<string
   type Deleg = { agent: string; task: string; solution: string; ok: boolean };
   const results: Deleg[] = [];
   for (const r of reqs) {
-    const norm = r.agent.trim().toLowerCase();
-    const expert = useExpertStore
-      .getState()
-      .experts.find((e) => e.name.trim().toLowerCase() === norm);
+    // Coincidència tolerant: la IA sovent escriu «la Tester» o «agent tester» en lloc
+    //del nom exacte; abans una diferència mínima matava la delegació en silenci.
+    const expert = matchExpert(r.agent, useExpertStore.getState().experts);
     if (!expert) {
+      const noms = useExpertStore
+        .getState()
+        .experts.map((e) => `«${e.name}»`)
+        .join(", ");
       results.push({
         agent: r.agent,
         task: r.task,
-        solution: `(no existeix cap especialista anomenat «${r.agent}»; crea'l amb «@agent:» o usa'n un altre)`,
+        solution: `(no existeix cap especialista anomenat «${r.agent}»${noms ? ` — els que hi ha: ${noms}` : "; crea'l amb «@agent:»"})`,
         ok: false,
       });
       continue;
@@ -260,9 +276,16 @@ async function applyDelegateDirectives(raw: string, sid: string): Promise<string
       r.task ||
       (sess?.messages.filter((m: ChatMessage) => m.role === "user" && !m.error).slice(-1)[0]?.text ?? "");
     // El agent també veu la llista de tasques: així NI la principal NI ell es
-    // perden cap punt del treball en comú.
+    // perden cap punt del treball en comú. I veu els seus COMPANYS d'equip
+    // (amb «@use:» pot delegar una part a un altre especialista: treball en
+    // cadena, com experts reals).
     const agentTaskCtx = useTaskListStore.getState().asContext();
-    const subTask = agentTaskCtx ? `${agentTaskCtx}TASCA QUE SE T'HA DELEGAT:\n${baseTask}` : baseTask;
+    const peersCtx = rosterContext(
+      useExpertStore.getState().experts.map((e) => ({ name: e.name, role: e.role })),
+      expert.name,
+    );
+    const subTask =
+      (agentTaskCtx ?? "") + (peersCtx ? peersCtx + "\n" : "") + `TASCA QUE SE T'HA DELEGAT:\n${baseTask}`;
     // Sesión sintética: la solució de l'agent NO sobreescriu el raonament del xat.
     const solution = await useExpertStore
       .getState()
@@ -297,7 +320,12 @@ async function applyDelegateDirectives(raw: string, sid: string): Promise<string
           `TASCA DE L'USUARI:\n${originalUser}\n\n--- SOLUCIONS DELS AGENTS DELEGATS ---\n${solsBlock}\n\n` +
           "Integra aquestes solucions en una RESPOSTA FINAL coherent en català. Si cal codi, " +
           "emet cada fitxer amb «@file:». No tornes a delegar; només consolida.",
-        system: CONSOLIDATION_SYSTEM,
+        // La llista real d'especialistes DAMUNT del system: si no, la
+        // consolidació perdria els noms si el model decidís ampliar el pla.
+        system:
+          rosterContext(
+            useExpertStore.getState().experts.map((e) => ({ name: e.name, role: e.role })),
+          ) + CONSOLIDATION_SYSTEM,
         ...ia,
         history: hist,
         // La pregunta REAL de l'usuari (per a l'aprenentatge local): el prompt
@@ -891,6 +919,10 @@ interface AgentState {
   setChatExpert: (id: string, expertId: string) => void;
   setChatPlatform: (id: string, platform: "desktop" | "android" | "ios") => void;
   setIncludeContext: (id: string, v: boolean) => void;
+  /// Marca visual del vot (1 👍 / -1 👎 / null) d'una resposta del xat. El
+  /// vot es desa al registre d'aprenentatge del backend; aquí només cal que
+  /// la bombolla el reflecteixi després de reobrir el xat.
+  setMessageVote: (id: string, index: number, vote: number | null) => void;
   /// Mostrar (per defecte) o AMAGAR el text del raonament de la IA. Per a
   /// qui el vol llegir i per a qui l'estorba: es recorda entre sessions.
   showThinking: boolean;
@@ -1267,6 +1299,18 @@ export const useAgentStore = create<AgentState>((set, get) => {
       get().persistChats();
     },
 
+    // ── VOT DE L'USUARI SOBRE UNA RESPOSTA ────────────────────────────────
+    // El vot real es fa al backend (`learning_vote`: registre d'aprenentatge
+    // i paquet de Soup). Aquí només en guardem la MARCA per tornar a pintar
+    // el botó del color correcte quan el xat es reobre — si fallés el vot,
+    // la bombolla no hauria de quedar pintada com si hagués funcionat.
+    setMessageVote: (id, index, vote) => {
+      patch(id, (s) => ({
+        messages: s.messages.map((m, i) => (i === index ? { ...m, vote } : m)),
+      }));
+      get().persistChats();
+    },
+
     persistChats: () => {
       try {
         const st = get();
@@ -1294,6 +1338,8 @@ export const useAgentStore = create<AgentState>((set, get) => {
             elapsedMs: m.elapsedMs ?? null,
             at: m.at,
             error: m.error ?? false,
+            // El vot de veritat és al backend; aquí només la marca visual.
+            vote: m.vote ?? null,
           })),
         }));
         localStorage.setItem(chatLsKey(currentBucket), JSON.stringify({ activeId: st.activeId, sessions }));
@@ -1457,6 +1503,14 @@ export const useAgentStore = create<AgentState>((set, get) => {
               ? 1
               : 0
             : 0;
+          // Índex de skills (ECC i la resta): la IA sap quines té i les pot
+          // llegir. Només al nivell 0: els reintents per OOM el descarten.
+          const skillsCtx = await skillsCatalogContext();
+          // Llista REAL d'especialistes: sense veure'n els noms la IA no pot
+          // delegar-hi (l'error clàssic de «@use:»: instrucció sense dades).
+          const roster = rosterContext(await ensureExpertsLoaded(), sessOf(sid)?.expertId
+            ? useExpertStore.getState().experts.find((e) => e.id === sessOf(sid)?.expertId)?.name
+            : undefined);
           const oomLevel = await runWithOOMRetry(sid, async (level) => {
           let m = finalPrompt;
           let h = history;
@@ -1476,6 +1530,8 @@ export const useAgentStore = create<AgentState>((set, get) => {
             h = threadOf(history);
             sy = MEMORY_SYSTEM;
           }
+          if (level === 0 && skillsCtx) sy = (sy ?? "") + skillsCtx;
+          if (level === 0 && roster) sy = roster + (sy ?? "");
           return await invoke<string>("send_prompt_stream", {
             prompt: m,
             system: sy,
@@ -2256,7 +2312,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
       const imgs = Array.from(new Set([...(images ?? []), ...extractChatImagePaths(text)]));
 
       // ── RUTES AUTOMÀTIQUES abans de res ────────────────────────────────
-      // El xat interpreta TRES tipus de missatge especials abans d'enviar
+      // El xat interpreta QUATRE tipus de missatge especials abans d'enviar
       // la frase al model de text:
       //  1. ORDRES D'ORDINADOR (@computer: o «obre Blender», «crea una
       //     carpeta X»…): van a l'agent d'ordinador, que demana permís
@@ -2265,7 +2321,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
       //     menció explícita de Blender): van al pont 3D (`agent_apply_
       //     blender`) — genera Python, ho aplica i arrenca Blender sol
       //     si falta (amb el permís d'Ordinador).
-      //  3. Tot altre missatge segueix el flux normal de l'agent.
+      //  3. MUNTATGE DE VÍDEO (`@video:` o «munta'm el vídeo», Kdenlive):
+      //     va al motor del menú «Vídeo» (escaneig, EDL, render, director).
+      //  4. Tot altre missatge segueix el flux normal de l'agent.
       const dirComputer = text.match(/^@(?:computer|ordinador):\s*([\s\S]+)/i);
       const goalComputer = dirComputer
         ? dirComputer[1].trim()
@@ -2278,6 +2336,69 @@ export const useAgentStore = create<AgentState>((set, get) => {
       // Les PREGUNTES («per què Blender es queda penjat?», «com ho faig?»)
       // continuen al xat normal: només les ORDRES sense interrogació van al 3D.
       const looksLikeQuestion = /\?|^\s*(?:per què|per què no|que és|què és|com\s)/i.test(text.trim());
+      //  4. MUNTATGE DE VÍDEO (@video: o «munta'm el vídeo», «muntatge amb
+      //     Kdenlive»): va DIRECTE al motor del menú «Vídeo» — la mateixa
+      //     funció que crida el panell i la Jam. Així el que l'usuari diu en
+      //     veu alta i el que la IA fa sola són exactament el mateix codi.
+      const dirVideo = text.match(/^@video:\s*([\s\S]+)/i);
+      const wantsMount =
+        /\b(?:munta|munta'm|munta'm|muntar|muntatge|muntant|edita|editar|edició)\b/i.test(text) &&
+        /\b(?:v[ií]deo|v[ií]deos|clips|kdenlive)\b/i.test(text);
+      const mentionsKdenlive = /\bkdenlive\b/i.test(text);
+      // Arguments reals del motor: la directriu explícita mana; si no, la
+      // frase en llenguatge natural es converteix en l'ordre al DIRECTOR amb
+      // 40 minuts de treball (el mateix preset que el panell «Vídeo»).
+      const goalVideo = dirVideo
+        ? dirVideo[1].trim()
+        : !goalComputer && !looksLikeQuestion && (wantsMount || mentionsKdenlive)
+          ? `director ${JSON.stringify({ brief: text.trim(), budgetS: 2400 })}`
+          : null;
+      if (goalVideo !== null) {
+        const t0v = Date.now();
+        patch(sid, {
+          running: true,
+          error: null,
+          stopped: false,
+          lastThinking: null,
+          startedAt: t0v,
+          lastElapsedMs: null,
+          stream: null,
+        });
+        const rootVideo = useWorkspaceStore.getState().root;
+        if (!rootVideo) {
+          patch(sid, { running: false, lastElapsedMs: Date.now() - t0v });
+          get().addNote(
+            "Per muntar vídeo necessito un projecte obert (Fitxer ▸ Obre carpeta): és on busco els clips i on deixo el muntatge, el `.kdenlive` i el render.",
+            { id: sid }
+          );
+          get().finalizeTurn(sid);
+          return text;
+        }
+        get().pushStep(sid, {
+          label: "Muntatge de vídeo",
+          detail: `@video:${goalVideo.slice(0, 90)}…`,
+          ok: true,
+        });
+        // El mateix motor que el menú «Vídeo» i que la Jam: `video_directive`
+        // (vegeu `src-tauri/src/video/commands.rs`).
+        let outVideo = "";
+        try {
+          outVideo = await invoke<string>("video_directive", {
+            projectPath: rootVideo,
+            args: goalVideo,
+          });
+        } catch (e) {
+          outVideo = `❌ ${String(e)}`;
+        }
+        patch(sid, { running: false, lastElapsedMs: Date.now() - t0v });
+        get().addNote(
+          outVideo +
+            "\n\nPots seguir qualsevol feina llarga al menú **Vídeo** (progrés, aturar, polir a Kdenlive).",
+          { id: sid }
+        );
+        get().finalizeTurn(sid);
+        return text;
+      }
       if (goalComputer === null && (dirBlender || (mentionsBlender && !isAppOSVerb && !looksLikeQuestion))) {
         // ── BLENDER: aplicar el demanat al pont 3D, sense retocs al xat ──
         const goalBlender = (
@@ -2556,6 +2677,25 @@ export const useAgentStore = create<AgentState>((set, get) => {
       if (!sys && platformPreamble) sys = platformPreamble + CONTEXT_SYSTEM;
       if (!sys) sys = MEMORY_SYSTEM;
 
+      // Índex de skills (ECC i la resta): la IA sap quines té i les pot
+      // llegir quan la tasca hi encaixi. Els models locals petits no el
+      // porten: la seua finestra de context és massa curta.
+      if (!modelPetit) {
+        const skillsCtx = await skillsCatalogContext();
+        if (skillsCtx) sys = (sys ?? "") + skillsCtx;
+      }
+
+      // Llista REAL d'especialistes creats (el panell pot no haver-se muntat
+      // mai: la carreguem del disc). S'injjecta DAMUNT de tot el system
+      // prompt — les instruccions diuen «delega amb el nom exacte», però si
+      // el model mai no ha vist els noms reals, la delegació «@use:» no pot
+      // néixer. Ací veu l'equip i les ordres juntes, just abans de parlar.
+      const expertDeLaSessió = sess.expertId
+        ? useExpertStore.getState().experts.find((e) => e.id === sess.expertId)?.name
+        : undefined;
+      const roster = rosterContext(await ensureExpertsLoaded(), expertDeLaSessió);
+      if (roster) sys = roster + (sys ?? "");
+
       // Checklist compartida: si hi ha tasques a la llista, les posem DAMUNT
       // del system prompt perquè la IA principal les veja i no se'n perga cap.
       const taskCtx = useTaskListStore.getState().asContext();
@@ -2622,6 +2762,16 @@ export const useAgentStore = create<AgentState>((set, get) => {
       const expert = sess.expertId
         ? useExpertStore.getState().experts.find((e) => e.id === sess.expertId) ?? null
         : null;
+      // Quan l'expert és qui parla pel xat, abans NO veia res del sistema
+      // d'agents (runSolo usa només el seu system prompt rust). Ara rep la
+      // nota de delegació + la llista dels seus COMPANYS: un especialista
+      // també pot treballar en equip i delegar subtasques amb «@use:».
+      const expertSystemExtra = expert
+        ? rosterContext(
+            useExpertStore.getState().experts.map((e) => ({ name: e.name, role: e.role })),
+            expert.name,
+          ) + AGENT_CREATION_SYSTEM
+        : undefined;
 
       const t0 = Date.now();
       patch(sid, {
@@ -2643,7 +2793,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
           });
           const out = await useExpertStore
             .getState()
-            .runSolo(expert.id, msg, { session: sid, history });
+            .runSolo(expert.id, msg, { session: sid, history, systemExtra: expertSystemExtra });
           if (out !== null) {
             const thinking = await fetchThinking(sid);
             get().pushStep(sid, {
@@ -2905,6 +3055,7 @@ function switchChatBucket(root: string | null) {
             elapsedMs: m.elapsedMs ?? null,
             at: m.at,
             error: m.error ?? false,
+            vote: m.vote ?? null,
           })),
         })),
       })

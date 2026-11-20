@@ -51,8 +51,26 @@ export const unrealInfo = () =>
 export const unrealDetectInstallations = () =>
   invoke<string[]>("unreal_detect_installations");
 
-export const unrealAutoConnect = (project: string, timeout = 90) =>
-  invoke<LaunchReport>("unreal_auto_connect", { project, timeout });
+/// Instal·lacions A MITGES (l'Epic Launcher encara baixant el motor): no
+/// serveixen per connectar, però l'UI les mostra perquè l'usuari sap on
+/// les té i per què NoOrbit diu que no ha trobat cap motor.
+export const unrealDetectPendingInstallations = () =>
+  invoke<string[]>("unreal_detect_pending_installations");
+
+/// Connecta (i arrenca si cal) l'editor amb un projecte.
+///
+/// `engineRoot` és opcional: carpeta del motor triada a mà (p. ex. un Unreal
+/// instal·lat en un disc extern). Si no es passa, el backend ho detecta sol.
+export const unrealAutoConnect = (
+  project: string,
+  timeout = 90,
+  engineRoot?: string | null
+) =>
+  invoke<LaunchReport>("unreal_auto_connect", {
+    project,
+    timeout,
+    engineRoot: engineRoot ?? null,
+  });
 
 export const unrealRunPython = (code: string) =>
   invoke<PythonResult>("unreal_run_python", {
@@ -108,3 +126,48 @@ export const unrealGetRcPort = () => invoke<number>("unreal_get_rc_port");
 
 export const unrealSetRcPort = (port: number) =>
   invoke<number>("unreal_set_rc_port", { port });
+
+// ── Agent MCP (plugin oficial d'Unreal 5.8+) ──────────────────────────────
+
+export interface UnrealSetupStep {
+  name: string;
+  ok: boolean;
+  message: string;
+}
+
+export interface UnrealSetupReport {
+  steps: UnrealSetupStep[];
+  ok: boolean;
+  mcp_connected: boolean;
+  tools: number;
+  message: string;
+}
+
+export interface UnrealMcpTool {
+  name: string;
+  description: string | null;
+  input_schema?: unknown;
+}
+
+export interface UnrealMcpCallResult {
+  text: string;
+  is_error: boolean;
+}
+
+/// ORQUESTRADOR «Activar Agent Unreal»: prepara l'entorn en segon pla
+/// (Ollama, plugins MCP, auto-arrencada del servidor, handshake MCP).
+export const unrealAgentSetup = (project: string, launch: boolean) =>
+  invoke<UnrealSetupReport>("unreal_agent_setup", { project, launch });
+
+/// Executa una tasca d'alt nivell contra l'editor (el model local tria les
+/// eines MCP rellevants i les crida en un bucle fins a la resposta final).
+export const unrealAgentTask = (prompt: string) =>
+  invoke<string>("unreal_agent_task", { prompt });
+
+/// Catàleg d'eines MCP de l'editor.
+export const unrealMcpTools = () =>
+  invoke<UnrealMcpTool[]>("unreal_mcp_tools");
+
+/// Executa una eina MCP concreta (depuració / ordres puntuals).
+export const unrealMcpCall = (name: string, args: Record<string, unknown>) =>
+  invoke<UnrealMcpCallResult>("unreal_mcp_call", { name, args });

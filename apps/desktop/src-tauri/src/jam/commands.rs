@@ -9,6 +9,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -16,6 +17,16 @@ use tokio_util::sync::CancellationToken;
 
 use crate::jam::{emit, store_plan, derive_jam_id, jam_data_dir, jam_workdir, JamRequest, JamRunner, JamState};
 use crate::AppState;
+
+/// Sostre de temps per fer el PLA amb la IA.
+///
+/// Ha de ser MES GRAN que el pressupost TOTAL del planner (3 intents de
+/// 20 min = ~1 h): si el nostre timeout es crusca abans que el planner
+/// pugui fer el SEGON intent, es perden els reintents (que són els que
+/// salven la Jam quan el model local triga o torna JSON invàlid) i la Jam
+/// mor on abans s'hauria recuperat. El que atura la Jam de debò és
+/// l'usuari: el pla és CANCEL·LABLE i el token es mira en cada instant.
+pub(super) const PLAN_TIMEOUT: Duration = Duration::from_secs(65 * 60);
 
 
 /// Estat global de la Jam (n'hi ha pas de dues alhora).
@@ -38,7 +49,10 @@ impl Default for JamHandle {
 
 impl JamHandle {
     fn snapshot(&self) -> JamState {
-        self.state.lock().unwrap().clone()
+        // Sense `unwrap`: si el mutex s'havia envenenat (un panell va fallar
+        // dins del lock), la Jam encara ha de poder pintar l'estat en comptes
+        // de fer caure el panell sencer.
+        self.state.lock().map(|s| s.clone()).unwrap_or_default()
     }
     fn set(&self, f: impl FnOnce(&mut JamState)) {
         if let Ok(mut s) = self.state.lock() {
@@ -106,6 +120,9 @@ pub async fn jam_start(
     jam: State<'_, Arc<JamHandle>>,
     request: JamRequest,
 ) -> Result<(), String> {
+    // Comprovació ràpida: si ja hi ha una Jam en marxa, ni tan cal validar
+    // res. El control que REALMENT decideix és el compare-and-swap de més
+    // avall, que és atòmic.
     if jam.running.load(Ordering::SeqCst) {
         return Err("ja hi ha una Jam en marxa".into());
     }
@@ -135,9 +152,6 @@ pub async fn jam_start(
         );
     }
 
-    // Pla (amb la IA connectada de l'usuari) per mostrar-lo a la UI.
-    let plan = JamRunner::make_plan(state.ai_manager.clone(), &request).await?;
-
     // Rellotge de la Jam: el fill rep el `--duration` i s'atura sol.
     let duration = request.duration_secs.clamp(60, crate::jam::MAX_JAM_DURATION_SECS);
 
@@ -146,19 +160,84 @@ pub async fn jam_start(
     // de diferent i la represa mai trobava l'estat desat.
     let jam_id = derive_jam_id(&root, &brief, &request.engine, duration);
 
+    // ── RESERVA IMMEDIATA DE LA JAM ────────────────────────────────────
+    // Dos «Comença» (o dues finestres) no poden passar els dos el control.
+    // El flag s'ha de posar ABANS de qualsevol espera: abans es marcava
+    // després de dos `await` (el repo i el sondeig de la IA) i hi havia una
+    // finestra de SEGONS en què una segona Jam es colava: pisava l'estat i
+    // el token de la primera i les dues escrivien al mateix repo.
+    if jam
+        .running
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return Err("ja hi ha una Jam en marxa".into());
+    }
+
+    // EL TOKEN S'INSTAL·LA ABANS DE QUALSEVOL ESPERA: «Atura» ha de poder
+    // aturar la Jam des del primer instant (i no el token vell d'una Jam
+    // anterior).
+    let token = CancellationToken::new();
+    if let Ok(mut c) = jam.cancel.lock() {
+        *c = token.clone();
+    }
+
+    // LA JAM ARRENCA ABANS DEL PLA. Fins ara `jam_start` esperava la crida a
+    // la IA per fer el pla (que amb un model local pot durar minuts) ABANS de
+    // marcar-se com a en marxa: la UI no veia res, el panell semblava penjat
+    // i «Comença» es podia polsar altra vegada. Ara l'estat `running` + el
+    // cronòmetre s'emeten a l'instant i el pla es fa en segon pla; si falla,
+    // la Jam es marca com a fallida amb explicació.
+    let now = chrono::Local::now().timestamp();
+    let report_path = root.join("REPORT.md");
+    jam.set(|s| {
+        *s = JamState {
+            running: true,
+            title: String::new(),
+            completed: 0,
+            blocked: 0,
+            skipped: 0,
+            total: 0,
+            current_task: String::new(),
+            current_detail: "preparant el pla…".into(),
+            started_at: now,
+            finished_at: None,
+            duration_secs: duration,
+            report_path: report_path.to_string_lossy().to_string(),
+            project_path: root.to_string_lossy().to_string(),
+            error: None,
+            // El proveïdor i el model s'hi afegeixen quan es sapen (després
+            // del sondeig de l'IA): no han de delaying l'arribada a pantalla.
+            provider: String::new(),
+            model: String::new(),
+            stopping: false,
+        };
+    });
+    let _ = app.emit("jam://state", jam.snapshot());
+
     // Fitxers interns FORA del repo del projecte: escrits a l'arrel, el
     // `git add -A` del checkpointer els incloïa als commits i el
     // `git clean -fd` els esborrava abans de cada tasca (perdia el brief i,
     // pitjor, l'estat de represa).
     let workdir = jam_workdir(&jam_data_dir(), &jam_id);
     if let Err(e) = std::fs::create_dir_all(&workdir) {
-        return Err(format!("no s'ha pogut crear la carpeta de treball: {e}"));
+        // La reserva es lliura (i la UI ho sap): si no, la Jam quedaria
+        // «en marxa» per sempre amb cap agent darrere.
+        let msg = format!("no s'ha pogut crear la carpeta de treball: {e}");
+        fail(&app, jam.inner(), msg.clone());
+        return Err(msg);
     }
     // El `git clean -fd` del checkpointer només respeuta els fitxers IGNORED;
     // als directoris de dades que versions anteriors escrivien DINS del repo
     // (`.noorbit/`) cal afegir-los a `.git/info/exclude`: si no, una Jam
     // antiga encallada allà dins s'esborrava (o acabava als commits).
-    if let Err(e) = noorbit_persistence::ensure_git_excluded(&root, &[".noorbit/", ".noorbit-jam/"])
+    // `target/` és el directori de compilació de Rust (Bevy): sense excloure-lo
+    // el `git add -A` el commiteja (centenes de MB) i el `git clean -fd`
+    // esborraria la compilació sencera entre tasques.
+    if let Err(e) = noorbit_persistence::ensure_git_excluded(
+        &root,
+        &[".noorbit/", ".noorbit-jam/", "target/"],
+    )
         .await
     {
         eprintln!("jam: no s'ha pogut actualitzar .git/info/exclude: {e}");
@@ -175,47 +254,25 @@ pub async fn jam_start(
         "durationSecs": duration,
     });
     if let Err(e) = std::fs::write(&brief_path, serde_json::to_vec_pretty(&brief_json).unwrap_or_default()) {
-        return Err(format!("no s'ha pogut escriure el brief: {e}"));
-    }
-    // El pla JA fet s'envia al fill: si no, el fill el torna a demanar a la IA
-    // (cost doble) i executa un pla DISTINT del que veu l'usuari.
-    if let Err(e) = std::fs::write(
-        &plan_path,
-        serde_json::to_vec_pretty(&store_plan(&plan)).unwrap_or_default(),
-    ) {
-        return Err(format!("no s'ha pogut escriure el pla: {e}"));
+        let msg = format!("no s'ha pogut escriure el brief: {e}");
+        fail(&app, jam.inner(), msg.clone());
+        return Err(msg);
     }
 
     // Proveïdor i model ACTIUS de l'app. El fill construeix el seu propi
     // `AiManager` i aquests dos valors NO es persisteixen: sense passar-los,
     // la Jam sempre parlava amb Ollama encara que l'usuari tingui un proveïdor
     // remot seleccionat.
-    let provider = state.ai_manager.active_provider().await;
-    let model = state.ai_manager.selected_model().await.unwrap_or_default();
-
-    jam.running.store(true, Ordering::SeqCst);
-    let token = CancellationToken::new();
-    if let Ok(mut c) = jam.cancel.lock() {
-        *c = token.clone();
-    }
-    let now = chrono::Local::now().timestamp();
-    let report_path = root.join("REPORT.md");
+    //
+    // `active_labels` aplica el mateix criteri que el xat (caiguda a la IA
+    // remota o a la IA integrada si Ollama no està en marxa): el que es
+    // mostra a la UI és EXACTAMENT el que farà servir la Jam.
+    let (provider, model) = state.ai_manager.active_labels().await;
+    let ai_manager = state.ai_manager.clone();
+    // Ara sí que es sap quina IA hi treballa: la capçal del panell ho diu.
     jam.set(|s| {
-        *s = JamState {
-            running: true,
-            title: plan.title.clone(),
-            completed: 0,
-            blocked: 0,
-            skipped: 0,
-            total: plan.tasks.len() as u32,
-            current_task: String::new(),
-            current_detail: "planning…".into(),
-            started_at: now,
-            finished_at: None,
-            duration_secs: duration,
-            report_path: report_path.to_string_lossy().to_string(),
-            error: None,
-        };
+        s.provider = provider.clone();
+        s.model = model.clone();
     });
     let _ = app.emit("jam://state", jam.snapshot());
 
@@ -223,6 +280,62 @@ pub async fn jam_start(
     let app2 = app.clone();
 
     tauri::async_runtime::spawn(async move {
+        // El Mac/PC NO s'ha de suspendre mentre la Jam treballa en segon pla:
+        // el guard dura el que dura el supervisor (i els seus reinicis); en
+        // acabar o fallar, allibera i el SO torna al seu comportament normal.
+        let _awake = crate::keep_awake::activar("Jam");
+        // ── Pla (amb la IA connectada), ARA en segon pla ──────────────────
+        // El pla el fa la IA: amb un model local pot trigar MINUTS i, si el
+        // model no respon de cap manera, es queda penjada. Per això la fase
+        // és CANCEL·LABLE (l'atura de l'usuari la talla de debò) i té un
+        // sostre de temps.
+        let plan = match plan_with_future(JamRunner::make_plan(ai_manager.clone(), &request), &token)
+            .await
+        {
+            PlanOutcome::Planned(p) => p,
+            PlanOutcome::Cancelled => {
+                let _ = std::fs::remove_dir_all(&workdir);
+                stopped(&app2, &jam_handle);
+                return;
+            }
+            PlanOutcome::Failed(msg) => {
+                let _ = std::fs::remove_dir_all(&workdir);
+                fail(&app2, &jam_handle, msg);
+                return;
+            }
+        };
+        // El pla JA fet s'envia al fill: si no, el fill el torna a demanar a la IA
+        // (cost doble) i executa un pla DISTINT del que veu l'usuari.
+        if let Err(e) = std::fs::write(
+            &plan_path,
+            serde_json::to_vec_pretty(&store_plan(&plan)).unwrap_or_default(),
+        ) {
+            let _ = std::fs::remove_dir_all(&workdir);
+            fail(&app2, &jam_handle, format!("no s'ha pogut escriure el pla: {e}"));
+            return;
+        }
+        // El pla existeix: la UI rep el títol real i el denominador de la
+        // barra de progrés abans que el fill movi un sol fitxer.
+        jam_handle.set(|s| {
+            s.title = plan.title.clone();
+            s.total = plan.tasks.len() as u32;
+            s.current_detail = format!("pla fet ({} tasques) · executant…", plan.tasks.len());
+        });
+        emit(
+            &app2,
+            "note",
+            "",
+            &format!("pla fet: «{}» amb {} tasques", plan.title, plan.tasks.len()),
+            true,
+        );
+        let _ = app2.emit("jam://state", jam_handle.snapshot());
+        // Si l'usuari ha demanat aturar DURANT el pla, ni tan sols no s'ha de
+        // llançar l'agent: es neteja i la Jam s'acaba.
+        if token.is_cancelled() {
+            let _ = std::fs::remove_dir_all(&workdir);
+            stopped(&app2, &jam_handle);
+            return;
+        }
         // ── El binari que es relanza com a fill ────────────────────────────
         let exe = match std::env::current_exe() {
             Ok(p) => p,
@@ -285,10 +398,12 @@ pub async fn jam_start(
             }
         };
 
-        // Cancel·lació des de la UI.
+        // Cancel·lació des de la UI. El token es CLONA perquè el pares també
+        // el vol consultar després (per saber si l'aturada va ser de l'usuari).
         let cancel_bg = cancel.clone();
+        let token_watch = token.clone();
         tokio::spawn(async move {
-            token.cancelled().await;
+            token_watch.cancelled().await;
             cancel_bg.cancel();
         });
 
@@ -344,6 +459,13 @@ pub async fn jam_start(
                                         s.current_task = task.to_string();
                                         s.current_detail = detail.to_string();
                                     });
+                                }
+                                if kind == "note" {
+                                    // «Què fa la IA ara mateix»: és una línia
+                                    // curta que alimenta el detall viu (pantalla
+                                    // de feina i panell) sense esborrar la tasca.
+                                    jam3.set(|s| s.current_detail = detail.to_string());
+                                    let _ = app3.emit("jam://state", jam3.snapshot());
                                 }
                                 if kind == "task_done" || kind == "task_error" {
                                     // El text del `detail` és el que dona
@@ -438,13 +560,49 @@ pub async fn jam_start(
 
         jam_handle.set(|s| {
             s.running = false;
+            s.stopping = false;
             s.finished_at = Some(chrono::Local::now().timestamp());
+            // Si l'aturada la va demanar l'usuari, el detall ho diu (no és un
+            // error: és una ordre, no un fracàs).
+            if token.is_cancelled() {
+                s.current_detail = "aturada per l'usuari".into();
+            }
         });
         jam_handle.running.store(false, Ordering::SeqCst);
         let _ = app2.emit("jam://state", jam_handle.snapshot());
     });
 
     Ok(())
+}
+
+/// Resultat de la fase de pla.
+#[derive(Debug)]
+pub(super) enum PlanOutcome {
+    Planned(noorbit_jam::Plan),
+    /// L'usuari ha demanat aturar la Jam mentre la IA feia el pla.
+    Cancelled,
+    Failed(String),
+}
+
+/// Fa el pla amb la IA connectada: CANCEL·LABLE (l'atura de l'usuari la
+/// talla de debò) i amb un sostre de temps (un model que no respon no ha de
+/// deixar la Jam penjada per sempre sense que l'usuari ho noti).
+///
+/// El futur del pla s'injecta per poder-ho provar amb una IA falsa que no
+/// acaba mai (vegeu `jam::tests`).
+pub(super) async fn plan_with_future<Fut>(plan: Fut, token: &CancellationToken) -> PlanOutcome
+where
+    Fut: std::future::Future<Output = Result<noorbit_jam::Plan, String>>,
+{
+    tokio::select! {
+        biased;
+        _ = token.cancelled() => PlanOutcome::Cancelled,
+        r = tokio::time::timeout(PLAN_TIMEOUT, plan) => match r {
+            Ok(Ok(p)) => PlanOutcome::Planned(p),
+            Ok(Err(e)) => PlanOutcome::Failed(format!("la IA no ha pogut fer el pla: {e}")),
+            Err(_) => PlanOutcome::Failed("la IA no ha respost a temps per fer el pla".into()),
+        },
+    }
 }
 
 /// Recupera el resum del guardian (el pare el coneix) i l'afegeix al
@@ -477,7 +635,21 @@ fn fail(app: &AppHandle, jam: &Arc<JamHandle>, msg: String) {
     emit(app, "error", "", &msg, false);
     jam.set(|s| {
         s.running = false;
+        s.stopping = false;
         s.error = Some(msg);
+        s.finished_at = Some(chrono::Local::now().timestamp());
+    });
+    jam.running.store(false, Ordering::SeqCst);
+    let _ = app.emit("jam://state", jam.snapshot());
+}
+
+/// Marca la Jam com a ATURADA per l'usuari (sense error: no ha estat un
+/// fracàs, sinó una ordre de l'usuari) i neteja l'estat.
+fn stopped(app: &AppHandle, jam: &Arc<JamHandle>) {
+    jam.set(|s| {
+        s.running = false;
+        s.stopping = false;
+        s.current_detail = "aturada per l'usuari".into();
         s.finished_at = Some(chrono::Local::now().timestamp());
     });
     jam.running.store(false, Ordering::SeqCst);
@@ -506,18 +678,46 @@ fn total_system_ram() -> Option<u64> {
 }
 
 /// Atura la Jam.
+///
+/// Cancel·la el token —que respecten TOTS els actors: la fase de pla, el
+/// guardian i el fill— i avisa la UI DE SEGUIDA. Abans no s'emetia cap estat
+/// en aturar, així que prémer «Atura» no canvivia res a pantalla i l'usuari
+/// pensava que el botó no funcionava.
 #[tauri::command]
-pub fn jam_stop(jam: State<'_, Arc<JamHandle>>) {
+pub fn jam_stop(app: AppHandle, jam: State<'_, Arc<JamHandle>>) {
+    request_stop(&jam);
+    let _ = app.emit("jam://state", jam.snapshot());
+    emit(&app, "note", "", "aturada demanada per l'usuari", true);
+}
+
+/// Cancel·lació de la Jam en curs: el token es cancel·la i l'estat passa a
+/// «aturant…» fins que l'agent s'ha aturat del tot.
+pub fn request_stop(jam: &JamHandle) {
     if let Ok(c) = jam.cancel.lock() {
         c.cancel();
     }
     jam.set(|s| {
-        s.current_detail = "aturada per l'usuari".into();
+        if s.running {
+            s.stopping = true;
+            s.current_detail = "aturant…".into();
+        }
     });
 }
 
 /// Estat actual.
 #[tauri::command]
-pub fn jam_state(jam: State<'_, Arc<JamHandle>>) -> JamState {
-    jam.snapshot()
+pub async fn jam_state(
+    state: State<'_, AppState>,
+    jam: State<'_, Arc<JamHandle>>,
+) -> Result<JamState, String> {
+    let mut st = jam.snapshot();
+    if !st.running {
+        // Quan no hi ha Jam en marxa, el panell mostra la IA que farà servir
+        // la PRÒXIMA Jam (l'usuari pot haver canviat de proveïdor al xat).
+        let (provider, model) = state.ai_manager.active_labels().await;
+        st.provider = provider;
+        st.model = model;
+        st.stopping = false;
+    }
+    Ok(st)
 }

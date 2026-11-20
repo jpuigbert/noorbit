@@ -10,6 +10,7 @@ import { useUIStore } from "../stores/uiStore";
 import { useAIActivity } from "../stores/activityStore";
 import { useSystemStatsStore, memPercent, formatBytes } from "../stores/systemStatsStore";
 import BackgroundTaskBadge from "./BackgroundTaskBadge";
+import AutonomousClock from "./AutonomousClock";
 import AccountChip from "./Account/AccountChip";
 import { ProblemsBadge } from "./Problems/ProblemsPanel";
 import UpdateBadge from "./Update/UpdateBadge";
@@ -87,6 +88,7 @@ export default function StatusBar() {
       <div className="spacer" />
       <AccountChip />
       <BackgroundTaskBadge />
+      <AutonomousClock />
       {/* Commutadors ràpids de la diversió: so de tasca acabada i cursor
           disfressat. Un clic i canvia l'estat (es desa entre sessions). */}
       <button

@@ -382,7 +382,7 @@ async fn generate_online(
     }
     let mut last_err = String::new();
     for id in ids {
-        let prepared = remote.lock().unwrap().prepare(&id);
+        let prepared = remote.lock().unwrap().prepare(&id, false);
         let (provider, client) = match prepared {
             Ok(v) => v,
             Err(e) => {
@@ -473,7 +473,7 @@ async fn edit_online(
     };
     let mut last_err = String::new();
     for id in ids {
-        let prepared = remote.lock().unwrap().prepare(&id);
+        let prepared = remote.lock().unwrap().prepare(&id, false);
         let (provider, client) = match prepared {
             Ok(v) => v,
             Err(e) => {

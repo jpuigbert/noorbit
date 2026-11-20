@@ -1,6 +1,6 @@
 [package]
 name = "no-orbit"
-version = "0.71.11-alpha"
+version = "0.71.13-alpha"
 description = "NoOrbit — IDE amb agent IA local, Blender i Unreal Engine 5"
 authors = ["NoOrbit"]
 edition = "2021"
@@ -56,6 +56,13 @@ async-trait = "0.1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# Dictat per veu amb el motor del SISTEMA (SFSpeechRecognizer). Són crates que
+# Tauri ja arrossega; ací els declarem com a dependència directa per a `voice/macos.rs`.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+block2 = "0.6"
 
 [dev-dependencies]
 tempfile = "3"

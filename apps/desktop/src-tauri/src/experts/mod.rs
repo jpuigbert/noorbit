@@ -127,8 +127,18 @@ impl ExpertManager {
         if input.name.trim().is_empty() {
             return Err(anyhow!("Cal donar un nom a l'especialista"));
         }
+        let mut list = self.experts.lock().unwrap();
+        // Id únic: en creacions en ràfega (p. ex. importar 72 agents d'ECC)
+        // el mil·lisegon es repeteix i dos especialistes tindrien el mateix id.
+        let base = format!("exp-{}", chrono::Utc::now().timestamp_millis());
+        let mut id = base.clone();
+        let mut n = 2;
+        while list.iter().any(|e| e.id == id) {
+            id = format!("{base}-{n}");
+            n += 1;
+        }
         let expert = Expert {
-            id: format!("exp-{}", chrono::Utc::now().timestamp_millis()),
+            id,
             name: input.name.trim().to_string(),
             role: input.role.trim().to_string(),
             system_prompt: input.system_prompt.clone(),
@@ -136,7 +146,6 @@ impl ExpertManager {
             autonomous: false,
             created_at: chrono::Utc::now().timestamp_millis(),
         };
-        let mut list = self.experts.lock().unwrap();
         list.push(expert.clone());
         self.save(&list)?;
         Ok(expert)

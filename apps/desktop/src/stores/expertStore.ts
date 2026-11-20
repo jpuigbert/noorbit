@@ -55,7 +55,13 @@ interface ExpertState {
   runSolo: (
     expertId: string,
     prompt: string,
-    opts?: { session?: string; history?: { role: string; content: string }[] }
+    opts?: {
+      session?: string;
+      history?: { role: string; content: string }[];
+      /// Text extra que s'afegeix al system prompt de l'especialista (la
+      /// llista dels seus companys perquè pugui delegar-hi amb «@use:»).
+      systemExtra?: string;
+    }
   ) => Promise<string | null>;
   runTeam: (
     goal: string,
@@ -165,6 +171,7 @@ export const useExpertStore = create<ExpertState>((set, get) => ({
         prompt,
         session: opts?.session ?? null,
         history: opts?.history ?? null,
+        systemExtra: opts?.systemExtra ?? null,
       });
       set({ soloResult: text });
       return text;

@@ -15,7 +15,11 @@ const MAX_ACCEPTANCE_LEN: usize = 200;
 /// Durada màxima del pla: 7 dies. Ha de coincidir amb `MAX_JAM_DURATION_SECS`
 /// de l'app (jam/mod.rs) perquè les feines multi-dia no es rebutgen ací.
 const MAX_PLAN_DURATION: Duration = Duration::from_secs(7 * 24 * 3600);
-const LLM_TIMEOUT: Duration = Duration::from_secs(120);
+/// Temps màxim d'UNA crida al planner. Amb models locals sobre CPU el JSON
+/// del pla (totes les tasques d'un pla de dies) pot tardar diversos minuts a
+/// generar-se; amb 120 s el planner fallava SEMPRE en mode autònom i la Jam
+/// no arribava mai a escriure codi.
+const LLM_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const MAX_RETRIES: u32 = 2;
 
 #[derive(Debug, Error)]
@@ -39,10 +43,20 @@ pub struct Brief {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Engine { Unreal5, Godot4, Unity, Custom, Blender }
+pub enum Engine { Unreal5, Godot4, Unity, Custom, Blender, Bevy }
 impl Engine {
-    fn as_str(self) -> &'static str {
-        match self { Engine::Unreal5 => "unreal5", Engine::Godot4 => "godot4", Engine::Unity => "unity", Engine::Custom => "custom", Engine::Blender => "blender" }
+    /// Versió LLIBRE per al prompt del planner: el model ha de saber QUÈ és
+    /// el motor per escriure codi compatible (una joc de Bevy és Rust amb
+    /// ECS; «bevy» a secas no li diu res).
+    fn describe(self) -> &'static str {
+        match self {
+            Engine::Unreal5 => "unreal5 (Unreal Engine 5, C++/Blueprints, .uproject)",
+            Engine::Godot4 => "godot4 (Godot 4, GDScript, .tscn/.gd, project.godot)",
+            Engine::Unity => "unity (Unity, C#, .unity/.cs)",
+            Engine::Custom => "custom (web/HTML amb qualsevol stack: TypeScript, React, Vite…)",
+            Engine::Blender => "blender (Blender, Python bpy, escenes .blend i renders)",
+            Engine::Bevy => "bevy (Bevy 0.14, Rust, Cargo.toml + src/main.rs, ECS)",
+        }
     }
     pub fn parse(s: &str) -> Result<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
@@ -51,6 +65,7 @@ impl Engine {
             "unity" => Ok(Engine::Unity),
             "custom" => Ok(Engine::Custom),
             "blender" => Ok(Engine::Blender),
+            "bevy" | "bevy_rust" | "bevyrs" | "rust" => Ok(Engine::Bevy),
             other => Err(PlannerError::UnknownEngine(other.into())),
         }
     }
@@ -100,7 +115,7 @@ impl Planner {
 }
 
 fn build_prompt(brief: &Brief, feedback: Option<&str>) -> String {
-    let engine = brief.engine.as_str();
+    let engine = brief.engine.describe();
     let dur_min = brief.duration.as_secs() / 60;
     let mut p = String::new();
     p.push_str("Ets un planificador expert en desenvolupament de videojocs.\n");
@@ -250,6 +265,16 @@ mod tests {
     #[test]
     fn engine_parse() {
         assert_eq!(Engine::parse("UE5").unwrap(), Engine::Unreal5);
+        assert_eq!(Engine::parse("bevy").unwrap(), Engine::Bevy);
+        assert_eq!(Engine::parse("Rust").unwrap(), Engine::Bevy);
         assert!(Engine::parse("foo").is_err());
+    }
+
+    /// El Bevy ha d'arribar al planner com a «Rust + ECS», no com a «bevy»:
+    /// el model escriu el codi del pla a partir d'aquesta cadena.
+    #[test]
+    fn el_bevy_s_explica_al_planner() {
+        assert!(Engine::Bevy.describe().contains("Rust"));
+        assert!(Engine::Godot4.describe().contains("GDScript"));
     }
 }

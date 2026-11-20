@@ -29,9 +29,12 @@ export function setAutocompleteEnabled(v: boolean) {
   }
 }
 
-/// Delays: debonce del tipeig i vàlua màxima de la resposta del model.
+/// Delays: debonce del tipeig i valor màxim de la resposta del model.
+/// El sostre (8,5 s) va just per damunt dels 8 s del backend: si fos més curt
+/// seria l'editor qui tallaria els proveïdors remots (Claude, DeepSeek) abans
+/// que el backend pogués respondre, i el suggeriment no arribaria mai.
 const DEBOUNCE_MS = 350;
-const TIMEOUT_MS = 6_000;
+const TIMEOUT_MS = 8_500;
 
 interface Timer {
   t: ReturnType<typeof setTimeout> | null;

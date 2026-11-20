@@ -32,6 +32,10 @@ interface SkillState {
   loading: boolean;
   busy: boolean;
   lastError: string | null;
+  /// Missatge REAL del backend (el `lastError` només és el codi de la font).
+  /// Sense això la UI només podia dir «no s'ha pogut instal·lar» i l'usuari
+  /// no sabia si era el repo, la xarxa o un SKILL.md que no existeix.
+  lastErrorDetail: string | null;
 
   load: () => Promise<void>;
   reload: () => Promise<void>;
@@ -45,12 +49,14 @@ interface SkillState {
   exportExternal: (directory: string) => Promise<number | null>;
 }
 
-async function runInstall(fn: () => Promise<void>): Promise<boolean> {
+/// Executa una crida i retorna `null` si va bé o el missatge de l'error.
+/// Tauri rebutja amb la cadena que ha produït el comandament Rust.
+async function runInstall(fn: () => Promise<void>): Promise<string | null> {
   try {
     await fn();
-    return true;
-  } catch {
-    return false;
+    return null;
+  } catch (e) {
+    return typeof e === "string" && e.trim() ? e : String(e);
   }
 }
 
@@ -59,6 +65,7 @@ export const useSkillStore = create<SkillState>((set, get) => ({
   loading: false,
   busy: false,
   lastError: null,
+  lastErrorDetail: null,
 
   load: async () => {
     set({ loading: true });
@@ -80,57 +87,58 @@ export const useSkillStore = create<SkillState>((set, get) => ({
   },
 
   installGithub: async (repo) => {
-    set({ busy: true, lastError: null });
-    const ok = await runInstall(async () => {
+    set({ busy: true, lastError: null, lastErrorDetail: null });
+    const detail = await runInstall(async () => {
       await invoke("skills_install_github", { repo });
       await get().load();
     });
-    if (!ok) set({ lastError: "github" });
+    if (detail !== null) set({ lastError: "github", lastErrorDetail: detail });
     set({ busy: false });
-    return ok;
+    return detail === null;
   },
 
   installUrl: async (url) => {
-    set({ busy: true, lastError: null });
-    const ok = await runInstall(async () => {
+    set({ busy: true, lastError: null, lastErrorDetail: null });
+    const detail = await runInstall(async () => {
       await invoke("skills_install_url", { url });
       await get().load();
     });
-    if (!ok) set({ lastError: "url" });
+    if (detail !== null) set({ lastError: "url", lastErrorDetail: detail });
     set({ busy: false });
-    return ok;
+    return detail === null;
   },
 
   installZip: async (path) => {
-    set({ busy: true, lastError: null });
-    const ok = await runInstall(async () => {
+    set({ busy: true, lastError: null, lastErrorDetail: null });
+    const detail = await runInstall(async () => {
       await invoke("skills_install_zip", { source: path });
       await get().load();
     });
-    if (!ok) set({ lastError: "zip" });
+    if (detail !== null) set({ lastError: "zip", lastErrorDetail: detail });
     set({ busy: false });
-    return ok;
+    return detail === null;
   },
 
   installLocal: async (path) => {
-    set({ busy: true, lastError: null });
-    const ok = await runInstall(async () => {
+    set({ busy: true, lastError: null, lastErrorDetail: null });
+    const detail = await runInstall(async () => {
       await invoke("skills_install_local", { path });
       await get().load();
     });
-    if (!ok) set({ lastError: "local" });
+    if (detail !== null) set({ lastError: "local", lastErrorDetail: detail });
     set({ busy: false });
-    return ok;
+    return detail === null;
   },
 
   preview: async (kind, source) => {
-    set({ busy: true, lastError: null });
+    set({ busy: true, lastError: null, lastErrorDetail: null });
     try {
       const p = await invoke<SkillPreview>("skills_preview", { kind, source });
       set({ busy: false });
       return p;
-    } catch {
-      set({ busy: false, lastError: kind });
+    } catch (e) {
+      const detail = typeof e === "string" && e.trim() ? e : String(e);
+      set({ busy: false, lastError: kind, lastErrorDetail: detail });
       return null;
     }
   },
@@ -141,7 +149,7 @@ export const useSkillStore = create<SkillState>((set, get) => ({
   },
 
   restoreBuiltins: async () => {
-    set({ busy: true, lastError: null });
+    set({ busy: true, lastError: null, lastErrorDetail: null });
     let ok = false;
     try {
       const skills = await invoke<Skill[]>("skills_restore_builtin");
@@ -155,7 +163,7 @@ export const useSkillStore = create<SkillState>((set, get) => ({
   },
 
   exportExternal: async (directory) => {
-    set({ busy: true, lastError: null });
+    set({ busy: true, lastError: null, lastErrorDetail: null });
     try {
       const n = await invoke<number>("skills_export_external", { directory });
       set({ busy: false });

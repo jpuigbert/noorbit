@@ -1,0 +1,188 @@
+/* ESTALVI DE PANTALLA DE LA FEINA (noorbit-screensaver).
+   Només tokens del theme.css — cap color literal — perquè s'adapti al tema
+   i es vegia bé de lluny a pantalla completa. */
+.saver-root {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 6vh 6vw;
+  background: var(--bg-0, #07070c);
+  color: var(--text-0);
+  font-family: var(--font-ui);
+  overflow: hidden;
+  user-select: none;
+  cursor: default;
+}
+
+/* Camp d'estrelles lleuger (animació de brillantor); purament decoratiu. */
+.saver-stars {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.saver-stars i {
+  position: absolute;
+  border-radius: 50%;
+  background: var(--text-2, #6b6b80);
+  opacity: 0.35;
+  animation: saver-twinkle 9s ease-in-out infinite;
+}
+@keyframes saver-twinkle {
+  0%,
+  100% {
+    opacity: 0.12;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.saver-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 1;
+}
+.saver-logo {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-1);
+}
+.saver-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--accent);
+  padding: 3px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-2);
+}
+.saver-mode.idle {
+  color: var(--text-2);
+}
+
+.saver-title {
+  z-index: 1;
+  font-size: 30px;
+  font-weight: 700;
+  text-align: center;
+  max-width: 90%;
+  line-height: 1.25;
+  color: var(--text-0);
+}
+.saver-title.idle {
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--text-1);
+}
+
+/* Cronòmetre enorme: és el que ha de ser llegible des de l'altra banda de
+   l'habitació. */
+.saver-clock {
+  z-index: 1;
+  font-family: var(--font-mono);
+  font-size: clamp(56px, 12vw, 140px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: var(--text-0);
+  font-variant-numeric: tabular-nums;
+}
+
+.saver-progress {
+  z-index: 1;
+  width: min(680px, 90%);
+}
+
+.saver-detail {
+  z-index: 1;
+  max-width: 82%;
+  text-align: center;
+  font-size: 17px;
+  color: var(--text-1);
+  line-height: 1.4;
+}
+
+.saver-project {
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  color: var(--text-1);
+  padding: 6px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+}
+
+/* FEED VIU: «què fa la IA» i el seu pensament, en directe (estil terminal).
+   Només es veu amb una Jam en marxa; és la raó de ser de la pantalla. */
+.saver-live {
+  z-index: 1;
+  width: min(820px, 92%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.saver-live-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.saver-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 26vh;
+  overflow-y: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  scrollbar-width: thin;
+}
+.saver-feed-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--text-1);
+}
+.saver-feed-row svg {
+  flex: none;
+  margin-top: 3px;
+}
+.saver-feed-row.note {
+  color: var(--accent);
+}
+.saver-feed-row.thinking {
+  color: var(--text-1);
+}
+.saver-feed-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+}
+
+.saver-hint {
+  z-index: 1;
+  position: absolute;
+  bottom: 4vh;
+  font-size: 13px;
+  color: var(--text-2);
+}

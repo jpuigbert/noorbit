@@ -54,6 +54,7 @@ export default function ModelManagerModal() {
     startComfy,
     pullModel,
     pullBayModel,
+    fitCheck,
     deleteModel,
     selectModel,
     modelsDir,
@@ -106,6 +107,7 @@ export default function ModelManagerModal() {
       startComfy: st.startComfy,
       pullModel: st.pullModel,
       pullBayModel: st.pullBayModel,
+      fitCheck: st.fitCheck,
       deleteModel: st.deleteModel,
       selectModel: st.selectModel,
       modelsDir: st.modelsDir,
@@ -133,8 +135,14 @@ export default function ModelManagerModal() {
   // Connexió a Ollama Cloud (models gratuïts al núvol, sense descàrrega).
   const [cloudKey, setCloudKey] = useState("");
   // Model gran pendent de descarregar quan cal decidir ON (disc extern o
-  // disc intern): ≥ 8 GB i cap carpeta de models triada encara.
-  const [askDisk, setAskDisk] = useState<{ name: string; size: number | null } | null>(null);
+  // disc intern): ≥ 8 GB i cap carpeta de models triada encara. `noCap`
+  // recordsa que l'encaix ja va dir que no hi cabia i l'usuari ha acceptat
+  // baixar-lo igualment (segona confirmació: la primera ha estat per la RAM).
+  const [askDisk, setAskDisk] = useState<{
+    name: string;
+    size: number | null;
+    noCap?: boolean;
+  } | null>(null);
   // Avís de la instala·lació d'editors de vídeo (per si el Terminal falla).
   const [videoMsg, setVideoMsg] = useState("");
   // Motor local SENSE Ollama (llama.cpp): estat i models GGUF ja baixats.
@@ -149,6 +157,8 @@ export default function ModelManagerModal() {
     engineDir: string;
   } | null>(null);
   const [llamaMsg, setLlamaMsg] = useState("");
+  // Recepta Soup: afinat amb GPU externa (exporta soup.yaml + dataset).
+  const [soupMsg, setSoupMsg] = useState("");
 
   const loadLlama = async () => {
     const st = await invoke<{
@@ -232,18 +242,54 @@ export default function ModelManagerModal() {
     setCustom("");
   };
 
+  // Segon clic conscient: l'usuari vol baixar un model que l'encaix diu que
+  // NO cabrà a la RAM. Sense aquest «sí» el backend refusaria la baixada (la
+  // decisió de veritat hi viu; aquí només se'n transmet la intenció).
+  const askFitAnyway = (motiu?: string | null): boolean =>
+    window.confirm([t("ai.fitNoFit"), motiu ?? "", t("ai.fitAnywayQ")].filter(Boolean).join("\n\n"));
+
   // Baixa un model del núvol. Si Ollama no roda, intenta arrencar-lo
   // (o instal·lar-lo si no existeix) abans de descarregar.
+  // PRIMER L'ENCAIX (idea del `soup doctor` de Soup, Apache-2.0): si el model
+  // no cap a la RAM d'aquest equip, no el baixem sense un SEGON CLIC
+  // conscient. Dir-ho ABANS de gastar gigabytes, no cinc minuts després de
+  // carregar-lo. Les files del catàleg ja porten el veredicte fet (el
+  // backend el calcula amb la RAM real en llistar-les); la resta es pregunta.
   // ABANS DE DESCARREGAR-HO TOT: si el model pesa molt (≥ 8 GB) i encara no
   // has triat cap disc extern, PREGUNTEM on el vols — els models grans no
   // caben sempre al disc intern, i Ollama pot treballar des d'un USB/SSD.
-  const pullCloud = async (name: string, size?: number | null) => {
+  const pullCloud = async (
+    name: string,
+    size?: number | null,
+    encaixOk?: boolean | null,
+    encaixMotiu?: string | null
+  ) => {
     if (!ollamaRunning) {
       if (ollamaInstalled) await startOllama();
       else {
         await installOllama();
         return;
       }
+    }
+    // Veredicte: `null` = NO ho sabem (i aleshores no es fingeix res: es
+    // baixa i ja està, com fa el backend amb els models sense mida).
+    let ok = encaixOk;
+    let motiu = encaixMotiu ?? "";
+    if (ok == null) {
+      const c = await fitCheck(name, size ?? null);
+      if (c) {
+        ok = c.verdicte === "cap" || c.verdicte === "just";
+        motiu = c.sortida ? `${c.motiu} ${c.sortida}` : c.motiu;
+      }
+    }
+    if (ok === false) {
+      if (!askFitAnyway(motiu)) return;
+      if ((size ?? 0) >= 8_000_000_000 && !modelsDir) {
+        setAskDisk({ name, size: size ?? null, noCap: true });
+        return;
+      }
+      await pullModel(name, true);
+      return;
     }
     if ((size ?? 0) >= 8_000_000_000 && !modelsDir) {
       setAskDisk({ name, size: size ?? null });
@@ -258,9 +304,9 @@ export default function ModelManagerModal() {
     setAskDisk(null);
     if (!ask) return;
     if (dir) {
-      void setModelsDir(dir).then(() => pullModel(ask.name));
+      void setModelsDir(dir).then(() => pullModel(ask.name, ask.noCap));
     } else {
-      void pullModel(ask.name);
+      void pullModel(ask.name, ask.noCap);
     }
   };
 
@@ -280,6 +326,20 @@ export default function ModelManagerModal() {
       setVideoMsg(String(e));
     }
     setTimeout(() => setVideoMsg(""), 15_000);
+  };
+
+  // Exporta la recepta Soup (fine-tune amb GPU) a la carpeta triada: aquest
+  // equip no entrena (cal CUDA/MPS), però la recepta ix amb el coneixement
+  // real de NoOrbit (plantilles, protocols i regles ECC de sèrie).
+  const exportSoup = async () => {
+    const sel = await open({ directory: true });
+    if (typeof sel !== "string") return;
+    try {
+      const msg = await invoke<string>("soup_export_recipe", { dir: sel });
+      setSoupMsg(msg);
+    } catch (e) {
+      setSoupMsg(String(e));
+    }
   };
 
   // Connecta/actualitza el proveïdor del núvol d'Ollama amb el model triat i
@@ -516,6 +576,27 @@ export default function ModelManagerModal() {
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Recepta Soup: aquest Mac Intel no pot entrenar (cal CUDA/MPS);
+              NoOrbit exporta la recepta completa perquè s'afine en una
+              màquina amb GPU i el model torne via Hugging Bay. */}
+          <div className="field">
+            <label>
+              <Zap size={13} style={{ verticalAlign: -2, marginRight: 5 }} />
+              {t("ai.soupTitle")}
+            </label>
+            <p className="lp-hint">{t("ai.soupHint")}</p>
+            <div className="mm-custom">
+              <button className="btn sm" onClick={() => void exportSoup()}>
+                <Download size={12} /> {t("ai.soupExport")}
+              </button>
+            </div>
+            {soupMsg && (
+              <p className="lp-hint" style={{ marginTop: 6 }}>
+                {soupMsg}
+              </p>
+            )}
           </div>
 
           {/* Carpeta dels models: per posar-los en un USB extern quan el disc
@@ -882,6 +963,21 @@ export default function ModelManagerModal() {
                               ≈ {fmtSize(s.size)}
                             </span>
                           ) : null}
+                          {/* XIP D'ENCAIX: RAM real d'aquest equip contra el pes
+                              del model + la cua de claus del context. «NO hi
+                              cap» es veu ABANS de prémer «Baixa», i el títol
+                              diu els números i què fer. */}
+                          {s.encaix ? (
+                            <span
+                              className={
+                                "mm-fit " +
+                                (s.encaixOk === false ? "nocap" : s.encaixOk ? "cap" : "unknown")
+                              }
+                              title={s.encaixMotiu ?? undefined}
+                            >
+                              {s.encaix}
+                            </span>
+                          ) : null}
                         </div>
                         {s.description && <div className="mm-desc">{s.description}</div>}
                       </div>
@@ -892,9 +988,17 @@ export default function ModelManagerModal() {
                       ) : (
                         <button
                           className="btn sm"
-                          onClick={() =>
-                            bayId ? void pullBayModel(bayId) : void pullCloud(s.name, s.size)
-                          }
+                          onClick={() => {
+                            if (s.encaixOk === false && !askFitAnyway(s.encaixMotiu)) return;
+                            if (bayId) void pullBayModel(bayId, s.encaixOk === false);
+                            else
+                              void pullCloud(
+                                s.name,
+                                s.size,
+                                s.encaixOk ?? null,
+                                s.encaixMotiu ?? null
+                              );
+                          }}
                         >
                           <Download size={12} /> {t("ai.pull")}
                         </button>

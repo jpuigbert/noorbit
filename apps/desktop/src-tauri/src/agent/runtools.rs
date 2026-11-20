@@ -503,6 +503,17 @@ pub fn apply_edit_blocks(app: &AppHandle, text: &str) -> Vec<String> {
     let Some(root) = crate::commands::workspace::current_root() else {
         return Vec::new();
     };
+    let report = apply_edit_blocks_at(&root, text);
+    if !report.is_empty() {
+        progress(app, &format!("✏️ Edicions: {}", clip(&report.join(" · "), 160)), true);
+    }
+    report
+}
+
+/// Versió amb ARREL explícita: la fan servir les feines autònomes (Jam), que
+/// corren en un subprocés sense cap projecte «obert» a la UI i, per tant, no
+/// poden dependre de `workspace::current_root()`.
+pub fn apply_edit_blocks_at(root: &std::path::Path, text: &str) -> Vec<String> {
     let mut report: Vec<String> = Vec::new();
     for block in extract_edit_blocks(text) {
         let Some(rel) = safe_rel(&block.path) else { continue };
@@ -561,9 +572,6 @@ pub fn apply_edit_blocks(app: &AppHandle, text: &str) -> Vec<String> {
                 rel, fail
             ));
         }
-    }
-    if !report.is_empty() {
-        progress(app, &format!("✏️ Edicions: {}", clip(&report.join(" · "), 160)), true);
     }
     report
 }
@@ -959,7 +967,7 @@ el projecte o indica'n la ruta.",
                             }
                             Some(proj) => {
                                 progress(app, "Unreal: arrencant l'editor amb el projecte…", true);
-                                match launcher::auto_connect(&proj, 90).await {
+                                match launcher::auto_connect(&proj, 90, None).await {
                                     Ok(_) => editor = client.ping().await.unwrap_or(false),
                                     Err(e) => {
                                         return format!(

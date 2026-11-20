@@ -117,6 +117,24 @@
   border-radius: 3px;
   background: var(--accent-grad);
 }
+/* Bloc etiqueta de la fila: ho agrupa tot (ganxet d'opció activa + text) perquè
+   la dreta quede lliure per al drecerista (⌘…). */
+.menu-row-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* Opció exclosiva (tema, cursor…): el ganxet sempre ocupa lloc, invisible
+   quan no toca, així totes les fileres del mateix grup s'alineen. */
+.menu-tick {
+  flex: none;
+  color: var(--accent);
+  opacity: 0;
+}
+.menu-tick.on {
+  opacity: 1;
+}
 .menu-row .kbd {
   color: var(--text-3);
   font-size: 10px;

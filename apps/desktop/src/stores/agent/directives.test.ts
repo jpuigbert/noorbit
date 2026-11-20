@@ -2,6 +2,7 @@
 /// filtre de línies per a «Materialitzar».
 import { describe, expect, it } from "vitest";
 import {
+  matchExpert,
   parseAgentDirectives,
   parseTodoDirectives,
   parseUseDirectives,
@@ -106,5 +107,35 @@ describe("parseTodoDirectives", () => {
   it("netja cometes i backticks dels extrems", () => {
     const r = parseTodoDirectives('@todo: "tasca entre cometes"');
     expect(r.add).toEqual(["tasca entre cometes"]);
+  });
+});
+
+describe("matchExpert", () => {
+  const experts = [
+    { name: "Tester de QA" },
+    { name: "Dissenyador Frontend" },
+    { name: "Revisor de Seguretat" },
+  ];
+
+  it("exacte ignoreix majúscules i accents", () => {
+    expect(matchExpert("tester de qa", experts)?.name).toBe("Tester de QA");
+    expect(matchExpert("Revisor de Seguretat", experts)?.name).toBe("Revisor de Seguretat");
+  });
+
+  it("tolera articles, cometes i noms parcials", () => {
+    expect(matchExpert("«el Tester»", experts)?.name).toBe("Tester de QA");
+    expect(matchExpert("Tester", experts)?.name).toBe("Tester de QA");
+    expect(matchExpert("Tester", [])).toBeNull();
+  });
+
+  it("emparella per sobreposició de paraules", () => {
+    expect(matchExpert("Dissenyador d'interfícies frontend", experts)?.name).toBe(
+      "Dissenyador Frontend"
+    );
+  });
+
+  it("no inventa: cap semblança raonable retorna null", () => {
+    expect(matchExpert("Cuiner de pastisseria", experts)).toBeNull();
+    expect(matchExpert("", experts)).toBeNull();
   });
 });

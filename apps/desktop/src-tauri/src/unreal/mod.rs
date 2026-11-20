@@ -3,12 +3,15 @@
 //! Funciona mitjançant:
 //! - Python Editor Script Plugin (execució de codi Python dins l'editor)
 //! - Remote Control API (HTTP a :30010 i WebSocket a :30020)
+//! - Model Context Protocol (servidor oficial UE 5.8+ a :8000) — agent local
 //! - RunUAT / BuildGraph per compilar i empaquetar
 
+pub mod agent;
 pub mod builder;
 pub mod client;
 pub mod commands;
 pub mod launcher;
+pub mod mcp;
 pub mod python;
 pub mod remote_control;
 

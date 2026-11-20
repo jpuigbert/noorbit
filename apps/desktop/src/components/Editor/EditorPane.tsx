@@ -2,7 +2,8 @@ import Editor, { DiffEditor } from "@monaco-editor/react";
 import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { invoke } from "@tauri-apps/api/core";
-import { X, ExternalLink, FolderOpen, ImageOff, Check, Undo2, Sparkles } from "lucide-react";
+import { readFile } from "@tauri-apps/plugin-fs";
+import { X, ExternalLink, FolderOpen, ImageOff, Film, Check, Undo2, Sparkles } from "lucide-react";
 import { useT } from "../../i18n";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import {
@@ -142,6 +143,99 @@ function ImageViewer({ path, name }: { path: string; name: string }) {
   );
 }
 
+/// MIME per extensió de vídeo (per crear el Blob reproduïble).
+function videoMime(path: string): string {
+  const ext = (path.split(".").pop() ?? "").toLowerCase();
+  switch (ext) {
+    case "mp4":
+    case "m4v":
+    case "f4v":
+      return "video/mp4";
+    case "mov":
+      return "video/quicktime";
+    case "webm":
+      return "video/webm";
+    case "mkv":
+      return "video/x-matroska";
+    case "avi":
+      return "video/x-msvideo";
+    case "mts":
+    case "m2ts":
+      return "video/mp2t";
+    default:
+      return "video/*";
+  }
+}
+
+/** Reproductor de vídeo dins de l'editor: llegeix els bytes amb el plugin fs
+    (permís de lectura sobre tot el disc) i crea un Blob URL reproduïble. */
+function VideoViewer({ path, name }: { path: string; name: string }) {
+  const { t } = useT();
+  const closeFile = useWorkspaceStore((s) => s.closeFile);
+  const [url, setUrl] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setUrl(null);
+    setErr(null);
+    let objectUrl: string | null = null;
+    (async () => {
+      try {
+        const bytes = await readFile(path);
+        if (!alive) return;
+        const blob = new Blob([bytes as BlobPart], { type: videoMime(path) });
+        objectUrl = URL.createObjectURL(blob);
+        if (alive) setUrl(objectUrl);
+      } catch (e) {
+        if (alive) setErr(String(e));
+      }
+    })();
+    return () => {
+      alive = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [path]);
+
+  return (
+    <div className="editor-pane">
+      <div className="editor-tabs">
+        <div className="editor-tab">{name}</div>
+        <div style={{ flex: 1 }} />
+        <button
+          className="btn sm"
+          title={t("common.openExternHint")}
+          onClick={() => void invoke("open_externally", { path }).catch(() => undefined)}
+        >
+          <ExternalLink size={12} /> {t("common.openExtern")}
+        </button>
+        <button
+          className="btn sm"
+          title={t("common.revealHint")}
+          onClick={() => void invoke("reveal_in_finder", { path }).catch(() => undefined)}
+        >
+          <FolderOpen size={12} /> {t("common.reveal")}
+        </button>
+        <button className="icon-btn" style={{ width: 16, height: 16 }} onClick={() => closeFile()}>
+          <X size={12} />
+        </button>
+      </div>
+      <div className="editor-content image-viewer">
+        {url ? (
+          <video
+            src={url}
+            controls
+            style={{ maxWidth: "100%", maxHeight: "100%" }}
+          />
+        ) : (
+          <div className="image-viewer-msg">
+            <Film size={18} /> {err ?? "Carregant vídeo…"}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function EditorPane() {
   const { t } = useT();
   const { openFile, updateContent, saveFile, closeFile } = useWorkspaceStore(
@@ -244,6 +338,11 @@ export default function EditorPane() {
         <ImageViewer path={openFile.imagePath} name={openFile.name} />
       </div>
     );
+  }
+
+  // Fitxer vídeo: reproductor dins del programa.
+  if (openFile.videoPath) {
+    return <VideoViewer path={openFile.videoPath} name={openFile.name} />;
   }
 
   // Fita de Monaco: mentre el chunk arriba (només la primera obertura),

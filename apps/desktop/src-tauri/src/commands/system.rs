@@ -184,3 +184,66 @@ pub async fn open_externally(path: String) -> Result<(), String> {
     };
     result.map(|_| ()).map_err(|e| format!("No s'ha pogut obrir: {}", e))
 }
+
+/// Obre la PÀGINA DE DESCÀRREGA OFICIAL d'una eina externa (Ollama, Blender,
+/// Unreal, Godot o Rust) JA filtrada pel sistema operatiu instal·lat: el
+/// binari es compila per al seu SO, així que l'usuari només fa un clic i cau
+/// directament a la «pestanya» de descàrrega correcta (mac / windows / linux).
+/// Un clic.
+#[command]
+pub async fn open_tool_download(tool: String) -> Result<String, String> {
+    let url = match tool.as_str() {
+        // Ollama té una pàgina per SO amb l'instal·lador directe.
+        "ollama" => match std::env::consts::OS {
+            "macos" => "https://ollama.com/download/mac",
+            "windows" => "https://ollama.com/download/windows",
+            _ => "https://ollama.com/download/linux",
+        },
+        // Blender: la pàgina obre sola la pestanya del SO del visitant.
+        "blender" => "https://www.blender.org/download/",
+        "unreal" => match std::env::consts::OS {
+            // Windows/macOS: la web detecta el SO i ofereix l'instal·lador
+            // de l'Epic Games Launcher (des d'allà s'instal·la UE 5).
+            "macos" | "windows" => "https://www.unrealengine.com/download",
+            // Linux: Epic no distribueix launcher natiu: documentació
+            // oficial d'instal·lació (Fab / codi font).
+            _ => "https://dev.epicgames.com/documentation/en-us/unreal-engine/install-unreal-engine",
+        },
+        // Godot: pàgina per SO amb el binari directe (sense instal·lador).
+        "godot" => match std::env::consts::OS {
+            "macos" => "https://godotengine.org/download/macos/",
+            "windows" => "https://godotengine.org/download/windows/",
+            _ => "https://godotengine.org/download/linux/",
+        },
+        // Rust: l'instal·lador és el mateix a tots els SO (rustup).
+        "rust" => "https://rustup.rs/",
+        other => return Err(format!("Eina desconeguda: {}", other)),
+    };
+    open_externally(url.to_string()).await?;
+    Ok(url.to_string())
+}
+
+/// Instal·la Blender amb UN SOL CLIC:
+/// - macOS amb Homebrew: `brew install --cask blender` al Terminal (mateix
+///   patró transparent que ComfyUI: l'usuari veu i autoritza el que s'executa).
+/// - Sense Homebrew / Linux / Windows: obre la pàgina de descàrrega oficial,
+///   que ja cau a la pestanya del sistema operatiu instal·lat.
+#[command]
+pub async fn install_blender() -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        if which::which("brew").is_ok() {
+            let script = "tell application \"Terminal\" to do script \"brew install --cask blender && open -a Blender\"";
+            std::process::Command::new("osascript")
+                .arg("-e")
+                .arg(script)
+                .spawn()
+                .map_err(|e| format!("No s'ha pogut obrir el Terminal: {}", e))?;
+            return Ok(
+                "S'ha obert el Terminal per instal·lar Blender amb Homebrew. Un cop acabi, prem «Revisa» i NoOrbit el detectarà sol.".into(),
+            );
+        }
+    }
+    open_tool_download("blender".into()).await?;
+    Ok("S'ha obert la pàgina de descàrrega de Blender per al teu sistema operatiu. Un cop instal·lat, prem «Revisa» i NoOrbit el detectarà sol.".into())
+}

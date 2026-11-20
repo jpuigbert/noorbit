@@ -140,6 +140,21 @@ if (!isTauri) {
       return;
     }
 
+    // ESTALVI DE PANTALLA DE LA FEINA: finestra «noorbit-screensaver» a
+    // pantalla completa. Pinta NOMÉS el progrés (no carrega App ni stores):
+    // l'estat li arriba directament del backend per events globals.
+    if (label === "noorbit-screensaver") {
+      const { default: ScreensaverApp } = await import("./screensaver/ScreensaverApp");
+      ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+        <React.StrictMode>
+          <ErrorBoundary>
+            <ScreensaverApp />
+          </ErrorBoundary>
+        </React.StrictMode>
+      );
+      return;
+    }
+
     const { default: App } = await import("./App");
     ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <React.StrictMode>

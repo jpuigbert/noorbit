@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-label="NoOrbit — IDE nativa amb agent IA local i motors de joc">
+  <title>NoOrbit</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a1830"/>
+      <stop offset="0.5" stop-color="#102a4e"/>
+      <stop offset="1" stop-color="#08111f"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#2f7ad6" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#2f7ad6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="core" cx="42%" cy="38%" r="62%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.28" stop-color="#dceaff"/>
+      <stop offset="0.66" stop-color="#5f9fe8"/>
+      <stop offset="1" stop-color="#1d4f90"/>
+    </radialGradient>
+    <radialGradient id="moon" cx="42%" cy="38%" r="62%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.3" stop-color="#c2f7f4"/>
+      <stop offset="0.72" stop-color="#2cb6bd"/>
+      <stop offset="1" stop-color="#0d5f68"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2c63c4"/>
+      <stop offset="0.45" stop-color="#5aa0ee"/>
+      <stop offset="1" stop-color="#1d4d99"/>
+    </linearGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.6" stop-color="#d5e6ff"/>
+      <stop offset="1" stop-color="#79b6f5"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="420" rx="0" fill="url(#bg)"/>
+
+  <!-- grilla fina de fons: "orbita" / espai de treball -->
+  <g stroke="#5aa0ee" stroke-opacity="0.10" stroke-width="1">
+    <path d="M0 84H1200M0 168H1200M0 252H1200M0 336H1200"/>
+    <path d="M100 0V420M250 0V420M400 0V420M550 0V420M700 0V420M850 0V420M1000 0V420M1150 0V420"/>
+  </g>
+
+  <!-- estels -->
+  <g fill="#cfe4ff">
+    <circle cx="70" cy="46" r="1.6" opacity="0.7"/>
+    <circle cx="188" cy="320" r="1.3" opacity="0.5"/>
+    <circle cx="318" cy="58" r="1.8" opacity="0.6"/>
+    <circle cx="452" cy="352" r="1.2" opacity="0.45"/>
+    <circle cx="612" cy="40" r="1.5" opacity="0.55"/>
+    <circle cx="806" cy="60" r="1.7" opacity="0.5"/>
+    <circle cx="948" cy="330" r="1.4" opacity="0.5"/>
+    <circle cx="1130" cy="96" r="1.6" opacity="0.6"/>
+    <circle cx="1064" cy="244" r="1.2" opacity="0.4"/>
+    <circle cx="520" cy="180" r="1.3" opacity="0.35"/>
+  </g>
+
+  <!-- marca: òrbita + nucli + lluna -->
+  <g transform="translate(150 210)">
+    <ellipse cx="0" cy="0" rx="150" ry="76" fill="none" stroke="url(#ring)" stroke-width="13" opacity="0.95" transform="rotate(-22)"/>
+    <ellipse cx="0" cy="0" rx="150" ry="76" fill="none" stroke="#8fc4ff" stroke-width="3" opacity="0.45" transform="rotate(-22)"/>
+    <circle cx="0" cy="0" r="86" fill="url(#halo)"/>
+    <circle cx="-6" cy="-4" r="52" fill="url(#core)"/>
+    <circle cx="-6" cy="-4" r="52" fill="none" stroke="#9ecbff" stroke-opacity="0.5" stroke-width="1.5"/>
+    <circle cx="96" cy="-30" r="26" fill="url(#moon)"/>
+    <circle cx="96" cy="-30" r="26" fill="none" stroke="#bdf2ef" stroke-opacity="0.45" stroke-width="1.2"/>
+  </g>
+
+  <!-- text -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif">
+    <text x="380" y="185" font-size="82" font-weight="800" letter-spacing="-2" fill="url(#title)">NoOrbit</text>
+    <text x="384" y="228" font-size="25" font-weight="600" fill="#9fc6f2">IDE nativa · agent IA local · Blender · Unreal · Godot · Bevy</text>
+    <text x="384" y="272" font-size="19" fill="#b9cfe8">Escritori per a macOS, Windows i Linux — construïda amb Tauri 2, React i Rust.</text>
+    <g font-size="16" font-weight="600">
+      <rect x="384" y="300" width="150" height="34" rx="17" fill="#2f7ad6"/>
+      <text x="459" y="323" text-anchor="middle" fill="#ffffff">⬇ Descàrrega</text>
+      <rect x="546" y="300" width="132" height="34" rx="17" fill="none" stroke="#5aa0ee" stroke-opacity="0.7"/>
+      <text x="612" y="323" text-anchor="middle" fill="#cfe4ff">📖 Documentació</text>
+      <rect x="690" y="300" width="140" height="34" rx="17" fill="none" stroke="#5aa0ee" stroke-opacity="0.7"/>
+      <text x="760" y="323" text-anchor="middle" fill="#cfe4ff">🧩 Extensions</text>
+    </g>
+  </g>
+</svg>

@@ -293,10 +293,13 @@ fn build_pass_prompt(
         p.push_str(research);
     }
     p.push_str(
-        "\n\nARA MILLORA EL PROJECTE segons el focus d'aquesta passada. Retorna els fitxers \
-         modificats COMPLETS amb blocs «@file: ruta/relativa». Implementa millores reals \
-         (bugs, rendiment, accessibilitat, SEO, seguretat, noves funcionalitats i tot el que \
-         se t'acudeixi). Acaba amb una línia «RESUM: …».",
+        "\n\nARA MILLORA EL PROJECTE segons el focus d'aquesta passada. Retorna els fitxers \n\
+         modificats COMPLETS amb blocs «@file: ruta/relativa». Implementa millores reals \n\
+         (bugs, rendiment, accessibilitat, SEO, seguretat, noves funcionalitats i tot el que \n\
+         se t'acudeixi). Si un fitxer és molt llarg i sortir-lo sencer et faria tallar, \n\
+         MODIFICA'l amb etiquetes d'edició: una línia amb @edit: i la ruta; després, per \n\
+         cada canvi, una línia «<<<<<<< CERCA», el codi antic exacte, una línia «=======», \n\
+         el codi nou (buit = esborrar) i una línia «>>>>>>>». Acaba amb una línia «RESUM: …».",
     );
     p
 }
@@ -445,6 +448,9 @@ async fn run_loop(
     let deadline = start.checked_add(budget).unwrap_or(start);
     let mut pass = 0u32;
     let mut files_changed = 0u32;
+    // El treball autopilotat pot durar dies sense que l'usuari toqui res:
+    // bloquem el son del SO mentre el guard visqui (s'allibera en acabar).
+    let _awake = crate::keep_awake::activar("treball autopilotat");
 
     loop {
         if token.is_cancelled() || Instant::now() >= deadline {
@@ -469,13 +475,27 @@ async fn run_loop(
             .unwrap_or_default();
 
         // 3) Demana les millores a la IA (xat CRU: sense eines ni confirmacions).
-        let prompt = build_pass_prompt(&name, &idea, focus, pass, &files, &research);
-        let opts = ChatOpts { provider: provider.clone(), model: model.clone(), ..Default::default() };
+        // `long_run`: models locals en CPU poden trigar mitja hora llarga per
+        // resposta; el sostre real és el pressupost total (`deadline`).
+        // Eines de motor: si el projecte és d'Unreal (o té un .uproject a dins)
+        // o Blender és a l'abast, la IA pot dirigir-los amb directrius. La
+        // secció s'afegeix al prompt perquè el model ho sàpiga i decideixi.
+        let engine = crate::engine_tools::EngineContext::detect(&root);
+        let mut prompt = build_pass_prompt(&name, &idea, focus, pass, &files, &research);
+        if engine.any() {
+            prompt.push_str(&crate::engine_tools::directives_help(&engine));
+        }
+        let opts = ChatOpts {
+            provider: provider.clone(),
+            model: model.clone(),
+            long_run: true,
+            ..Default::default()
+        };
         let resp = tokio::select! {
             _ = token.cancelled() => break,
-            r = tokio::time::timeout(Duration::from_secs(300), ai.chat_opts(&prompt, Some(profile.system), &opts)) => r,
+            r = tokio::time::timeout(Duration::from_secs(45 * 60), ai.chat_opts(&prompt, Some(profile.system), &opts)) => r,
         };
-        let text = match resp {
+        let mut text = match resp {
             Ok(Ok(t)) => t,
             Ok(Err(e)) => {
                 // Un error de passada NO atura el bucle: es continua autopilotat
@@ -496,6 +516,70 @@ async fn run_loop(
             break;
         }
 
+        // 3bis) Eines de motor: les directrius (@unreal:, @blender:…) de la
+        // resposta s'executen DE VERITAT contra Unreal/Blender i els
+        // resultats tornen al model, que pot demanar-ne més o acabar amb
+        // els fitxers. Les operacions queden a EngineWork/ del projecte.
+        let mut tool_ok = 0u32;
+        if engine.any() {
+            let mut tool_context = String::new();
+            for _round in 0..crate::engine_tools::MAX_TOOL_ROUNDS {
+                let directives = crate::engine_tools::parse_directives(&text);
+                if directives.is_empty() {
+                    break;
+                }
+                let mut outcomes = Vec::new();
+                for d in &directives {
+                    handle.set(|s| {
+                        s.detail = format!(
+                            "Passada {pass}: executant l'eina de motor «{}»…",
+                            d.kind.name()
+                        );
+                    });
+                    emit_state(&app, &handle);
+                    let o = crate::engine_tools::execute(&engine, d).await;
+                    if o.ok {
+                        tool_ok += 1;
+                    }
+                    handle.set(|s| {
+                        s.detail = format!(
+                            "Passada {pass}: eina {} — {}",
+                            o.kind,
+                            crate::engine_tools::clip(&o.summary, 160)
+                        );
+                    });
+                    emit_state(&app, &handle);
+                    outcomes.push(o);
+                }
+                tool_context.push_str(&crate::engine_tools::format_results(&outcomes));
+                let follow = format!(
+                    "{prompt}\n{tool_context}\nLes directrius d'eines ja s'han executat (els resultats són a sobre). \
+Ara COMPLETA la passada: escriu els fitxers modificats amb «@file:» o «@edit:» i acaba amb «RESUM: …». \
+Si et calen més eines de motor, emet més directrius."
+                );
+                let resp2 = tokio::select! {
+                    _ = token.cancelled() => break,
+                    r = tokio::time::timeout(Duration::from_secs(45 * 60), ai.chat_opts(&follow, Some(profile.system), &opts)) => r,
+                };
+                match resp2 {
+                    Ok(Ok(t)) => text = t,
+                    Ok(Err(e)) => {
+                        handle.set(|s| {
+                            s.detail = format!(
+                                "Passada {pass}: la IA ha fallat en el seguiment d'eines ({e})."
+                            );
+                        });
+                        emit_state(&app, &handle);
+                        break;
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
+        if token.is_cancelled() {
+            break;
+        }
+
         // 4) Materialitza els fitxers millorats (escriptura directa segura).
         let blocks = crate::agent::runtools::extract_file_blocks(&text);
         let mut n = 0u32;
@@ -512,7 +596,19 @@ async fn run_loop(
                 n += 1;
             }
         }
-        files_changed += n;
+        // SEGONA VIA: si el model no ha reeixit a tornar fitxers sencers (molt
+        // normal en models petits que tallen per longitud), acceptem les
+        // edicions quirúrgiques CERCA/NOU. Sense això la passada feia «0
+        // fitxers millorats» i el projecte no canviava mai res.
+        if n == 0 {
+            let edits = crate::agent::runtools::extract_edit_blocks(&text);
+            if !edits.is_empty() {
+                let report = crate::agent::runtools::apply_edit_blocks_at(&root, &text);
+                n = report.len() as u32;
+            }
+        }
+        // Les operacions de motor també compten com a feina feta.
+        files_changed += n + tool_ok;
         let resum = text
             .lines()
             .find(|l| l.trim_start().to_ascii_uppercase().starts_with("RESUM:"))

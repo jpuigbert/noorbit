@@ -38,6 +38,11 @@ export interface ChatMessage {
   /// Especialment útil amb les APIs de núvol: s'hi veu què costa cada
   /// resposta i quant del context s'ha consumit.
   usage?: TokenUsage;
+  /// Vot de l'usuari sobre AQUESTA resposta: 1 = 👍, -1 = 👎, `null` = sense
+  /// vot. El vot de veritat viu al registre d'aprenentatge del backend
+  /// (`learning_vote`); aquí només es recorda per tornar a pintar el botó
+  /// del color correcte quan el xat es reobre.
+  vote?: number | null;
 }
 
 /// Consum de tokens d'un torn, tal com l'informa el proveïdor.

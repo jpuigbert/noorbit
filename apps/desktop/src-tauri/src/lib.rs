@@ -4,15 +4,22 @@ pub mod agent;
 pub mod ai;
 pub mod api;
 pub mod autonomous;
+pub mod bevy;
 pub mod blender;
 pub mod browser;
 pub mod commands;
 pub mod computer;
 pub mod config;
+pub mod crash;
+pub mod engine_bridge;
+pub mod engine_open;
+pub mod engine_tools;
 pub mod experts;
 pub mod external_orchestrator;
+pub mod godot;
 pub mod imgen;
 pub mod jam;
+pub mod keep_awake;
 pub mod learning;
 pub mod lsp;
 pub mod mobile;
@@ -22,6 +29,8 @@ pub mod skills;
 pub mod themes;
 pub mod unreal;
 pub mod project_work;
+pub mod video;
+pub mod voice;
 
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
@@ -47,36 +56,21 @@ pub struct AppState {
     pub jam: Arc<jam::commands::JamHandle>,
     /// Millora contínua autopilotada de qualsevol projecte (estat + cancel·lació).
     pub project_work: Arc<project_work::ProjectWorkHandle>,
+    /// Muntatge de vídeo: render «a mà» (el botó del panell) en curs.
+    pub video_render: Arc<video::commands::RenderHandle>,
+    /// Muntatge de vídeo: el director autopilotat (mirada, guió, autocrítica).
+    pub video_director: Arc<video::director::DirectorHandle>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Registra els panics en un fitxer dins de les dades de NoOrbit. Si l'app
     // mor a l'arrencada (p. ex. executada des d'un USB), queda una pista en
-    // lloc d'un tancament sense cap informació.
+    // lloc d'un tancament sense cap informació. El hook viu al mòdul `crash`
+    // (que també construeix l'informe que l'usuari pot enviar).
     let crash_dir = config::AppConfig::data_dir();
-    std::panic::set_hook(Box::new(move |info| {
-        eprintln!("NoOrbit: error fatal: {info}");
-        if let Some(dir) = &crash_dir {
-            let _ = std::fs::create_dir_all(dir);
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(dir.join("crash.log"))
-            {
-                use std::io::Write;
-                let _ = writeln!(
-                    f,
-                    "[{}] {}",
-                    chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-                    info
-                );
-                if let Some(loc) = info.location() {
-                    let _ = writeln!(f, "  a {}:{}:{}", loc.file(), loc.line(), loc.column());
-                }
-            }
-        }
-    }));
+    crash::install_hook(crash_dir.clone());
+    crash::mark_session_start(crash_dir.as_deref());
 
     let config = config::AppConfig::load_or_default();
     let skills_manager = skills::SkillsManager::new(&config);
@@ -104,6 +98,9 @@ pub fn run() {
 
     // Aprenentatge local: el registre de converses i les lliçons apreses.
     let learning = Arc::new(learning::LearningStore::new(data_dir));
+    // La porta d'avaluació del cervell necessita les proves (els 👍) des d'un
+    // fil de fons, on no arriba l'estat de Tauri.
+    learning::set_shared(learning.clone());
 
     let agent_config = agent::AgentConfig::default();
     let orchestrator = Arc::new(agent::AgentOrchestrator::new(agent_config));
@@ -131,6 +128,8 @@ pub fn run() {
         learning,
         jam: Arc::new(jam::commands::JamHandle::default()),
         project_work: Arc::new(project_work::ProjectWorkHandle::default()),
+        video_render: Arc::new(video::commands::RenderHandle::default()),
+        video_director: Arc::new(video::director::DirectorHandle::default()),
     };
 
     tauri::Builder::default()
@@ -143,6 +142,9 @@ pub fn run() {
         .manage(state.jam.clone())
         // Handle de la millora de projectes (mateix patró que la Jam).
         .manage(state.project_work.clone())
+        // El muntatge de vídeo té dos handles: el render a mà i el director.
+        .manage(state.video_render.clone())
+        .manage(state.video_director.clone())
         .manage(state)
         .manage(agent_state)
         .manage(blender_state)
@@ -155,6 +157,25 @@ pub fn run() {
             // de cop): es netejen abans d'arrencar res, sinó el port del
             // motor local apareix ocupat per un servei que no existeix.
             crate::ai::llamacpp::cleanup_stale();
+            // IA NATIVA neuronal: es resol on viu el model GGUF empaquetat (i
+            // el motor, si n'hi ha) perquè la nativa tinga un LLM real de
+            // ple dret sense dependre de la ruta de l'instal·lador.
+            crate::ai::native_llm::init(&handle);
+
+            // MUNTATGE DE VÍDEO: els bucles d'IA (Jam, treball autopilotat, xat
+            // amb eines de motor) no reben `State<'_, …>`, així que els handles
+            // del render i del director es publiquen aquí una vegada. Sense
+            // aquest pont, `@video:render` i `@video:director` quedarien morts.
+            {
+                use tauri::Manager as _;
+                let st = app.state::<AppState>();
+                video::commands::set_runtime(video::commands::Runtime {
+                    app: handle.clone(),
+                    ai: st.ai_manager.clone(),
+                    render: st.video_render.clone(),
+                    director: st.video_director.clone(),
+                });
+            }
 
             // PROVEÏDORS LOCALS MORTS: un «llamacpp_11435» desat quan el
             // servidor ja no hi és (l'app es va tancar i el `llama-server`
@@ -190,6 +211,35 @@ pub fn run() {
             // IA baixava un model): el «.part» a mitges s'esborra en arrencar
             // perquè no ocupe disc ni es done per bo. Només toca «*.part».
             crate::ai::hf_bay::cleanup_partial_downloads();
+
+            // ECC DE SÈRIE: el coneixement d'ECC (skills, agents i regles)
+            // viatja amb l'instal·lador (`ecc-builtin/`) i es sembra al
+            // directori de skills el PRIMER cop, sense xarxa. En un fil a
+            // part: són ~7 MB i 400 carpetes, l'arrencada no s'ha d'alentir.
+            {
+                let ecc_handle = handle.clone();
+                std::thread::spawn(move || {
+                    use tauri::Manager as _;
+                    let state = ecc_handle.state::<AppState>();
+                    let dir = match state.skills_manager.lock() {
+                        Ok(g) => g.skills_dir().to_path_buf(),
+                        Err(_) => return,
+                    };
+                    if let Some(report) = crate::commands::ecc::seed_ecc_builtin(
+                        Some(&ecc_handle),
+                        &dir,
+                        &state.experts,
+                    ) {
+                        if let Ok(mut g) = state.skills_manager.lock() {
+                            g.reload();
+                        }
+                        eprintln!(
+                            "NoOrbit/ECC: de sèrie sembrat ({} skills, {} agents, {} regles)",
+                            report.skills, report.agents, report.rules
+                        );
+                    }
+                });
+            }
 
             // Connexió automàtica a Blender (Objectiu 1): si és habilitada a
             // configuració, arrenca el vigilant que connecta sol quan detecta
@@ -235,6 +285,11 @@ pub fn run() {
                     ai.ensure_default_model(&ollama_handle).await;
                 });
             });
+            // APRENENTATGE AUTÒNOM EN REPÒS: la IA nativa navega sola i aprén
+            // de contingut lliure (StackOverflow → Viquipèdia → web → profunda)
+            // només quan ningú no toca el programa, no hi ha cap generació en
+            // curs i la RAM és lliure. Es pot desactivar a Configuració.
+            crate::ai::wander::spawn(handle.clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -295,11 +350,16 @@ pub fn run() {
             jam::commands::jam_start,
             jam::commands::jam_stop,
             jam::commands::jam_state,
+            engine_open::open_project_in_engine,
+            engine_open::godot_status,
+            engine_open::bevy_status,
             commands::workspace::clone_game_studios,
             // Sistema operatiu
             commands::system::open_terminal,
             commands::system::reveal_in_finder,
             commands::system::open_externally,
+            commands::system::open_tool_download,
+            commands::system::install_blender,
             commands::system::exit_app,
             commands::system::system_total_memory,
             commands::system::system_memory_status,
@@ -328,6 +388,7 @@ pub fn run() {
             commands::ai::ollama_get_keep_alive,
             commands::ai::ollama_set_keep_alive,
             commands::ai::ollama_suggested_models,
+            commands::ai::ai_fit_check,
             commands::ai::ollama_search_cloud,
             commands::ai::ollama_search_huggingface,
             commands::ai::hf_bay_search,
@@ -368,6 +429,13 @@ pub fn run() {
             commands::ai::ollama_set_model,
             commands::ai::ollama_active_model,
             commands::ai::ai_last_thinking,
+            // APRENENTATGE AUTÒNOM EN REPÒS: estat, commutador, sessió ara,
+            // adreces de la Internet profunda i cor d'activitat de la interfície.
+            commands::ai::wander_status,
+            commands::ai::wander_set,
+            commands::ai::wander_run,
+            commands::ai::wander_profunda_set,
+            commands::ai::native_note_activity,
             // Catàleg d'IAs: censura, visió, generació d'imatges/vídeo i mida
             // aproximada, ABANS de descarregar res
             commands::ai::ia_catalog,
@@ -407,11 +475,37 @@ pub fn run() {
             commands::themes::theme_upload_session,
             commands::themes::theme_check_auth,
             commands::themes::theme_open_sales_page,
+            // DICTAT PER VEU al xat (botó de micròfon del composer)
+            commands::voice::voice_status,
+            commands::voice::voice_transcribe,
             // Millora contínua AUTOPILOTADA de qualsevol projecte (temps de treball)
             project_work::wp_theme_work,
             project_work::project_work,
             project_work::project_work_stop,
             project_work::project_work_state,
+            // MUNTATGE DE VÍDEO (menú «Vídeo»: Blender → Kdenlive/ffmpeg amb IA)
+            video::commands::video_tools,
+            video::commands::video_scan,
+            video::commands::video_sheet,
+            video::commands::video_edl_get,
+            video::commands::video_edl_set,
+            video::commands::video_edl_parse,
+            video::commands::video_auto_edl,
+            video::commands::video_source_add,
+            video::commands::video_sources_set,
+            video::commands::video_plan,
+            video::commands::video_render,
+            video::commands::video_render_state,
+            video::commands::video_render_stop,
+            video::commands::video_export,
+            video::commands::video_verify,
+            video::commands::video_open,
+            video::commands::video_open_kdenlive,
+            video::commands::video_director_start,
+            video::commands::video_director_stop,
+            video::commands::video_director_state,
+            video::commands::video_transitions,
+            video::commands::video_directive,
             // Proveïdors d'IA en línia (tokens)
             commands::api::ai_provider_list,
             commands::api::ai_provider_add,
@@ -430,6 +524,8 @@ pub fn run() {
             commands::skills::list_skills,
             commands::skills::reload_skills,
             commands::skills::vscode_import_skills,
+            commands::ecc::ecc_install,
+            commands::soup::soup_export_recipe,
             commands::vscode_extensions::vscode_list_extensions,
             commands::skills_store::skills_store_list,
             commands::skills_store::skills_install_github,
@@ -443,6 +539,9 @@ pub fn run() {
             // Config
             commands::config::get_config,
             commands::config::update_config,
+            // Informe de fallides («crash»): es pot copiar i enviar.
+            commands::crash::crash_report,
+            commands::crash::crash_log_path,
             // Preview
             commands::preview::start_preview_server,
             commands::preview::stop_preview_server,
@@ -495,6 +594,11 @@ pub fn run() {
             commands::learning::learning_distill,
             commands::learning::learning_export,
             commands::learning::learning_record,
+            // Bucle de dades: els vots del xat i el paquet que entén Soup
+            commands::learning_soup::learning_vote,
+            commands::learning_soup::learning_soup_export,
+            // Veredicte de la porta d'avaluació del cervell natiu
+            commands::learning_soup::learning_brain_verdict,
             // Blender
             blender::commands::blender_ping,
             blender::commands::blender_info,
@@ -517,6 +621,7 @@ pub fn run() {
             unreal::commands::unreal_ping,
             unreal::commands::unreal_info,
             unreal::commands::unreal_detect_installations,
+            unreal::commands::unreal_detect_pending_installations,
             unreal::commands::unreal_find_uproject,
             unreal::commands::unreal_get_rc_port,
             unreal::commands::unreal_set_rc_port,
@@ -527,6 +632,10 @@ pub fn run() {
             unreal::commands::unreal_import_asset,
             unreal::commands::unreal_build_lighting,
             unreal::commands::unreal_package_game,
+            unreal::commands::unreal_agent_setup,
+            unreal::commands::unreal_agent_task,
+            unreal::commands::unreal_mcp_tools,
+            unreal::commands::unreal_mcp_call,
             // Mòbil natiu (Android SDK + Xcode/iOS Simulator)
             mobile::commands::mobile_status,
             mobile::commands::mobile_android_list_avds,

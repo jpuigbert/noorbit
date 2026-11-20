@@ -48,6 +48,8 @@ interface UIState {
   showWpTheme: boolean;
   /** Menú «Treball autopilotat»: la IA millora qualsevol projecte un temps triat. */
   showProjectWork: boolean;
+  /** Menú «Vídeo»: muntatge professional Blender → Kdenlive/ffmpeg dirigit per IA. */
+  showVideoStudio: boolean;
   showIaCatalog: boolean;
   showRemoteServer: boolean;
   showSettings: boolean;
@@ -105,6 +107,7 @@ interface UIState {
   setShowGameStudios: (v: boolean) => void;
   setShowWpTheme: (v: boolean) => void;
   setShowProjectWork: (v: boolean) => void;
+  setShowVideoStudio: (v: boolean) => void;
   setShowIaCatalog: (v: boolean) => void;
   setShowRemoteServer: (v: boolean) => void;
   setShowSettings: (v: boolean) => void;
@@ -159,6 +162,12 @@ export function applyTheme(theme: Theme) {
   else root.setAttribute("data-theme", theme);
 }
 
+/// Cursor divertit desat: el rellegeixen les finestres de panells separats
+/// quan l'usuari el canvia des del menú Vista del programa principal.
+export function loadFunCursor(): boolean {
+  return loadBool(LS_FUN_CURSOR, true);
+}
+
 export const useUIStore = create<UIState>((set, get) => ({
   sidebarOpen: true,
   rightPanelOpen: true,
@@ -170,6 +179,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   showGameStudios: false,
   showWpTheme: false,
   showProjectWork: false,
+  showVideoStudio: false,
   showIaCatalog: false,
   showRemoteServer: false,
   showSettings: false,
@@ -197,7 +207,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   autoSaveDelay: loadNum(LS_AUTOSAVE_DELAY, 1000),
   zoom: 1,
   theme: loadTheme(),
-  funCursor: loadBool(LS_FUN_CURSOR, true),
+  funCursor: loadFunCursor(),
   funSound: loadBool(LS_FUN_SOUND, true),
 
   toggleSidebar: () => set({ sidebarOpen: !get().sidebarOpen }),
@@ -212,6 +222,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setShowGameStudios: (v) => set({ showGameStudios: v }),
   setShowWpTheme: (v) => set({ showWpTheme: v }),
   setShowProjectWork: (v) => set({ showProjectWork: v }),
+  setShowVideoStudio: (v) => set({ showVideoStudio: v }),
   setShowIaCatalog: (v) => set({ showIaCatalog: v }),
   setShowRemoteServer: (v) => set({ showRemoteServer: v }),
   setShowSettings: (v) => set({ showSettings: v }),
@@ -309,6 +320,9 @@ export const useUIStore = create<UIState>((set, get) => ({
       /* sense persistència */
     }
     set({ funCursor: v });
+    // Com amb el tema: les finestres separades són webviews independents i
+    // tenen el seu propi estat. «Cursor clàssic» ha de valdre a TOT arreu.
+    void emit("fun-cursor://changed", { on: v }).catch(() => undefined);
   },
   setFunSound: (v) => {
     try {

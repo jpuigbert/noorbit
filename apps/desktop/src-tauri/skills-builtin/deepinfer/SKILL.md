@@ -48,7 +48,10 @@ La mateixa IA (els pesos de DeepSeek), servida oficialment:
 
 1. Crea un token a plataforma.deepseek.com.
 2. A NoOrbit: **Proveïdors d'IA → «DeepSeek API (núvol)»** → enganxa el token
-   i activa'l. Ja hi està creat per defecte amb `deepseek-chat`.
+   i activa'l. Ja hi està creat per defecte amb `deepseek-flash` (també pots
+   fer servir `deepseek-v4-pro`). Si el teu accés és l'endpoint
+   `https://api.deepseek.com/anthropic`, usa el preset «DeepSeek (format
+   Claude)»: NoOrbit hi parla amb `x-api-key` i `/v1/messages`.
 
 ## Com fa servir NoOrbit les respostes
 

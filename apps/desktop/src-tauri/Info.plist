@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Claus de privadesa de macOS. Sense estes descripcions el sistema MATA el
+  procés la primera volta que es toca el micròfon o el reconeixement de veu.
+  - NSMicrophoneUsageDescription: gravar l'ordre dictada al xat.
+  - NSSpeechRecognitionUsageDescription: passar la gravació a text amb el
+    motor del sistema (SFSpeechRecognizer).
+  Tauri fusiona este fitxer amb l'Info.plist del paquet .app; build.rs també
+  l'incrusta al binari perquè `tauri dev` també tinga permisos.
+-->
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>NoOrbit usa el micròfon només mentre mantens premut el botó de veu del xat, per dictar l'ordre que vols enviar a la IA.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>NoOrbit passa a text l'àudio que has dictat al xat. Amb el model de la llengua instal·lat, el reconeixement es fa al teu ordinador.</string>
+</dict>
+</plist>

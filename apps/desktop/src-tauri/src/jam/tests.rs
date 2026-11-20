@@ -338,3 +338,124 @@ async fn el_bucle_emet_progres_per_a_cada_tasca() {
         evs
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Aturada i IA en servei
+//
+//  Regressions de dues queixes de l'usuari:
+//  1) «en el apartat jam no diu quina ia esta fent servir» → l'estat ha de
+//     portar proveïdor i model (i la UI els ha de poder llegir).
+//  2) «quant apreta atura no es para» → la fase de pla (la IA pensant) ha de
+//     ser CANCEL·LABLE i l'aturada ha de cancel·lar el token i deixar l'estat
+//     en «aturant…» fins que l'agent s'ha aturat del tot.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn aturar_durant_el_pla_talla_la_fase_de_pla() {
+    use tokio_util::sync::CancellationToken;
+
+    let token = CancellationToken::new();
+    token.cancel();
+
+    // Un pla que NO arriba mai (com un model penjat sense resposta).
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        crate::jam::commands::plan_with_future(
+            std::future::pending::<Result<noorbit_jam::Plan, String>>(),
+            &token,
+        ),
+    )
+    .await
+    .expect("la fase de pla no s'hauria d'haver quedat penjada després d'aturar");
+
+    assert!(
+        matches!(outcome, crate::jam::commands::PlanOutcome::Cancelled),
+        "amb el token cancel·lat el pla ha de quedar cancel·lat: {outcome:?}"
+    );
+}
+
+#[test]
+fn aturar_la_jam_cancela_el_token_i_marca_aturant() {
+    use crate::jam::commands::{request_stop, JamHandle};
+
+    let jam = JamHandle::default();
+    {
+        let mut s = jam.state.lock().unwrap();
+        s.running = true;
+        s.current_detail = "preparant el pla…".into();
+    }
+    let token = jam.cancel.lock().unwrap().clone();
+
+    request_stop(&jam);
+
+    assert!(
+        token.is_cancelled(),
+        "el token de cancel·lació hauria d'estar cancel·lat (el que mira el fill i el guardian)"
+    );
+    let s = jam.state.lock().unwrap().clone();
+    assert!(s.stopping, "l'estat hauria de dir que la Jam s'està aturant");
+    assert_eq!(s.current_detail, "aturant…");
+}
+
+#[test]
+fn aturar_una_jam_que_no_corre_no_marca_aturant() {
+    use crate::jam::commands::{request_stop, JamHandle};
+
+    let jam = JamHandle::default();
+    request_stop(&jam);
+
+    let s = jam.state.lock().unwrap().clone();
+    assert!(
+        !s.stopping,
+        "si no hi ha cap Jam en marxa no hi ha res a aturar (i la UI no ha de quedar penjada)"
+    );
+}
+
+#[test]
+fn l_estat_de_la_jam_porta_la_ia_en_servei() {
+    let s = crate::jam::JamState {
+        provider: "ollama".into(),
+        model: "llama3".into(),
+        stopping: true,
+        ..Default::default()
+    };
+    // La UI llegeix el JSON directament: els noms han de ser els del frontend.
+    let v = serde_json::to_value(&s).unwrap();
+    assert_eq!(v.get("provider").and_then(|x| x.as_str()), Some("ollama"));
+    assert_eq!(v.get("model").and_then(|x| x.as_str()), Some("llama3"));
+    assert_eq!(v.get("stopping").and_then(|x| x.as_bool()), Some(true));
+}
+
+#[test]
+fn la_reserva_de_la_jam_impedeix_dos_comencaments() {
+    use crate::jam::commands::JamHandle;
+    use std::sync::atomic::Ordering;
+
+    let jam = JamHandle::default();
+    // El primer «Comença» reserva la Jam (compare-and-swap).
+    assert!(
+        jam.running
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok(),
+        "el primer «Comença» ha de poder reservar la Jam"
+    );
+    // El segon NO: si passés, pisaria l'estat i el token del primer i les
+    // dues Jams escriurien al mateix repo.
+    assert!(
+        jam.running
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err(),
+        "un segon «Comença» no ha de poder entrar"
+    );
+}
+
+#[test]
+fn el_sostre_del_pla_i_al_pressupost_del_planner() {
+    // El planner fa 3 intents de 20 min: el nostre sostre ha de ser MES GRAN
+    // o els reintents del planner es perden (i la Jam mor on abans
+    // s'hauria recuperat).
+    assert!(
+        crate::jam::commands::PLAN_TIMEOUT > std::time::Duration::from_secs(3 * 20 * 60),
+        "el sostre del pla ha de ser més gran que el total del planner"
+    );
+}

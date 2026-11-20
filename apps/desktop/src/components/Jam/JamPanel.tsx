@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Gamepad2, Play, Square, ListChecks, AlertTriangle, CheckCircle2, Loader2, X, Trophy, Rocket, Sparkles } from "lucide-react";
+import { Gamepad2, Play, Square, ListChecks, AlertTriangle, CheckCircle2, Loader2, X, Trophy, Rocket, Sparkles, Folder, MonitorPlay, Brain, Bot } from "lucide-react";
 import { useT } from "../../i18n";
 import WorkProgress from "../WorkProgress";
+import { obrirEstalvi } from "../../screensaver/window";
 import { customMinutes, formatDuration, type TimeUnit } from "../../utils/workTime";
+import { useProviderStore } from "../../stores/providerStore";
 
 interface JamTask {
   id: string;
@@ -36,7 +38,18 @@ interface JamState {
   /// Durada màxima triada (segons): sostre de l'ETA i de la fin estimada.
   durationSecs: number;
   reportPath: string;
+  /// Arrel del projecte on la Jam està (o ha estat) treballant. Sense això,
+  /// al final l'usuari no podia saber QUIN projecte havia tocat.
+  projectPath: string;
   error: string | null;
+  /// Proveïdor i model d'IA que fa servir la Jam. Sense això l'usuari no
+  /// sabia amb quina IA treballava de debò (Ollama, un proveïdor en línia
+  /// o la IA integrada de NoOrbit).
+  provider: string;
+  model: string;
+  /// L'aturada ja s'ha demanat però la Jam encara no s'ha aturat del tot:
+  /// el backend encara està tallant el pla o el procés fill.
+  stopping: boolean;
 }
 
 interface JamEvent {
@@ -57,6 +70,7 @@ const PRESETS = [
 
 const ENGINES = [
   { id: "godot4", label: "🎮 Godot 4" },
+  { id: "bevy", label: "🦀 Bevy (Rust)" },
   { id: "blender", label: "🧊 Blender" },
   { id: "unreal5", label: "🎬 Unreal 5" },
   { id: "unity", label: "Unity" },
@@ -84,6 +98,8 @@ const KIND_LABEL: Record<string, string> = {
   task_start: "començo",
   task_done: "fet",
   task_error: "no ho aconsegueixo",
+  note: "fent",
+  thinking: "pensament",
   memory: "memòria",
   restart: "reinici",
   compact: "neteja de memòria",
@@ -91,6 +107,12 @@ const KIND_LABEL: Record<string, string> = {
   finished: "acabat",
   error: "error",
 };
+
+/// Registre VIU compartit entre muntatges del panell: si l'usuari canvia de
+/// sub-pestanya (Agent ▸ xat/Jam/integracions) mentre la Jam treballa, el
+/// panell es desmunta i tornava buit, fent pensar que «no fa res». Viure
+/// fora del component (mòdul) ho conserva mentre la finestra estigui oberta.
+let registreCompartit: JamEvent[] = [];
 
 /// PANELL «JAM» — l'agent autònom que construeix el joc sol, en hores,
 /// sense que el Mac es pengi (supervisió de memòria al backend).
@@ -106,16 +128,22 @@ export default function JamPanel() {
   const [buildCmd, setBuildCmd] = useState("");
   const [plan, setPlan] = useState<JamPlan | null>(null);
   const [state, setState] = useState<JamState | null>(null);
-  const [events, setEvents] = useState<JamEvent[]>([]);
+  const [events, setEvents] = useState<JamEvent[]>(() => registreCompartit.slice());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [reportText, setReportText] = useState<string | null>(null);
+  // Proveïdors configurats: només en volem el nom llegible del que fa
+  // servir la Jam («OpenAI» en lloc de «openai»).
+  const providers = useProviderStore((s) => s.providers);
+  const loadProviders = useProviderStore((s) => s.load);
 
   // Estat inicial + esdeveniments en viu.
   useEffect(() => {
     void invoke<JamState>("jam_state").then(setState).catch(() => undefined);
     const un1 = listen<JamState>("jam://state", (e) => setState(e.payload));
     const un2 = listen<JamEvent>("jam://event", (e) => {
+      registreCompartit = [...registreCompartit.slice(-200), e.payload];
       setEvents((prev) => [...prev.slice(-200), e.payload]);
     });
     return () => {
@@ -123,6 +151,11 @@ export default function JamPanel() {
       void un2.then((u) => u());
     };
   }, []);
+
+  // Noms llegibles dels proveïdors (només si encara no tenim la llista).
+  useEffect(() => {
+    if (providers.length === 0) void loadProviders();
+  }, [providers.length, loadProviders]);
 
   /// Temps efectiu en minuts: el preset triat o el valor personalitzat (retallat
   /// a 1 minut..7 dies, igual que el backend).
@@ -150,6 +183,7 @@ export default function JamPanel() {
   const doStart = async () => {
     setBusy(true);
     setErr(null);
+    registreCompartit = [];
     setEvents([]);
     setReportText(null);
     try {
@@ -165,7 +199,18 @@ export default function JamPanel() {
   };
 
   const doStop = async () => {
-    await invoke("jam_stop").catch(() => undefined);
+    // Resposta immediata: el botó es posa a «aturant…» abans que torni el
+    // backend (que també emet l'estat). Abans no hi havia cap retorn visible
+    // i prémer «Atura» semblava que no feia res.
+    setState((s) => (s ? { ...s, stopping: true } : s));
+    try {
+      await invoke("jam_stop");
+    } catch (e) {
+      // Si l'ordre no arriba al backend es torna enrere: el botó no es pot
+      // quedar «Aturant…» per sempre sense que la Jam s'aturi.
+      setState((s) => (s ? { ...s, stopping: false } : s));
+      setErr(String(e));
+    }
   };
 
   const openReport = async () => {
@@ -179,6 +224,58 @@ export default function JamPanel() {
   };
 
   const running = state?.running ?? false;
+  // L'aturada ja s'ha demanat? (el botó ho diu i es desactiva: prémer-lo
+  // dos cops no fa res i abans semblava que el botó no funcionava).
+  const stopping = state?.stopping ?? false;
+  // Nom llegible del proveïdor: el backend dona l'id («ollama»,
+  // «noorbit_native»…) i el store el nom de veritat («OpenAI», «Claude…»).
+  // Ollama i la IA integrada NO són al store (no són proveïdors
+  // configurables), així que tenen el nom aquí.
+  const providerLabel = (id: string) =>
+    providers.find((p) => p.id === id)?.name ??
+    (id === "noorbit_native"
+      ? t("jam.aiNative")
+      : id === "ollama"
+        ? t("jam.aiOllama")
+        : id);
+  // Etiqueta de la IA que fa servir la Jam: «OpenAI · gpt-4o-mini».
+  const aiLabel = state?.provider
+    ? [providerLabel(state.provider), state.model].filter(Boolean).join(" · ")
+    : "";
+  // Nom de la carpeta del projecte (l'últim segment del camí): és el que
+  // l'usuari reconeix de la barra lateral, no tot el camí absolut.
+  const projectName = (state?.projectPath ?? "")
+    .replace(/[\\/]+$/, "")
+    .split(/[\\/]/)
+    .pop() ?? "";
+  const revealProject = () => {
+    if (!state?.projectPath) return;
+    void invoke("reveal_in_finder", { path: state.projectPath }).catch(() => undefined);
+  };
+  // Motor on què es pot obrir el projecte amb UN CLIC. Només els que tenen
+  // editor o terminal propi: Blender, Unity i el web no s'hi obren així.
+  const openableEngine =
+    engine === "godot4"
+      ? "godot"
+      : engine === "unreal5"
+        ? "unreal"
+        : engine === "bevy"
+          ? "bevy"
+          : null;
+  const openInEngine = async () => {
+    if (!state?.projectPath || !openableEngine) return;
+    setNotice(null);
+    try {
+      setNotice(
+        await invoke<string>("open_project_in_engine", {
+          projectPath: state.projectPath,
+          engine: openableEngine,
+        }),
+      );
+    } catch (e) {
+      setErr(String(e));
+    }
+  };
   // Denominador REAL: el `total` que envia el backend (el pla que s'està
   // executant de veritat). El `plan` de la preview només serveix mentre no
   // hagi arrencat, i el backend ja el passa a `state.total`.
@@ -195,7 +292,14 @@ export default function JamPanel() {
       <div className="jam-head">
         <Gamepad2 size={14} />
         <span>{t("jam.title")}</span>
-        {running && <span className="jam-live">{t("jam.live")}</span>}
+        <span className="jam-head-right">
+          {aiLabel && (
+            <span className="jam-ai" title={`${t("jam.ai")}: ${aiLabel}`}>
+              <Bot size={12} /> {aiLabel}
+            </span>
+          )}
+          {running && <span className="jam-live">{t("jam.live")}</span>}
+        </span>
       </div>
 
       {!running && (
@@ -354,6 +458,26 @@ export default function JamPanel() {
             </span>
             <span className="jam-muted">{state.skipped} saltats</span>
           </div>
+          {/* El projecte concret on la Jam treballa (o ha treballat): visible
+              TAMBÉ després d'acabar, quan la pestanya es tanca i es reobre. */}
+          {projectName && (
+            <div className="jam-current" title={state.projectPath}>
+              <Folder size={11} /> <b>{t("jam.project")}</b> {projectName}
+              <button className="btn sm" style={{ marginLeft: 8 }} onClick={revealProject}>
+                {t("jam.reveal")}
+              </button>
+              {openableEngine && (
+                <button className="btn sm" style={{ marginLeft: 6 }} onClick={() => void openInEngine()}>
+                  <MonitorPlay size={12} /> {t("jam.openInEngine")}
+                </button>
+              )}
+            </div>
+          )}
+          {notice && (
+            <div className="jam-current" style={{ color: "var(--accent)" }}>
+              {notice}
+            </div>
+          )}
           {!running && state.finishedAt && (
             <div className="jam-current">
               <Trophy size={11} /> <b>{t("jam.title")}</b> {t("jam.finished")}
@@ -361,14 +485,26 @@ export default function JamPanel() {
           )}
           {running && (
             <div className="jam-current">
-              <Sparkles size={11} /> <b>{state.currentTask || "…"}</b> {state.currentDetail}
+              <Sparkles size={11} /> <b>{state.currentTask || t("jam.workingNow")}</b> {state.currentDetail}
             </div>
           )}
           {running && (
-            <button className="btn sm" onClick={() => void doStop()}>
-              <Square size={12} /> {t("jam.stop")}
+            <button className="btn sm" disabled={stopping} onClick={() => void doStop()}>
+              {stopping ? <Loader2 size={12} className="spin" /> : <Square size={12} />}{" "}
+              {stopping ? t("jam.stopping") : t("jam.stop")}
             </button>
           )}
+          {/* Pantalla de feina a pantalla completa: deixa el Mac/PC mostrant
+              el progrés gran mentre la IA treballa sola (i keep_awake evita
+              que el sistema s'adormi per inactivitat). */}
+          <button
+            className="btn sm"
+            style={{ marginLeft: 8 }}
+            onClick={() => void obrirEstalvi()}
+            title={t("jam.workScreen")}
+          >
+            <MonitorPlay size={12} /> {t("jam.workScreen")}
+          </button>
         </div>
       )}
 
@@ -376,19 +512,26 @@ export default function JamPanel() {
       {events.length > 0 && (
         <div className="jam-log">
           {events.map((e, i) => (
-            <div key={i} className={"jam-log-row" + (e.ok ? "" : " bad")}>
+            <div key={i} className={"jam-log-row" + (e.ok ? "" : " bad") + (e.kind === "thinking" ? " thought" : "")}>
               {e.kind === "task_done" ? (
                 <CheckCircle2 size={11} />
               ) : e.kind === "task_error" || e.kind === "error" ? (
                 <AlertTriangle size={11} />
               ) : e.kind === "finished" ? (
                 <Trophy size={11} />
+              ) : e.kind === "thinking" ? (
+                <Brain size={11} />
               ) : (
                 <Loader2 size={11} className="spin-slow" />
               )}
               <span className="jam-log-kind">{KIND_LABEL[e.kind] ?? e.kind}</span>
-              {e.task && <b>{e.task}</b>}
-              <span className="jam-log-detail">{e.detail}</span>
+              {e.task && e.kind !== "thinking" && e.kind !== "note" && <b>{e.task}</b>}
+              <span
+                className="jam-log-detail"
+                style={e.kind === "thinking" ? { whiteSpace: "pre-wrap" } : undefined}
+              >
+                {e.detail}
+              </span>
             </div>
           ))}
         </div>

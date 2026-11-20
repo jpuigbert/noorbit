@@ -15,9 +15,12 @@ export default function UnrealConnectButton() {
     engineVersion,
     projectName,
     installations,
+    pendingInstallations,
+    engineRoot,
     rcPort,
     lastError,
     setProjectPath,
+    setEngineRoot,
     setRcPort,
     connect,
     disconnect,
@@ -30,9 +33,12 @@ export default function UnrealConnectButton() {
       engineVersion: st.engineVersion,
       projectName: st.projectName,
       installations: st.installations,
+      pendingInstallations: st.pendingInstallations,
+      engineRoot: st.engineRoot,
       rcPort: st.rcPort,
       lastError: st.lastError,
       setProjectPath: st.setProjectPath,
+      setEngineRoot: st.setEngineRoot,
       setRcPort: st.setRcPort,
       connect: st.connect,
       disconnect: st.disconnect,
@@ -43,6 +49,11 @@ export default function UnrealConnectButton() {
   // Llista d'instal·lacions: sempre un array (mai null) — un null aquí
   // feia caure el component i, amb ell, TOTA la interfície.
   const inst = Array.isArray(installations) ? installations : [];
+  // Motors a mitges (l'Epic Launcher encara baixant-los): no serveixen per
+  // connectar, però l'usuari ha de saber que hi són i on.
+  const pending = Array.isArray(pendingInstallations)
+    ? pendingInstallations
+    : [];
 
   // El port el resol el backend (config.toml) i arriba DESPRÉS del primer
   // dibuix, així que el camp segueix l'store fins que l'usuari l'edita.
@@ -59,6 +70,18 @@ export default function UnrealConnectButton() {
       filters: [{ name: "Unreal Project", extensions: ["uproject"] }],
     });
     if (typeof sel === "string") setProjectPath(sel);
+  };
+
+  /// Tria la carpeta del motor a mà: necessari quan el Unreal viu en un lloc
+  /// que la detecció automàtica no veu (un disc extern no muntat, una unitat
+  /// de xarxa amb permisos, una carpeta amb només el motor).
+  const pickEngine = async () => {
+    const sel = await open({
+      directory: true,
+      multiple: false,
+      title: t("unreal.engine"),
+    });
+    if (typeof sel === "string") setEngineRoot(sel);
   };
 
   const PortField = () => (
@@ -120,14 +143,54 @@ export default function UnrealConnectButton() {
             <FolderSearch size={13} /> {t("common.select")}
           </button>
         </div>
+      </div>
+      <div className="field">
+        <label>{t("unreal.engine")}</label>
+        <div className="si-pick">
+          <select
+            value={engineRoot ?? ""}
+            onChange={(e) => setEngineRoot(e.target.value || null)}
+          >
+            <option value="">{t("unreal.engineAuto")}</option>
+            {inst.map((i) => (
+              <option key={i} value={i}>
+                {i}
+              </option>
+            ))}
+            {engineRoot && !inst.includes(engineRoot) && (
+              <option value={engineRoot}>{engineRoot}</option>
+            )}
+          </select>
+          <button className="btn sm" onClick={pickEngine}>
+            <FolderSearch size={13} /> {t("common.select")}
+          </button>
+        </div>
         {inst.length > 0 && (
-          <p className="lp-hint">
-            {t("unreal.installations")}: {inst.length}
-          </p>
+          <>
+            <p className="lp-hint">
+              {t("unreal.installations")}: {inst.length}
+            </p>
+            <ul className="ue-paths">
+              {inst.map((i) => (
+                <li key={i}>{i}</li>
+              ))}
+            </ul>
+          </>
         )}
         {inst.length === 0 && (
           <p className="lp-hint">{t("unreal.noInstallations")}</p>
         )}
+        {pending.length > 0 && (
+          <div className="ue-status warn">
+            {t("unreal.pendingInstallations")}
+            <ul className="ue-paths">
+              {pending.map((p) => (
+                <li key={p}>{p}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <p className="lp-hint">{t("unreal.engineHint")}</p>
       </div>
       <PortField />
       <button className="btn primary" disabled={busy || !projectPath} onClick={() => connect()}>

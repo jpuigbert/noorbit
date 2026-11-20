@@ -38,5 +38,21 @@ fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     fs::write(out_dir.join("builtin_skills.rs"), body).expect("no s'ha pogut escriure builtin_skills.rs");
 
+    // macOS: les claus de privadesa (micròfon i reconeixement de veu) han de
+    // ser a l'Info.plist DEL PROCÉS. El paquet .app en porta una còpia, però
+    // `tauri dev` executa el binari pelat: sense esta secció, el sistema mata
+    // l'app el primer dia que es prem el micròfon. La incrustem ací.
+    #[cfg(target_os = "macos")]
+    {
+        let plist = manifest.join("Info.plist");
+        if plist.is_file() {
+            println!("cargo:rerun-if-changed=Info.plist");
+            println!(
+                "cargo:rustc-link-arg=-Wl,-sectcreate,__TEXT,__info_plist,{}",
+                plist.display()
+            );
+        }
+    }
+
     tauri_build::build()
 }

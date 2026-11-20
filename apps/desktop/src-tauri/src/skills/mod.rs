@@ -35,15 +35,7 @@ pub struct SkillsManager {
 
 impl SkillsManager {
     pub fn new(config: &crate::config::AppConfig) -> Self {
-        let dir = if !config.skills_dir.is_empty() {
-            PathBuf::from(&config.skills_dir)
-        } else {
-            // Passen pel resoledor central de dades: en mode portàtil (USB)
-            // les skills viuen a `NoOrbitData/` i viatgen amb l'app.
-            crate::config::AppConfig::data_dir()
-                .unwrap_or_else(|| dirs::data_dir().unwrap_or_else(|| std::env::temp_dir()))
-                .join("skills")
-        };
+        let dir = resolve_skills_dir(config);
         let _ = std::fs::create_dir_all(&dir);
         seed_builtin_skills(&dir);
         let mut manager = Self { skills_dir: dir, skills: vec![] };
@@ -61,6 +53,20 @@ impl SkillsManager {
 
     pub fn list(&self) -> Vec<Skill> {
         self.skills.clone()
+    }
+}
+
+/// Resolució CENTRAL del directori de skills: la configure l'usuari o, si no,
+/// el resolvedor de dades (en mode portàtil USB les skills viuen a
+/// `NoOrbitData/` i viatgen amb l'app). Compartida pel gestor i per la IA
+/// nativa (consulta de skills ECC de sèrie).
+pub fn resolve_skills_dir(config: &crate::config::AppConfig) -> PathBuf {
+    if !config.skills_dir.is_empty() {
+        PathBuf::from(&config.skills_dir)
+    } else {
+        crate::config::AppConfig::data_dir()
+            .unwrap_or_else(|| dirs::data_dir().unwrap_or_else(|| std::env::temp_dir()))
+            .join("skills")
     }
 }
 
@@ -101,9 +107,18 @@ fn scan_skills(root: &Path) -> Vec<Skill> {
     if !root.is_dir() {
         return out;
     }
+    // Profunditat 4: les skills d'un repositori extern poden estar aninades
+    // (p. ex. `<repo>/document-skills/pdf/SKILL.md` un cop instal·lades).
+    // `.git` i les carpetes de dependències no s'exploren: milers de fitxers
+    // i cap skill.
     for entry in walkdir::WalkDir::new(root)
-        .max_depth(3)
+        .max_depth(4)
         .into_iter()
+        .filter_entry(|e| {
+            !(e.file_type().is_dir()
+                && [".git", "node_modules", "target", "dist"]
+                    .contains(&e.file_name().to_string_lossy().as_ref()))
+        })
         .flatten()
     {
         let path = entry.path();

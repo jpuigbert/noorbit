@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Undo2, Redo2 } from "lucide-react";
+import { Check, Loader2, Undo2, Redo2 } from "lucide-react";
 import { useT } from "../i18n";
 import { actions } from "../actions";
 import { useAIActivity } from "../stores/activityStore";
@@ -10,6 +10,9 @@ interface Row {
   kbd?: string;
   action?: () => void;
   sep?: boolean;
+  /** Filera d'opció EXCLOSIVA (tema, cursor…): el ganxet indica quina és activa. */
+  check?: boolean;
+  title?: string;
 }
 
 /// Barra de menús amb la mateixa estructura que VS Code / Qoder:
@@ -19,6 +22,11 @@ export default function MenuBar() {
   const [open, setOpen] = useState<string | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const activity = useAIActivity();
+  // El cursor (divertit / clàssic) es pinta amb ganxet al menú Vista: cal
+  // llegir l'estat perquè la llista es refresqui en fer clic.
+  const funCursor = useUIStore((s) => s.funCursor);
+  const setFunCursor = useUIStore((s) => s.setFunCursor);
+  const theme = useUIStore((s) => s.theme);
 
   // tanca el desplegable en fer clic fora
   useEffect(() => {
@@ -82,16 +90,29 @@ export default function MenuBar() {
       { label: t("menu.wordWrap"), kbd: "⌥Z", action: act("view.wordWrap") },
       { label: t("menu.minimap"), action: act("view.minimap") },
       { sep: true, label: "" },
+      // Cursor del ratolí: el divertit per zones o el clàssic de l'ordinador.
+      { label: t("menu.cursorFun"), check: funCursor, action: () => setFunCursor(true) },
+      {
+        label: t("menu.cursorClassic"),
+        check: !funCursor,
+        title: t("menu.cursorHint"),
+        action: () => setFunCursor(false),
+      },
+      { sep: true, label: "" },
       { label: t("menu.zoomIn"), kbd: "⌘=", action: act("view.zoomIn") },
       { label: t("menu.zoomOut"), kbd: "⌘-", action: act("view.zoomOut") },
       { label: t("menu.zoomReset"), kbd: "⌘0", action: act("view.zoomReset") },
       { sep: true, label: "" },
-      { label: t("settings.themeDark"), action: act("view.themeDark") },
-      { label: t("settings.themeLight"), action: act("view.themeLight") },
-      { label: t("settings.themeGray"), action: act("view.themeGray") },
-      { label: t("settings.themeGreen"), action: act("view.themeGreen") },
-      { label: t("settings.themeGold"), action: act("view.themeGold") },
-      { label: t("settings.themeYellow"), action: act("view.themeYellow") },
+      { label: t("settings.themeDark"), check: theme === "dark", action: act("view.themeDark") },
+      { label: t("settings.themeLight"), check: theme === "light", action: act("view.themeLight") },
+      { label: t("settings.themeGray"), check: theme === "gray", action: act("view.themeGray") },
+      { label: t("settings.themeGreen"), check: theme === "green", action: act("view.themeGreen") },
+      { label: t("settings.themeGold"), check: theme === "gold", action: act("view.themeGold") },
+      {
+        label: t("settings.themeYellow"),
+        check: theme === "yellow",
+        action: act("view.themeYellow"),
+      },
       { sep: true, label: "" },
       { label: t("settings.title"), kbd: "⌘,", action: act("view.settings") },
     ],
@@ -114,6 +135,26 @@ export default function MenuBar() {
     ],
     zip: [
       { label: t("menu.zipWpTheme"), action: act("zip.wpTheme") },
+    ],
+    // MENÚ NOU «VÍDEO»: muntatge professional Blender → Kdenlive/ffmpeg. Viu
+    // a part de l'«IA» perquè és un ofici propi: mirar, muntar, criticar,
+    // renderitzar i verificar, tot des del mateix motor que la IA fa servir
+    // amb `@video:`.
+    video: [
+      {
+        label: t("menu.videoDirector"),
+        action: act("video.director"),
+        title: t("menu.videoDirectorHint"),
+      },
+      { sep: true, label: "" },
+      { label: t("menu.videoPanel"), action: act("video.panel") },
+      { label: t("menu.videoScan"), action: act("video.scan") },
+      { label: t("menu.videoAuto"), action: act("video.auto"), title: t("menu.videoAutoHint") },
+      { sep: true, label: "" },
+      { label: t("menu.videoPreview"), action: act("video.preview") },
+      { label: t("menu.videoRender"), action: act("video.render") },
+      { label: t("menu.videoExport"), action: act("video.export"), title: t("menu.videoExportHint") },
+      { label: t("menu.videoKdenlive"), action: act("video.kdenlive") },
     ],
     ai: [
       { label: t("ai.manager"), action: act("ai.models") },
@@ -152,6 +193,7 @@ export default function MenuBar() {
     run: t("menu.run"),
     terminal: t("menu.terminal"),
     ai: t("menu.ai"),
+    video: t("menu.video"),
     zip: t("menu.zip"),
     help: t("menu.help"),
   };
@@ -168,12 +210,20 @@ export default function MenuBar() {
               <button
                 key={i}
                 className="menu-row"
+                title={r.title}
                 onClick={() => {
                   r.action?.();
                   setOpen(null);
                 }}
               >
-                <span>{r.label}</span>
+                <span className="menu-row-main">
+                  {/* El ganxet sempre ocupa lloc (invisible si no toca) perquè
+                      les fileres d'una mateixa opció quedin alineades. */}
+                  {r.check != null && (
+                    <Check size={12} className={"menu-tick" + (r.check ? " on" : "")} />
+                  )}
+                  <span>{r.label}</span>
+                </span>
                 {r.kbd && <span className="kbd">{r.kbd}</span>}
               </button>
             )

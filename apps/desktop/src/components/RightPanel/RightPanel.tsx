@@ -23,6 +23,7 @@ import MobilePanel from "../Mobile/MobilePanel";
 import GitPanel from "../Git/GitPanel";
 import ProblemsPanel from "../Problems/ProblemsPanel";
 import DebugConsole from "../Console/DebugConsole";
+import WorkLive from "../WorkLive";
 
 /// PESTANYES: des de la v0.71 les «Integracions» NO són una pestanya a part:
 /// viuen DINS de la pestanya Agent com a sub-pestanyes (així veus sempre, al
@@ -256,6 +257,10 @@ export default function RightPanel() {
             registre — el xat només queda amb les respostes. */}
         {rightTab === "dev" && (
           <div className="rp-group">
+            {/* Feina autònoma en marxa (Jam / treball autopilotat): franja
+                viva amb tasca actual, progrés i cronòmetre, sense haver de
+                canviar de pestanya. */}
+            <WorkLive />
             <div className="rp-subtabs">
               {SUB_DEV.map((k) => (
                 <button

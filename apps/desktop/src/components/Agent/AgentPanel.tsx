@@ -18,6 +18,8 @@ import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { useSystemStatsStore, memPercent, formatBytes } from "../../stores/systemStatsStore";
 import { useProcessStore } from "../../stores/processStore";
 import TaskChecklist from "./TaskChecklist";
+import ChatVote from "./ChatVote";
+import VoiceButton from "./VoiceButton";
 import { CopyButton, SaveButton } from "../CopyButton";
 import ChatMarkdown from "./ChatMarkdown";
 import { useWebAiStore } from "../../stores/webAiStore";
@@ -72,6 +74,7 @@ export default function AgentPanel() {
     importWebCode,
     clearChat,
     stop,
+    setMessageVote,
   } = useAgentStore(
     // Selectors fins: amb el store sencer, qualsevol canvi d'estat (tasques,
     // usage, altres xats…) re-renderitzava tot el panell. Ací només es
@@ -103,6 +106,7 @@ export default function AgentPanel() {
       importWebCode: st.importWebCode,
       clearChat: st.clearChat,
       stop: st.stop,
+      setMessageVote: st.setMessageVote,
     }))
   );
 
@@ -375,6 +379,17 @@ export default function AgentPanel() {
     forkChat(activeId, upToIndex);
   };
 
+  // Pregunta del torn d'una resposta: l'últim missatge d'usuari ABANS d'ella.
+  // El vot s'ha d'associar al torn complet (pregunta + resposta), que és com
+  // ho guarda el registre d'aprenentatge.
+  const questionOf = (idx: number): string => {
+    for (let j = idx - 1; j >= 0; j -= 1) {
+      const p = messages[j];
+      if (p && p.role === "user") return p.text;
+    }
+    return "";
+  };
+
   // Creació MANUAL d'estructura: un diàleg amb una línia per ruta. Es
   // pre-emplena amb els fitxers/carpetes que la IA RECOMANA al missatge
   // (encara que només n'hagi parlat en prosa); l'usuari l'edita a plaer.
@@ -399,6 +414,20 @@ export default function AgentPanel() {
       e.preventDefault();
       handleSend();
     }
+  };
+
+  // Dictat per veu: el text reconegut s'AFIG al que ja hi ha escrit (no el
+  // substituïx) i el cursor queda al final, a punt de revisar i prémer ⏎.
+  const appendVoice = (text: string) => {
+    setPrompt((p) => (p.trim() ? p.replace(/\s+$/, "") + " " + text : text));
+    requestAnimationFrame(() => {
+      const el = promptRef.current;
+      if (!el) return;
+      el.focus();
+      el.selectionStart = el.selectionEnd = el.value.length;
+      el.style.height = "auto";
+      el.style.height = Math.min(el.scrollHeight, 140) + "px";
+    });
   };
 
   // Enganxar (⌘V) o triar fitxers: les imatges es desen a la carpeta de
@@ -880,6 +909,8 @@ export default function AgentPanel() {
                 e.target.value = "";
               }}
             />
+            {/* Dictat per veu: parla l'ordre i s'escriu al composer. */}
+            <VoiceButton onText={appendVoice} disabled={running} />
             <button
               className="icon-btn"
               onClick={() => {
@@ -1201,6 +1232,13 @@ export default function AgentPanel() {
                   >
                     <GitFork size={11} /> {t("agent.fork")}
                   </button>
+                  {/* Vot del torn: el 👍 esdevé prova per a la porta del
+                      cervell i fila de dataset; el 👎 s'exclou de tot. */}
+                  <ChatVote
+                    question={questionOf(i)}
+                    vote={m.vote ?? null}
+                    onVoted={(v) => setMessageVote(activeId, i, v)}
+                  />
                 </div>
               )}
               {/* Si el missatge conté codi o fitxers @file:, un clic els escriu

@@ -620,6 +620,13 @@
   border-radius: 4px;
   box-shadow: 0 6px 28px rgba(0, 0, 0, 0.45);
 }
+.image-viewer video {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 4px;
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.45);
+  background: #000;
+}
 .image-viewer-msg {
   display: flex;
   align-items: center;
@@ -919,6 +926,55 @@
 .rp-group-body > * {
   flex: 1;
   min-height: 0;
+}
+
+/* ── APRENENTATGE AUTÒNOM EN REPÒS (Configuració ▸ Integracions) ──────── */
+.wander-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+}
+.wander-note {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+}
+.wander-note-font {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--accent);
+}
+.wander-note-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-1);
+}
+.wander-note-count {
+  flex: none;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+.wander-textarea {
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  resize: vertical;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

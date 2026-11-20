@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="470" viewBox="0 0 1200 470" role="img" aria-label="Pont d'actius: Blender exporta a EngineWork/Exports i la IA decideix quan importar l'asset a Godot, Bevy o Unreal">
+  <title>Pont d'actits Blender → motor</title>
+  <defs>
+    <linearGradient id="p1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#14304f"/>
+      <stop offset="1" stop-color="#0d1c33"/>
+    </linearGradient>
+    <linearGradient id="p2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#123a2f"/>
+      <stop offset="1" stop-color="#0c241d"/>
+    </linearGradient>
+    <linearGradient id="p3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a2b52"/>
+      <stop offset="1" stop-color="#241a35"/>
+    </linearGradient>
+    <marker id="pa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#8fc4ff"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="470" fill="#080f1c"/>
+  <text x="600" y="44" text-anchor="middle" font-family="-apple-system, 'Segoe UI', sans-serif" font-size="24" font-weight="700" fill="#8fc4ff">Pont d'actits — de Blender al motor, quan la IA ho decideix</text>
+
+  <!-- 1. Blender -->
+  <rect x="40" y="150" width="250" height="170" rx="16" fill="url(#p1)" stroke="#2f7ad6" stroke-width="2"/>
+  <text x="165" y="186" text-anchor="middle" font-family="-apple-system, 'Segoe UI', sans-serif" font-size="20" font-weight="700" fill="#9fc6f2">🧊 Blender</text>
+  <g font-family="-apple-system, 'Segoe UI', sans-serif" font-size="14" fill="#cfe4ff">
+    <text x="62" y="218">@blender-headless:</text>
+    <text x="62" y="242">modela, texturitza,</text>
+    <text x="62" y="266">exporta a glTF/GLB</text>
+    <text x="62" y="296" fill="#9fc6f2">(la IA hi treballa sol)</text>
+  </g>
+
+  <!-- 2. Exports -->
+  <rect x="400" y="150" width="270" height="170" rx="16" fill="url(#p2)" stroke="#3fae8a" stroke-width="2"/>
+  <text x="535" y="186" text-anchor="middle" font-family="-apple-system, 'Segoe UI', sans-serif" font-size="20" font-weight="700" fill="#7ee0bd">📦 EngineWork/Exports/</text>
+  <g font-family="-apple-system, 'Segoe UI', sans-serif" font-size="14" fill="#bdf0dd">
+    <text x="422" y="218">model.glb</text>
+    <text x="422" y="242">casa.glb</text>
+    <text x="422" y="266">hero.glb</text>
+    <text x="422" y="296" fill="#7ee0bd">dins el repo, versionable</text>
+  </g>
+  <path d="M290 235 H400" stroke="#8fc4ff" stroke-width="2.5" marker-end="url(#pa)"/>
+  <text x="345" y="222" text-anchor="middle" font-family="-apple-system, 'Segoe UI', sans-serif" font-size="13" fill="#9fc6f2">exporta</text>
+
+  <!-- 3. La IA decideix -->
+  <rect x="760" y="120" width="400" height="230" rx="16" fill="url(#p3)" stroke="#8a6fd0" stroke-width="2"/>
+  <text x="960" y="156" text-anchor="middle" font-family="-apple-system, 'Segoe UI', sans-serif" font-size="20" font-weight="700" fill="#c3b0f5">🤖 La IA decideix</text>
+  <rect x="800" y="176" width="320" height="52" rx="10" fill="#0f2039" stroke="#4a90e2" stroke-width="1.5"/>
+  <text x="960" y="199" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" fill="#9fc6f2">@import: model.glb</text>
+  <text x="960" y="220" text-anchor="middle" font-family="-apple-system, 'Segoe UI', sans-serif" font-size="13" fill="#b9a7e8">@import: godot model.glb  (motor forçat)</text>
+  <g font-family="-apple-system, 'Segoe UI', sans-serif" font-size="14" fill="#ded2ff">
+    <text x="800" y="262">• sense @import: no es mou res</text>
+    <text x="800" y="288">• ruta per nom, relativa o absoluta</text>
+    <text x="800" y="314">• errors clars: sense motor / sense asset</text>
+  </g>
+  <path d="M670 235 H760" stroke="#8fc4ff" stroke-width="2.5" marker-end="url(#pa)"/>
+  <text x="715" y="222" text-anchor="middle" font-family="-apple-system, 'Segoe UI', sans-serif" font-size="13" fill="#9fc6f2">importa</text>
+
+  <!-- destins -->
+  <g font-family="-apple-system, 'Segoe UI', sans-serif">
+    <rect x="70" y="380" width="320" height="70" rx="12" fill="url(#p1)" stroke="#2f7ad6" stroke-width="2"/>
+    <text x="230" y="408" text-anchor="middle" font-size="17" font-weight="700" fill="#9fc6f2">🎮 Godot 4</text>
+    <text x="230" y="432" text-anchor="middle" font-size="13" fill="#cfe4ff">assets/ + scenes/&lt;nom&gt;.tscn + reimport headless</text>
+
+    <rect x="440" y="380" width="320" height="70" rx="12" fill="url(#p1)" stroke="#2f7ad6" stroke-width="2"/>
+    <text x="600" y="408" text-anchor="middle" font-size="17" font-weight="700" fill="#9fc6f2">🦀 Bevy (Rust)</text>
+    <text x="600" y="432" text-anchor="middle" font-size="13" fill="#cfe4ff">assets/ → asset_server.load(&quot;…glb&quot;)</text>
+
+    <rect x="810" y="380" width="320" height="70" rx="12" fill="url(#p1)" stroke="#2f7ad6" stroke-width="2"/>
+    <text x="970" y="408" text-anchor="middle" font-size="17" font-weight="700" fill="#9fc6f2">🎬 Unreal Engine 5</text>
+    <text x="970" y="432" text-anchor="middle" font-size="13" fill="#cfe4ff">Remote Control API → /Game/Imports (verificat)</text>
+
+    <path d="M960 350 V372 H230 V378" stroke="#6ea8e8" stroke-width="2" fill="none" marker-end="url(#pa)"/>
+    <path d="M960 350 V372 H600 V378" stroke="#6ea8e8" stroke-width="2" fill="none" marker-end="url(#pa)"/>
+    <path d="M960 350 V378" stroke="#6ea8e8" stroke-width="2" fill="none" marker-end="url(#pa)"/>
+  </g>
+</svg>

@@ -2,14 +2,19 @@ import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
 import { readFile } from "@tauri-apps/plugin-fs";
 import {
+  unrealAgentSetup,
+  unrealAgentTask,
   unrealAutoConnect,
   unrealBuildLighting,
   unrealCreateBlueprint,
   unrealDetectInstallations,
+  unrealDetectPendingInstallations,
   unrealFindUproject,
   unrealGetRcPort,
   unrealImportAsset,
   unrealInfo,
+  unrealMcpCall,
+  unrealMcpTools,
   unrealPackageGame,
   unrealPing,
   unrealRunPython,
@@ -18,8 +23,17 @@ import {
   PythonResult,
   PackageOptions,
   BuildResult,
+  UnrealSetupStep,
+  UnrealSetupReport,
+  UnrealMcpTool,
+  UnrealMcpCallResult,
 } from "../core/unreal/client";
 import { useWorkspaceStore } from "./workspaceStore";
+import { t } from "../i18n";
+import {
+  normalizeAgentPhase,
+  type UnrealAgentEvent,
+} from "../utils/unrealAgent";
 
 export type UnrealConnectStatus =
   | "idle"
@@ -35,6 +49,13 @@ interface UnrealState {
   engineVersion: string | null;
   projectName: string | null;
   installations: string[];
+  /// Instal·lacions A MITGES (l'Epic Launcher encara baixant el motor). No
+  /// es poden fer servir, però es mostren perquè l'usuari sap que el motor
+  /// hi és i que la descàrrega no s'ha acabat.
+  pendingInstallations: string[];
+  /// Carpeta del motor triada a mà. Vacua = detecció automàtica (que ja
+  /// escaneja els discs externs i les unitats montades).
+  engineRoot: string | null;
   projectPath: string | null;
   /// Port de la Remote Control que usa REALMENT el backend (config.toml). Es
   /// pot canviar des d'aquí: si l'editor n'usa un altre, sense això la
@@ -55,13 +76,58 @@ interface UnrealState {
   /// Rellotge del watchdog de connexió (ping cada 5 s); null si no corre.
   watchdogTimer: number | null;
 
+  /// Agent MCP (Unreal 5.8+): les tres fases del flux d'un sol clic.
+  ///
+  /// FASE 1 (setup): passos del preparati, informe final i bloqueig de
+  /// reintent després d'un timeout (evita arrencar DOS editors).
+  setupSteps: UnrealSetupStep[];
+  setupRunning: boolean;
+  setupReport: UnrealSetupReport | null;
+  setupError: string | null;
+  setupProject: string | null;
+  setupStartedAt: number | null;
+  setupFinishedAt: number | null;
+  setupAbandonedAt: number | null;
+
+  /// FASE 2 (descobriment): catàleg d'eines MCP i execució puntual.
+  tools: UnrealMcpTool[];
+  toolsLoading: boolean;
+  toolsError: string | null;
+  toolsLoadedAt: number | null;
+
+  /// FASE 3 (execució): el bucle d'eines de l'agent, en directe.
+  taskEvents: UnrealAgentEvent[];
+  taskRunning: boolean;
+  taskAnswer: string | null;
+  taskError: string | null;
+
   init: () => Promise<void>;
   detectInstallations: () => Promise<void>;
   loadRcPort: () => Promise<void>;
   setRcPort: (port: number) => Promise<void>;
   setProjectPath: (path: string | null) => void;
+  /// Tria la carpeta del motor d'Unreal a mà (disc extern o lloc rar).
+  setEngineRoot: (path: string | null) => void;
   connect: (timeout?: number) => Promise<void>;
   disconnect: () => void;
+
+  /// FASE 1: prepara TOT l'entorn d'un sol clic (Ollama, plugins MCP,
+  /// auto-arrencada del servidor i handshake). Amb timeout i bloqueig de
+  /// reintent: si es quedat penjat, un altre intent obriria un segon
+  /// editor d'Unreal (doble RAM i dos ports MCP).
+  runOneClickSetup: (opts?: {
+    launch?: boolean;
+    project?: string;
+  }) => Promise<void>;
+  clearSetup: () => void;
+
+  /// FASE 2: catàleg d'eines MCP (amb càch d'un minut) i crida puntual.
+  loadTools: (force?: boolean) => Promise<void>;
+  callTool: (name: string, args: unknown) => Promise<UnrealMcpCallResult>;
+
+  /// FASE 3: xat lliure amb l'agent (bucle d'eines del model local).
+  runTask: (prompt: string) => Promise<void>;
+  clearTask: () => void;
 
   runPython: (code: string) => Promise<PythonResult | null>;
   createBlueprint: (
@@ -85,11 +151,52 @@ interface UnrealState {
 /// cada línia de build s'afegiria duplicada al visor).
 let initPromise: Promise<void> | null = null;
 
+/// El setup pot trigar minuts (arrencada de l'editor, compilació de shaders):
+/// sis minuts de marge abans de declarar-lo penjat.
+const SETUP_TIMEOUT_MS = 360_000;
+/// Després d'un timeout NO es pot reintentar immediatament: el backend
+/// arrenca l'editor i un segon intent obriria un SEGON editor (doble RAM i
+/// dos ports MCP al mateix temps).
+const RETRY_BLOCK_MS = 60_000;
+/// El catàleg d'eines canva poc: es torna a demanar com a molt d'un minut.
+const TOOLS_CACHE_MS = 60_000;
+/// Límit dels arguments d'una eina: un JSON de 50 MB bloqueja el fil
+/// principal del navegador (DoS local).
+const MAX_ARGS_BYTES = 100_000;
+/// Esdeveniments del bucle d'eines conservats en memòria.
+const MAX_TASK_EVENTS = 300;
+
+/// El setup ja està en marxa (evita dues crides simultànies al backend).
+let setupInFlight = false;
+/// Comptador de ids dels esdeveniments de l'agent.
+let eventSeq = 0;
+const nextEventId = () => ++eventSeq;
+
+/// Resol el `.uproject`: el triat a mà o el detectat dins del workspace.
+async function resolveUproject(get: () => UnrealState): Promise<string | null> {
+  const chosen = get().projectPath;
+  if (chosen) return chosen;
+  const root = useWorkspaceStore.getState().root;
+  if (!root) return null;
+  try {
+    const found = await unrealFindUproject(root);
+    if (found) {
+      get().setProjectPath(found);
+      return found;
+    }
+  } catch {
+    /* sense .uproject: el caller avisa */
+  }
+  return null;
+}
+
 export const useUnrealStore = create<UnrealState>((set, get) => ({
   connected: false,
   engineVersion: null,
   projectName: null,
   installations: [],
+  pendingInstallations: [],
+  engineRoot: null,
   projectPath: null,
   rcPort: 30010,
 
@@ -106,11 +213,71 @@ export const useUnrealStore = create<UnrealState>((set, get) => ({
   capturing: false,
   watchdogTimer: null,
 
+  setupSteps: [],
+  setupRunning: false,
+  setupReport: null,
+  setupError: null,
+  setupProject: null,
+  setupStartedAt: null,
+  setupFinishedAt: null,
+  setupAbandonedAt: null,
+
+  tools: [],
+  toolsLoading: false,
+  toolsError: null,
+  toolsLoadedAt: null,
+
+  taskEvents: [],
+  taskRunning: false,
+  taskAnswer: null,
+  taskError: null,
+
   init: () => {
     if (!initPromise) {
       initPromise = (async () => {
         await listen<string>("unreal://build-output", (evt) => {
           set((s) => ({ buildOutput: s.buildOutput + evt.payload }));
+        });
+        // Passos de l'orquestrador «Activar Agent Unreal» (✓/✗ per pas).
+        await listen<UnrealSetupStep>("unreal://agent-setup", (evt) => {
+          const s = evt.payload;
+          set((st) => ({
+            setupSteps: [...st.setupSteps, s].slice(-20),
+          }));
+        });
+        // Progrés del bucle d'eines de l'agent (fase + text + eina + ronda).
+        await listen<{
+          phase: string;
+          text: string;
+          tool?: string;
+          turn?: number;
+        }>("unreal://agent-task", (evt) => {
+          const p = evt.payload;
+          const ev: UnrealAgentEvent = {
+            id: nextEventId(),
+            phase: normalizeAgentPhase(p.phase),
+            text: p.text ?? "",
+            tool: p.tool,
+            turn: p.turn,
+            ts: Date.now(),
+          };
+          if (ev.phase === "answer") {
+            set((st) => ({
+              taskEvents: [...st.taskEvents, ev].slice(-MAX_TASK_EVENTS),
+              taskAnswer: ev.text,
+            }));
+            return;
+          }
+          if (ev.phase === "error") {
+            set((st) => ({
+              taskEvents: [...st.taskEvents, ev].slice(-MAX_TASK_EVENTS),
+              taskError: ev.text,
+            }));
+            return;
+          }
+          set((st) => ({
+            taskEvents: [...st.taskEvents, ev].slice(-MAX_TASK_EVENTS),
+          }));
         });
         await get().detectInstallations();
         await get().loadRcPort();
@@ -195,9 +362,22 @@ export const useUnrealStore = create<UnrealState>((set, get) => ({
     } catch {
       set({ installations: [] });
     }
+
+    // Les instal·lacions a mitges van a part: el backend pot ser vell i no
+    // conèixer la comanda, i en aquest cas simplement no se'n mostra cap.
+    try {
+      const pending = (await unrealDetectPendingInstallations()) ?? [];
+      set({
+        pendingInstallations: Array.isArray(pending) ? pending : [],
+      });
+    } catch {
+      set({ pendingInstallations: [] });
+    }
   },
 
   setProjectPath: (path) => set({ projectPath: path }),
+
+  setEngineRoot: (path) => set({ engineRoot: path }),
 
   /// Demana al backend el port EFFECTIU (no el 30010 fixe de la UI): si
   /// l'usuari el va canviar a config.toml, la interfície n'ha de mostrar el
@@ -264,7 +444,9 @@ export const useUnrealStore = create<UnrealState>((set, get) => ({
       }
 
       setStatus("waiting", "Arrencant editor i esperant Remote Control API…");
-      const report = await unrealAutoConnect(project, timeout);
+      // El motor triat a mà té prioritat (disc extern); si no hi ha, el
+      // backend el detecta sol (també a les unitats montades).
+      const report = await unrealAutoConnect(project, timeout, get().engineRoot);
 
       const info = await unrealInfo();
       set({
@@ -292,6 +474,169 @@ export const useUnrealStore = create<UnrealState>((set, get) => ({
       statusMessage: "",
       lastError: null,
     }),
+
+  /// FASE 1 · SETUP — un sol clic prepara TOT l'entorn (Ollama, plugins MCP
+  /// al .uproject, auto-arrencada del servidor i handshake). Idempotent.
+  ///
+  /// Amb timeout propi: si es queda penjat, es bloqueja el reintent (un altre
+  /// intent obriria un SEGON editor d'Unreal: doble RAM i dos ports MCP).
+  runOneClickSetup: async (opts) => {
+    if (setupInFlight) return;
+
+    const { setupAbandonedAt } = get();
+    if (setupAbandonedAt && Date.now() - setupAbandonedAt < RETRY_BLOCK_MS) {
+      const remaining = Math.ceil(
+        (RETRY_BLOCK_MS - (Date.now() - setupAbandonedAt)) / 1000
+      );
+      set({ setupError: t("unreal.agent.setup.retryBlocked", { s: remaining }) });
+      return;
+    }
+
+    setupInFlight = true;
+    set({
+      setupRunning: true,
+      setupSteps: [],
+      setupReport: null,
+      setupError: null,
+      setupStartedAt: Date.now(),
+      setupFinishedAt: null,
+      setupAbandonedAt: null,
+    });
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let timedOut = false;
+    try {
+      const project = opts?.project ?? (await resolveUproject(get));
+      if (!project) {
+        throw new Error(t("unreal.agent.setup.noProject"));
+      }
+      set({ setupProject: project });
+
+      const invokePromise = unrealAgentSetup(project, opts?.launch ?? true);
+      // El rebuig tardà es captura aquí: si no, saltaria com a
+      // unhandledRejection quan el timeout guanyi la carrera.
+      invokePromise.catch(() => {
+        /* l'error real el mostra el Promise.race */
+      });
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          timedOut = true;
+          reject(
+            new Error(
+              t("unreal.agent.setup.timeout", {
+                min: Math.round(SETUP_TIMEOUT_MS / 60_000),
+              })
+            )
+          );
+        }, SETUP_TIMEOUT_MS);
+      });
+
+      const report = await Promise.race([invokePromise, timeoutPromise]);
+      set({ setupReport: report });
+      if (!report.ok) set({ setupError: report.message });
+      // Setup correcte: el catàleg d'eines ja és disponible.
+      if (report.ok && report.mcp_connected) {
+        void get().loadTools(true);
+      }
+    } catch (e) {
+      set({
+        setupError: e instanceof Error ? e.message : String(e),
+        // Només un timeout bloqueja el reintent: un error normal es pot
+        // corregir i tornar a provar de seguida.
+        setupAbandonedAt: timedOut ? Date.now() : null,
+      });
+    } finally {
+      if (timer) clearTimeout(timer);
+      setupInFlight = false;
+      set({ setupRunning: false, setupFinishedAt: Date.now() });
+    }
+  },
+
+  clearSetup: () => {
+    if (setupInFlight) return;
+    set({
+      setupSteps: [],
+      setupReport: null,
+      setupError: null,
+      setupProject: null,
+      setupStartedAt: null,
+      setupFinishedAt: null,
+      setupAbandonedAt: null,
+    });
+  },
+
+  /// FASE 2 · DESCOBERIMENT — catàleg d'eines MCP de l'editor (amb càch
+  /// d'un minut: no canvia entre crides).
+  loadTools: async (force = false) => {
+    const { tools, toolsLoadedAt, toolsLoading } = get();
+    if (toolsLoading) return;
+    if (
+      !force &&
+      tools.length > 0 &&
+      toolsLoadedAt &&
+      Date.now() - toolsLoadedAt < TOOLS_CACHE_MS
+    ) {
+      return;
+    }
+    set({ toolsLoading: true, toolsError: null });
+    try {
+      const list = await unrealMcpTools();
+      set({
+        tools: list ?? [],
+        toolsLoading: false,
+        toolsLoadedAt: Date.now(),
+      });
+    } catch (e) {
+      set({
+        toolsLoading: false,
+        toolsError: e instanceof Error ? e.message : String(e),
+      });
+    }
+  },
+
+  /// Crida puntual d'una eina: primer es valida que existeix al catàleg
+  /// (no es crida res que el servidor no hagi anunciat) i que els arguments
+  /// no siguin un JSON gegant.
+  callTool: async (name, args) => {
+    const known = get().tools.some((tool) => tool.name === name);
+    if (!known) {
+      throw new Error(t("unreal.agent.tools.unknownTool", { name }));
+    }
+    const json = JSON.stringify(args ?? {});
+    if (json.length > MAX_ARGS_BYTES) {
+      throw new Error(
+        t("unreal.agent.tools.argsTooBig", {
+          kb: Math.round(json.length / 1024),
+          max: Math.round(MAX_ARGS_BYTES / 1024),
+        })
+      );
+    }
+    return unrealMcpCall(name, (args ?? {}) as Record<string, unknown>);
+  },
+
+  /// FASE 3 · EXECUCIÓ — una tasca d'alt nivell («crea 5 llums en fila…»):
+  /// el model local tria les eines MCP i les crida fins a la resposta final.
+  /// El bucle es veu en directe (esdeveniment `unreal://agent-task`).
+  runTask: async (prompt) => {
+    if (get().taskRunning) return;
+    set({
+      taskRunning: true,
+      taskAnswer: null,
+      taskError: null,
+      taskEvents: [],
+    });
+    try {
+      const answer = await unrealAgentTask(prompt);
+      set({ taskAnswer: answer });
+    } catch (e) {
+      set({ taskError: e instanceof Error ? e.message : String(e) });
+    } finally {
+      set({ taskRunning: false });
+    }
+  },
+
+  clearTask: () =>
+    set({ taskEvents: [], taskAnswer: null, taskError: null }),
 
   runPython: async (code) => {
     try {

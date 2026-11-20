@@ -1,0 +1,1350 @@
+//! Generació de CODI de la IA nativa: quart component del motor simbòlic
+//! (després de matemàtiques, cervell i aprenentatge).
+//!
+//! El motor natiu no és un LLM i no pot inventar programari arbitrari, però
+//! SÍ que serveix per programar: un catàleg de plantilles d'arrencada (React,
+//! HTML, CSS, Python, Rust, Node, PHP, TypeScript) viu COMPILAT al binari.
+//! Quan la petició encaixa amb una plantilla, la nativa respon amb el format
+//! estricte «@file: ruta» + tanca de codi que el xat ja sap materialitzar
+//! (`parseFileBlocks` de `stores/agent/fileBlocks.ts` + `materialize` +
+//! revisió verd/roig), de manera que la IA nativa CREA FITXERS REALS al
+//! projecte sense Ollama, sense token i sense baixar res.
+
+/// Una plantilla del catàleg: dispara per paraules clau i emet un fitxer.
+pub struct Snippet {
+    /// Nom legible per a l'usuari («Component React»).
+    pub title: &'static str,
+    /// Ruta per defecte dins el projecte (pot contenir `{nom}`).
+    pub file: &'static str,
+    /// Llenguatge de la tanca (`tsx`, `python`, `html`…).
+    pub lang: &'static str,
+    /// Paraules que sumen per disparar la plantilla (minúscules i sense
+    /// accents: es comparen amb els tokens ja normalitzats de la petició).
+    pub triggers: &'static [&'static str],
+    /// Paraules que per elles soles identifiquen la plantilla (llenguatge o
+    /// format concret: «react», «python», «php»…).
+    pub strong: &'static [&'static str],
+    /// Contingut. `{nom}` és el nom en slug (rutes i fitxers) i `{Nom}` en
+    /// identificador (funcions, classes, títols).
+    pub code: &'static str,
+}
+
+/// Plantilles d'arrencada integrades al binari: el que la nativa sap
+/// programar de soca-rel. Totes sense dependències exòtiques. Els motors de
+/// joc van AL DAVANT: si una petició empata en punts amb una altra plantilla
+/// («fes un joc en godot» també toca «joc» del joc de consola), guanya el
+/// motor perquè és la intenció més concreta.
+pub fn catalog() -> Vec<Snippet> {
+    vec![
+        // ── BLENDER i UNREAL: disseny 3D i jocs des de la nativa ──
+        // L'export glTF va ABANS de l'escena Blender: «exporta de blender a
+        // godot» empata en punts amb l'escena i guanya el primer del catàleg.
+        Snippet {
+            title: "Blender → glTF (assets per a jocs)",
+            file: "blender/export_{nom}.py",
+            lang: "python",
+            triggers: &["exporta", "exportar", "blender", "godot", "joc", "asset", "gltf"],
+            strong: &["gltf"],
+            code: r##"""{Nom} — exportació glTF per a motors de joc (Godot/Unreal/Bevy).
+
+Executa'l dins Blender (Scripting) o headless:
+    blender --background --python export_{nom}.py
+Selecciona els objectes a exportar ABANS d'executar (o exporta tota l'escena).
+"""
+import bpy
+import os
+
+sortida = os.path.join(os.path.dirname(bpy.data.filepath) or ".", "{nom}.gltf")
+
+# glTF separat (.gltf + .bin + textures): el format que Godot 4 importa millor.
+bpy.ops.export_scene.gltf(
+    filepath=sortida,
+    export_format='GLTF_SEPARATE',
+    use_selection=False,
+    export_apply=True,
+    export_yup=True,
+)
+print("Exportat " + sortida + " — arrossega'l al projecte de Godot/Unreal")
+"##,
+        },
+        Snippet {
+            title: "Escena Blender (bpy)",
+            file: "blender/{nom}.py",
+            lang: "python",
+            triggers: &["3d", "escena", "modelatge", "render", "disseny", "figura"],
+            strong: &["blender", "bpy"],
+            code: r##"""{Nom} — escena Blender generada per la IA nativa de NoOrbit.
+
+Executa'l dins Blender (pestanya Scripting) o headless:
+    blender --background --python {nom}.py
+EEVEE (no Cycles): el render més lleuger per a Mac Intel amb GPU integrada.
+"""
+import bpy
+import os
+
+# Escena neta: esborra el cub/llum/càmera per defecte sense tocar la resta.
+for nom_obj in ("Cube", "Light", "Camera"):
+    if nom_obj in bpy.data.objects:
+        bpy.data.objects.remove(bpy.data.objects[nom_obj], do_unlink=True)
+
+# Terra + figura principal amb material de color.
+bpy.ops.mesh.primitive_plane_add(size=12, location=(0, 0, 0))
+terra = bpy.context.active_object
+terra.name = "{Nom}_Terra"
+
+bpy.ops.mesh.primitive_uv_sphere_add(radius=1.2, location=(0, 0, 1.2))
+figura = bpy.context.active_object
+figura.name = "{Nom}_Figura"
+bpy.ops.object.shade_smooth()
+
+mat = bpy.data.materials.new("{Nom}_Mat")
+mat.use_nodes = True
+bsdf = mat.node_tree.nodes["Principled BSDF"]
+bsdf.inputs["Base Color"].default_value = (0.15, 0.45, 0.9, 1.0)
+bsdf.inputs["Roughness"].default_value = 0.35
+figura.data.materials.append(mat)
+
+# Llum suau + càmera orientada cap a la figura.
+bpy.ops.object.light_add(type='SUN', location=(5, -5, 10))
+llum = bpy.context.active_object
+llum.data.energy = 3.0
+bpy.ops.object.camera_add(location=(7, -6, 5), rotation=(1.1, 0.0, 0.8))
+bpy.context.scene.camera = bpy.context.active_object
+
+# EEVEE amb fallback de versió (4.2+ canvia el nom del motor).
+escena = bpy.context.scene
+try:
+    escena.render.engine = 'BLENDER_EEVEE_NEXT'
+except TypeError:
+    escena.render.engine = 'BLENDER_EEVEE'
+escena.render.resolution_x = 1280
+escena.render.resolution_y = 720
+escena.eevee.taa_render_samples = 32
+
+# Desa el .blend i renderitza una imatge de mostra.
+dir_sortida = os.path.dirname(bpy.data.filepath) or "."
+bpy.ops.wm.save_as_mainfile(filepath=os.path.join(dir_sortida, "{nom}.blend"))
+escena.render.filepath = os.path.join(dir_sortida, "{nom}.png")
+bpy.ops.render.render(write_still=True)
+print("Escena {Nom} creada: {nom}.blend + {nom}.png")
+"##,
+        },
+        Snippet {
+            title: "Animació Blender (bpy)",
+            file: "blender/animacio_{nom}.py",
+            lang: "python",
+            triggers: &["animacio", "animar", "anima", "keyframes", "moviment", "video", "orbita"],
+            strong: &["blender", "bpy"],
+            code: r##"""{Nom} — animació Blender generada per la IA nativa de NoOrbit.
+
+Executa'l dins Blender amb l'escena oberta: anima la figura «{Nom}_Figura"
+(si no existeix, en crea una) i deixa el vídeo preparat per renderitzar.
+"""
+import bpy
+
+nom_figura = "{Nom}_Figura"
+if nom_figura not in bpy.data.objects:
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=1.0, location=(0, 0, 1))
+    bpy.context.active_object.name = nom_figura
+ob = bpy.data.objects[nom_figura]
+
+# Òrbita senzilla: 4 keyframes de posició + rotació contínua.
+escena = bpy.context.scene
+escena.frame_start = 1
+escena.frame_end = 120
+for frame, pos in ((1, (3, 0, 1)), (30, (0, 3, 2)), (60, (-3, 0, 1)), (90, (0, -3, 2)), (120, (3, 0, 1))):
+    ob.location = pos
+    ob.keyframe_insert(data_path="location", frame=frame)
+ob.rotation_euler = (0, 0, 0)
+ob.keyframe_insert(data_path="rotation_euler", frame=1)
+ob.rotation_euler = (0, 0, 6.283)
+ob.keyframe_insert(data_path="rotation_euler", frame=120)
+
+# Interpolació suau (BEZIER) a totes les corbes.
+if ob.animation_data and ob.animation_data.action:
+    for fc in ob.animation_data.action.fcurves:
+        for kp in fc.keyframe_points:
+            kp.interpolation = 'BEZIER'
+
+print("Animació {Nom} creada (frames 1..120). Render ▸ Render Animation per al vídeo.")
+"##,
+        },
+        Snippet {
+            title: "Material Blender (bpy)",
+            file: "blender/material_{nom}.py",
+            lang: "python",
+            triggers: &["material", "textura", "color", "metal", "vidre", "brillant"],
+            strong: &["blender", "bpy"],
+            code: r##"""{Nom} — material procedural Blender generat per la IA nativa.
+
+Executa'l dins Blender: crea un material metàl·lic acolorit i l'aplica a
+l'objecte actiu (o a tots els que no en tenen cap).
+"""
+import bpy
+
+mat = bpy.data.materials.new("{Nom}_Mat")
+mat.use_nodes = True
+nodes = mat.node_tree.nodes
+bsdf = nodes["Principled BSDF"]
+bsdf.inputs["Base Color"].default_value = (0.75, 0.35, 0.1, 1.0)
+bsdf.inputs["Metallic"].default_value = 0.85
+bsdf.inputs["Roughness"].default_value = 0.25
+
+# Textura procedural de soroll per trencar la uniformitat (sense fitxers).
+soroll = nodes.new("ShaderNodeTexNoise")
+soroll.inputs["Scale"].default_value = 8.0
+rampa = nodes.new("ShaderNodeValToRGB")
+rampa.color_ramp.elements[0].color = (0.6, 0.3, 0.1, 1.0)
+rampa.color_ramp.elements[1].color = (0.9, 0.6, 0.2, 1.0)
+mat.node_tree.links.new(soroll.outputs["Fac"], rampa.inputs["Fac"])
+mat.node_tree.links.new(rampa.outputs["Color"], bsdf.inputs["Base Color"])
+
+actiu = bpy.context.view_layer.objects.active
+objectius = [actiu] if actiu else [o for o in bpy.data.objects if o.type == 'MESH' and not o.data.materials]
+for ob in objectius:
+    if ob and ob.type == 'MESH':
+        ob.data.materials.clear()
+        ob.data.materials.append(mat)
+print("Material {Nom}_Mat aplicat a " + str(len(objectius)) + " objecte(s)")
+"##,
+        },
+        Snippet {
+            title: "Projecte Unreal lleuger",
+            file: "{nom}.uproject",
+            lang: "json",
+            triggers: &["joc", "lleuger", "projecte", "escena"],
+            strong: &["unreal", "ue5"],
+            code: r##"{
+  "FileVersion": 3,
+  "EngineAssociation": "5.3",
+  "Category": "Game",
+  "Description": "{Nom} — projecte Unreal lleuger generat per la IA nativa de NoOrbit. Sense Lumen, Nanite ni ombres virtuals: el mínim consum possible.",
+  "Plugins": [
+    { "Name": "PythonScriptPlugin", "Enabled": true },
+    { "Name": "RemoteControl", "Enabled": true }
+  ]
+}
+"##,
+        },
+        Snippet {
+            title: "Script Unreal (Python)",
+            file: "unreal/{nom}.py",
+            lang: "python",
+            triggers: &["script", "python", "actor", "spawn", "escena", "nivel"],
+            strong: &["unreal", "ue5"],
+            code: r##"""{Nom} — script Unreal generat per la IA nativa de NoOrbit.
+
+La via MÉS LLEUGERA per programar Unreal: Python dins l'editor (pont Remote
+Control de NoOrbit, directriu RUN|UNREAL|), sense compilar C++ ni Blueprints.
+Executa'l a l'editor (Output Log ▸ Python) o deixa que NoOrbit l'enviï.
+"""
+import unreal
+
+# Subsistema modern (EditorLevelLibrary està deprecat des de UE 5.1).
+subs = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+
+# Actor bàsic amb el cub del motor: sense assets externs, sense Nanite.
+mesh = unreal.load_object(None, "/Engine/BasicShapes/Cube.Cube")
+actor = subs.spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(0, 0, 100))
+actor.set_actor_label("{Nom}_Cub")
+comp = actor.static_mesh_component
+comp.set_static_mesh(mesh)
+comp.set_material(0, unreal.load_object(None, "/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"))
+
+# Llums i escalat baixos: el projecte lleuger ja porta la configuració.
+subs.spawn_actor_from_class(unreal.DirectionalLight, unreal.Vector(0, 0, 500))
+print("{Nom}: cub i llum creados a l'escena (via Python, sense C++)")
+"##,
+        },
+        Snippet {
+            title: "Projecte Godot 4",
+            file: "project.godot",
+            lang: "text",
+            triggers: &["2d", "escena", "plataformes", "sprite"],
+            strong: &["godot", "gdscript", "videojoc"],
+            code: r#"; {Nom} — projecte Godot 4 generat per la IA nativa de NoOrbit.
+; Renderer «Compatibility» (OpenGL 3.3): ideal per a Mac Intel amb GPU integrada.
+; Obre'l amb l'editor de Godot 4 i prem Play.
+
+config_version=5
+
+[application]
+
+config/name="{Nom}"
+run/main_scene="res://main.tscn"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+"#,
+        },
+        Snippet {
+            title: "Projecte Defold",
+            file: "game.project",
+            lang: "text",
+            triggers: &["2d", "lleuger", "mobil", "escena"],
+            strong: &["defold", "lua"],
+            code: r#"; {Nom} — projecte Defold generat per la IA nativa de NoOrbit.
+; El motor més lleuger (editor d'1-3 MB): obre'l amb l'editor de Defold.
+
+[bootstrap]
+main_collection = /main.collectionc
+
+[project]
+title = {Nom}
+
+[display]
+width = 960
+height = 540
+"#,
+        },
+        Snippet {
+            title: "Joc Bevy (Rust)",
+            file: "Cargo.toml",
+            lang: "toml",
+            triggers: &["joc", "entitat", "ecs", "finestra"],
+            strong: &["bevy"],
+            code: r#"# {Nom} — joc Bevy generat per la IA nativa de NoOrbit.
+
+[package]
+name = "{nom}"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = "0.14"
+"#,
+        },
+        Snippet {
+            title: "Escena Panda3D (Python)",
+            file: "{nom}.py",
+            lang: "python",
+            triggers: &["3d", "escena", "camera", "model"],
+            strong: &["panda3d", "panda"],
+            code: r#"""{Nom} — escena Panda3D generada per la IA nativa de NoOrbit.
+
+    pip install panda3d
+    python3 {nom}.py
+"""
+from direct.showbase.ShowBase import ShowBase
+from panda3d.core import TextNode
+
+
+class Joc(ShowBase):
+    def __init__(self):
+        ShowBase.__init__(self)
+        titol = TextNode("titol")
+        titol.setText("{Nom} — Panda3D en marxa!")
+        node = self.aspect2d.attachNewNode(titol)
+        node.setScale(0.08)
+        node.setPos(-0.4, 0, 0)
+        self.cam.setPos(0, -20, 5)
+        self.cam.lookAt(0, 0, 0)
+
+
+Joc().run()
+"#,
+        },
+        Snippet {
+            title: "Component React",
+            file: "src/{Nom}.tsx",
+            lang: "tsx",
+            triggers: &["interficie", "widget", "formulari", "panell"],
+            strong: &["react", "tsx", "jsx", "vue", "component"],
+            code: r#"// {Nom} — component generat per la IA nativa de NoOrbit.
+import { useState } from "react";
+
+export default function {Nom}() {
+  const [valor, setValor] = useState("");
+  const [comptador, setComptador] = useState(0);
+
+  return (
+    <section className="{nom}">
+      <h2>{Nom}</h2>
+      <input
+        value={valor}
+        onChange={(e) => setValor(e.target.value)}
+        placeholder="Escriu alguna cosa…"
+      />
+      <p>Diu: <strong>{valor || "res encara"}</strong></p>
+      <button onClick={() => setComptador((c) => c + 1)}>Clics: {comptador}</button>
+    </section>
+  );
+}
+"#,
+        },
+        Snippet {
+            title: "Pàgina HTML",
+            file: "{nom}.html",
+            lang: "html",
+            triggers: &["formulari", "index", "portfolio", "landing"],
+            strong: &["html", "pagina", "web", "lloc", "site"],
+            code: r#"<!doctype html>
+<!-- {Nom} — pàgina generada per la IA nativa de NoOrbit. -->
+<html lang="ca">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{Nom}</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 0; min-height: 100vh;
+             display: grid; place-items: center; background: #f4f4f6; }
+      main { max-width: 640px; padding: 2rem; background: #fff; border-radius: 12px;
+             box-shadow: 0 8px 30px rgb(0 0 0 / 8%); }
+      h1 { margin-top: 0; }
+      input, button { font: inherit; padding: .5rem .8rem; border-radius: 8px; border: 1px solid #ccc; }
+      button { background: #2563eb; color: #fff; border-color: #2563eb; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>{Nom}</h1>
+      <p>Pàgina d'arrencada creada per la IA nativa de NoOrbit.</p>
+      <form onsubmit="event.preventDefault(); document.getElementById('sortida').textContent = 'Hola, ' + this.nom.value + '!';">
+        <label>Nom: <input name="nom" required /></label>
+        <button type="submit">Saluda'm</button>
+      </form>
+      <p id="sortida" role="status"></p>
+    </main>
+  </body>
+</html>
+"#,
+        },
+        Snippet {
+            title: "Full CSS",
+            file: "{nom}.css",
+            lang: "css",
+            triggers: &["full", "butlla", "targetes"],
+            strong: &["css", "scss", "estil", "estils", "disseny"],
+            code: r#"/* {Nom} — estils generats per la IA nativa de NoOrbit. */
+:root {
+  --color-primari: #2563eb;
+  --color-fons: #f4f4f6;
+  --radi: 12px;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: var(--color-fons);
+}
+
+.contingut {
+  max-width: 960px;
+  margin-inline: auto;
+  padding: 1.5rem;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.targeta {
+  background: #fff;
+  border-radius: var(--radi);
+  padding: 1rem 1.25rem;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 6%);
+}
+
+.botio {
+  appearance: none;
+  border: 0;
+  padding: .6rem 1rem;
+  border-radius: 999px;
+  background: var(--color-primari);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.botio:hover { filter: brightness(1.1); }
+"#,
+        },
+        Snippet {
+            title: "Servidor HTTP Python",
+            file: "{nom}.py",
+            lang: "python",
+            triggers: &["backend", "http", "api", "flask"],
+            strong: &["python", "servidor", "server"],
+            code: r#""""{Nom} — servidor HTTP generat per la IA nativa de NoOrbit.
+
+Sense dependències: només la biblioteca estàndard del Python 3.
+    python3 {nom}.py        →  http://127.0.0.1:8000
+"""
+import json
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+PORT = 8000
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/api/dades":
+            cos = json.dumps({"missatge": "Hola des de {Nom}!", "ara": self.date_time_string()})
+            self._resposta(200, "application/json", cos)
+        else:
+            html = (
+                "<h1>{Nom}</h1>"
+                f"<p>Servidor Python en marxa al port {PORT}.</p>"
+                '<p><a href="/api/dades">/api/dades</a></p>'
+            )
+            self._resposta(200, "text/html; charset=utf-8", html)
+
+    def _resposta(self, codi: int, tipus: str, cos: str):
+        self.send_response(codi)
+        self.send_header("Content-Type", tipus)
+        self.end_headers()
+        self.wfile.write(cos.encode("utf-8"))
+
+
+if __name__ == "__main__":
+    print(f"{Nom} → http://127.0.0.1:{PORT}  (Control-C per aturar)")
+    HTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+"#,
+        },
+        Snippet {
+            title: "Eina de terminal Python",
+            file: "{nom}.py",
+            lang: "python",
+            triggers: &["llista", "comandes", "tareas", "argparse"],
+            strong: &["script", "cli", "terminal", "tasques", "todo", "gestor"],
+            code: r#""""{Nom} — gestor de tasques de terminal generat per la IA nativa de NoOrbit.
+
+    python3 {nom}.py add "Escriure l'informe"
+    python3 {nom}.py            # llistar
+    python3 {nom}.py fer 1      # marcar la primera com a feta
+"""
+import json
+import sys
+from pathlib import Path
+
+DADES = Path(__file__).with_name("{nom}.json")
+
+
+def carregar() -> list:
+    if DADES.exists():
+        return json.loads(DADES.read_text(encoding="utf-8"))
+    return []
+
+
+def desar(tasques: list) -> None:
+    DADES.write_text(json.dumps(tasques, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def principal() -> None:
+    accio = sys.argv[1] if len(sys.argv) > 1 else "llistar"
+    tasques = carregar()
+
+    if accio == "add" and len(sys.argv) > 2:
+        tasques.append({"text": " ".join(sys.argv[2:]), "feta": False})
+        desar(tasques)
+        print(f"Tasca afegida ({len(tasques)} en total).")
+    elif accio == "fer" and len(sys.argv) > 2:
+        i = int(sys.argv[2]) - 1
+        if 0 <= i < len(tasques):
+            tasques[i]["feta"] = True
+            desar(tasques)
+    elif accio == "esborrar" and len(sys.argv) > 2:
+        i = int(sys.argv[2]) - 1
+        if 0 <= i < len(tasques):
+            tasques.pop(i)
+            desar(tasques)
+
+    for i, t in enumerate(tasques, 1):
+        marca = "✔" if t["feta"] else "·"
+        print(f"  {i} [{marca}] {t['text']}")
+    if not tasques:
+        print('(llista buida — afegeix amb: python3 {nom}.py add "algo")')
+
+
+if __name__ == "__main__":
+    principal()
+"#,
+        },
+        Snippet {
+            title: "Joc d'endevinament (Python)",
+            file: "{nom}.py",
+            lang: "python",
+            triggers: &["random", "console", "numero", "adivina"],
+            strong: &["joc", "jocs", "endevina", "videojoc"],
+            code: r#""""{Nom} — joc de consola generat per la IA nativa de NoOrbit.
+
+    python3 {nom}.py
+"""
+import random
+
+INTENTS = 7
+
+
+def principal() -> None:
+    secret = random.randint(1, 100)
+    print(f"He pensat un número entre 1 i 100. Tens {INTENTS} intents.")
+
+    for intent in range(1, INTENTS + 1):
+        try:
+            entrada = input(f"Intent {intent}/{INTENTS}: ").strip()
+        except EOFError:
+            break
+        if not entrada.isdigit():
+            print("Posa un número, si us plau.")
+            continue
+        if int(entrada) == secret:
+            print(f"Encertat! Era {secret}.")
+            return
+        pista = "més amunt" if int(entrada) < secret else "més avall"
+        print(f"   → prova cap a {pista}.")
+    print(f"Ben jugat! El número era {secret}.")
+
+
+if __name__ == "__main__":
+    principal()
+"#,
+        },
+        Snippet {
+            title: "Programa Rust",
+            file: "src/main.rs",
+            lang: "rust",
+            triggers: &["binari", "recompte", "crates"],
+            strong: &["rust", "cargo", "programa", "aplicacio"],
+            code: r#"// {Nom} — programa generat per la IA nativa de NoOrbit.
+// Compila amb: cargo run
+
+use std::collections::HashMap;
+
+fn recomptes(text: &str) -> Vec<(String, usize)> {
+    let mut mapa: HashMap<String, usize> = HashMap::new();
+    for paraula in text.split_whitespace() {
+        *mapa.entry(paraula.to_lowercase()).or_insert(0) += 1;
+    }
+    let mut llista: Vec<(String, usize)> = mapa.into_iter().collect();
+    llista.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    llista
+}
+
+fn main() {
+    let demo = "la IA nativa de NoOrbit programa amb Rust i la IA raona";
+    println!("Recompte de paraules:\n");
+    for (paraula, n) in recomptes(demo) {
+        println!("  {n:2} × {paraula}");
+    }
+}
+"#,
+        },
+        Snippet {
+            title: "Servidor Node",
+            file: "{nom}.js",
+            lang: "javascript",
+            triggers: &["http", "api", "backend"],
+            strong: &["node", "javascript", "express"],
+            code: r#"// {Nom} — servidor Node generat per la IA nativa de NoOrbit.
+// Sense dependències: node {nom}.js  →  http://127.0.0.1:3000
+
+const http = require("http");
+
+const PORT = 3000;
+const inici = Date.now();
+
+const servidor = http.createServer((req, res) => {
+  if (req.url === "/api/estat") {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({
+      missatge: "Hola des de {Nom}!",
+      segonsActiu: Math.round((Date.now() - inici) / 1000),
+    }));
+    return;
+  }
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(
+    `<h1>{Nom}</h1><p>Node escoltant al port ${PORT}.</p>` +
+      `<p><a href="/api/estat">/api/estat</a></p>`
+  );
+});
+
+servidor.listen(PORT, "127.0.0.1", () => {
+  console.log(`{Nom} → http://127.0.0.1:${PORT} (Control-C per aturar)`);
+});
+"#,
+        },
+        Snippet {
+            title: "Pàgina PHP",
+            file: "{nom}.php",
+            lang: "php",
+            triggers: &["taula", "formulari", "dinamic"],
+            strong: &["php", "wordpress"],
+            code: r#"<?php
+/**
+ * {Nom} — pàgina PHP generada per la IA nativa de NoOrbit.
+ * Serveix-la amb: php -S 127.0.0.1:8080 {nom}.php
+ */
+$titol = '{Nom}';
+$dades = [
+  ['nom' => 'Rust',  'paper' => 'backend de NoOrbit'],
+  ['nom' => 'React', 'paper' => 'interfície'],
+  ['nom' => 'Tauri', 'paper' => 'escriptori multiplataforma'],
+];
+?>
+<!doctype html>
+<html lang="ca">
+<head>
+  <meta charset="utf-8">
+  <title><?= htmlspecialchars($titol) ?></title>
+</head>
+<body>
+  <h1><?= htmlspecialchars($titol) ?></h1>
+  <ul>
+    <?php foreach ($dades as $d): ?>
+      <li><strong><?= htmlspecialchars($d['nom']) ?></strong> — <?= htmlspecialchars($d['paper']) ?></li>
+    <?php endforeach; ?>
+  </ul>
+  <p>Hora del servidor: <?= date('H:i:s') ?></p>
+</body>
+</html>
+"#,
+        },
+        Snippet {
+            title: "Extensió de VS Code (TypeScript)",
+            file: "{nom}.ts",
+            lang: "typescript",
+            triggers: &["comando", "barra"],
+            strong: &["typescript", "vscode", "extensio", "plugin"],
+            code: r#"// {Nom} — extensió de VS Code generada per la IA nativa de NoOrbit.
+// Prem F5 (Depurar: extensió); l'ordre apareix a la paleta de comandes.
+
+import * as vscode from "vscode";
+
+export function activate(context: vscode.ExtensionContext) {
+  const disposable = vscode.commands.registerCommand("{nom}.saluda", async () => {
+    const nom = await vscode.window.showInputBox({ prompt: "Com et dius?" });
+    if (!nom) return;
+    vscode.window.showInformationMessage(`Hola, ${nom}! ({Nom})`);
+  });
+  context.subscriptions.push(disposable);
+}
+
+export function deactivate() {}
+"#,
+        },
+    ]
+}
+
+// ── Fitxers EXTRA de les plantilles (projectes de diversos fitxers) ─────
+
+/// Fitxers addicionals d'algunes plantilles: els motors de joc necessiten
+/// més d'un fitxer per arrencar (escena + script + configuració). Claus: el
+/// títol de la plantilla. Emplenables amb {nom}/{Nom}, com `code`.
+fn extras(title: &str) -> &'static [(&'static str, &'static str, &'static str)] {
+    match title {
+        "Projecte Godot 4" => &[
+            (
+                "main.tscn",
+                "text",
+                r#"[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://main.gd" id="1"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1")
+"#,
+            ),
+            (
+                "main.gd",
+                "gdscript",
+                r#"# {Nom} — escena principal generada per la IA nativa de NoOrbit.
+# Una pilota que orbita dibuixada amb `_draw`: sense assets, sense xarxa.
+extends Node2D
+
+var temps := 0.0
+
+func _process(delta: float) -> void:
+    temps += delta
+    queue_redraw()
+
+func _draw() -> void:
+    var centre := Vector2(sin(temps) * 120.0, cos(temps) * 60.0)
+    draw_circle(centre, 20.0, Color(0.2, 0.5, 1.0))
+"#,
+            ),
+        ],
+        "Projecte Defold" => &[
+            (
+                "main.collection",
+                "text",
+                r#"name: "Main"
+embedded_instances {
+  id: "go"
+  data: "components {\n  id: \"script\"\n  component: \"/main.script\"\n}\n"
+}
+"#,
+            ),
+            (
+                "main.script",
+                "lua",
+                r#"-- {Nom} — script principal generat per la IA nativa de NoOrbit.
+-- El cub de l'escena bota en bucle amb una animació.
+
+function init(self)
+    print("Hola des de {Nom}!")
+    msg.post(".", "bota")
+end
+
+function on_message(self, message_id, message, sender)
+    if message_id == hash("bota") then
+        go.animate(".", "scale", go.PLAYBACK_LOOP_PINGPONG,
+                   vmath.vector3(1.2), go.EASING_INOUTSINE, 0.8)
+    end
+end
+"#,
+            ),
+        ],
+        "Projecte Unreal lleuger" => &[
+            (
+                "Config/DefaultEngine.ini",
+                "text",
+                r#"; {Nom} — configuració LLEUGERA generada per la IA nativa de NoOrbit.
+; Sense Lumen, sense Nanite, sense ombres virtuals ni camps de distància:
+; el mínim consum de GPU/RAM per a Mac Intel amb gràfica integrada.
+
+[/Script/Engine.RendererSettings]
+r.DynamicGlobalIlluminationMethod=0
+r.ReflectionMethod=0
+r.Shadow.Virtual.Enable=0
+r.GenerateMeshDistanceFields=False
+r.Nanite.ProjectEnabled=False
+r.DefaultFeature.AutoExposure=False
+r.DefaultFeature.MotionBlur=False
+r.DefaultFeature.AmbientOcclusion=False
+r.AntiAliasingMethod=1
+
+[SystemSettings]
+sg.ViewDistanceQuality=1
+sg.AntiAliasingQuality=1
+sg.ShadowQuality=1
+sg.PostProcessQuality=0
+sg.TextureQuality=1
+sg.EffectsQuality=1
+sg.FoliageQuality=0
+
+[/Script/EngineSettings.GameMapsSettings]
+GameDefaultMap=/Engine/Maps/Entry.Entry
+
+[/Script/PythonScriptPlugin.PythonScriptPluginSettings]
+bDeveloperMode=True
+"#,
+            ),
+            (
+                "Content/Python/inici.py",
+                "python",
+                r#"""{Nom} — escena inicial via Python (la via més lleugera: sense C++).
+
+Executa'l a l'editor (Output Log ▸ Python) o deixa que NoOrbit l'enviï pel
+pont Remote Control (directriu RUN|UNREAL|). Fa servir els subsistemes
+moderns: EditorLevelLibrary està deprecat des de UE 5.1.
+"""
+import unreal
+
+subs = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+
+# Cub del motor + llum direccional: zero assets externs, zero Nanite.
+mesh = unreal.load_object(None, "/Engine/BasicShapes/Cube.Cube")
+actor = subs.spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(0, 0, 100))
+actor.set_actor_label("{Nom}_Cub")
+comp = actor.static_mesh_component
+comp.set_static_mesh(mesh)
+comp.set_material(0, unreal.load_object(None, "/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"))
+subs.spawn_actor_from_class(unreal.DirectionalLight, unreal.Vector(0, 0, 500))
+print("{Nom}: escena lleugera creada via Python (sense compilar C++)")
+"#,
+            ),
+        ],
+        "Joc Bevy (Rust)" => &[(
+            "src/main.rs",
+            "rust",
+            r#"// {Nom} — joc Bevy generat per la IA nativa de NoOrbit.
+// Executa'l amb: cargo run
+use bevy::prelude::*;
+
+fn main() {
+    App::new()
+        .add_plugins(DefaultPlugins)
+        .add_systems(Startup, munta)
+        .run();
+}
+
+fn munta(mut commands: Commands) {
+    commands.spawn(Camera2d);
+    commands.spawn(Text::new("{Nom} — Bevy en marxa!"));
+}
+"#,
+        )],
+        _ => &[],
+    }
+}
+
+// ── Interpretació de la petició ───────────────────────────────────────────
+
+/// Text en minúscules i sense accents, per comparar paraules d'una petició.
+pub fn pla(text: &str) -> String {
+    text.to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'à' | 'á' | 'â' | 'ä' => 'a',
+            'è' | 'é' | 'ê' | 'ë' => 'e',
+            'í' | 'ï' | 'î' | 'ì' => 'i',
+            'ò' | 'ó' | 'ô' | 'ö' => 'o',
+            'ú' | 'ù' | 'û' | 'ü' => 'u',
+            'ç' => 'c',
+            'ñ' => 'n',
+            _ => c,
+        })
+        .collect()
+}
+
+/// Arrels de verbs i expressions que declaren una intenció de CREAR codi. Es
+/// busquen sobre el text brut perquè `learning::tokens` descarta aquestes
+/// paraules com a buides («fes», «fer», «vull» són *stopwords*).
+const INTENCIONS: &[&str] = &[
+    "crea", "crear", "creem", "genera", "generar", "escriu", "escriure", "programa",
+    "programar", "instal", "munta", "muntar", "vull", "vol", "necessit", "fes", "fer",
+    "fem", "feu", "nou", "nova", "arrencada", "plantilla", "esquelet", "demo", "exemple",
+    "comenc", "comen", "exporta", "exportar",
+];
+
+/// Paraules que OBRIEN una pregunta. Si la petició comença amb una, les arrels
+/// fluixes («fer», «comenc»…) no declaren intenció de crear codi: «què fa aquest
+/// projecte» o «què fa un render en blender» són PREGUNTES, no ordres. Cal un
+/// verb inequívoc («crea», «fes»…) o una petició educada («com puc fer…»).
+const INTERROGATIUS: &[&str] = &[
+    "que", "com", "on", "quan", "qui", "quant", "quina", "quin", "quines", "quins",
+    "what", "how", "where", "when", "who", "why", "which",
+];
+
+/// Verbs d'intenció que valen fins i tot dins una pregunta.
+const INTENCIONS_FORTS: &[&str] = &[
+    "crea", "crear", "creem", "genera", "generar", "escriu", "escriure", "programa",
+    "programar", "fes", "fem", "feu", "vull", "vol", "necessit", "munta", "muntar",
+    "exporta", "exportar", "instal",
+];
+
+fn te_intencio(prompt: &str) -> bool {
+    let low = format!("{} ", pla(prompt));
+    let mots: Vec<&str> = low
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let pregunta = mots.first().map(|m| INTERROGATIUS.contains(m)).unwrap_or(false);
+    // «com puc fer…» és una ordre educada, no una pregunta d'informació.
+    let educada = mots
+        .iter()
+        .any(|w| matches!(*w, "puc" | "podries" | "pots" | "podem" | "podeu"));
+    mots.iter().any(|w| {
+        let fluixa = INTENCIONS.iter().any(|i| w.starts_with(i.trim_end()));
+        if !fluixa {
+            return false;
+        }
+        !pregunta || educada || INTENCIONS_FORTS.iter().any(|f| w.starts_with(f))
+    })
+}
+
+/// Plantilla que millor encaixa amb la petició, si n'hi ha cap. Un sol mot
+/// fort (llenguatge o format) ja n'hi ha prou; si no, calen dos tokens de la
+/// plantilla. Així «fes un component React» dispara, però «què és React» no
+/// (porta cap intenció de crear) i «crea un projecte nou» tampoc (cap token
+/// de plantilla).
+pub fn match_snippet(prompt: &str) -> Option<Snippet> {
+    let tokens = crate::learning::tokens(prompt);
+    if tokens.is_empty() || !te_intencio(prompt) {
+        return None;
+    }
+    let mut millor: Option<(usize, Snippet)> = None;
+    for s in catalog() {
+        let forts = s
+            .strong
+            .iter()
+            .filter(|t| tokens.iter().any(|w| w == *t))
+            .count();
+        let fluixos = s
+            .triggers
+            .iter()
+            .filter(|t| tokens.iter().any(|w| w == *t))
+            .count();
+        // Un mot fort val més que dos de fluixos.
+        let punts = forts * 3 + fluixos;
+        if forts == 0 && fluixos < 2 {
+            continue;
+        }
+        if millor.as_ref().map(|(p, _)| punts > *p).unwrap_or(true) {
+            millor = Some((punts, s));
+        }
+    }
+    millor.map(|(_, s)| s)
+}
+
+/// Nom per a la plantilla: l'explícit («que s'anomeni Cart», «anomenat X»,
+/// «de nom X»), si no un identificador especial del prompt (CamelCase o amb
+/// guions, que no sigui paraula de la plantilla), i si no el per defecte.
+fn nom_demanat(prompt: &str, s: &Snippet) -> String {
+    // Busquem sobre el text en minúscules SENSE reescriure els accents: així
+    // els índexs de bytes segueixen caient en frontera de caràcter (retallar
+    // sobre un text amb accents convertits podria fer un panic).
+    let low = prompt.to_lowercase();
+    for marca in [
+        "s'anomeni ", "s'anomena ", "anomeni ", "anomenat ", "anomenada ", "de nom ",
+        "called ", "named ",
+    ] {
+        if let Some(i) = low.find(marca) {
+            let cua = low[i + marca.len()..].trim_start();
+            let paraula: String = cua
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+                .collect();
+            let n = paraula.chars().count();
+            if (2..=32).contains(&n) {
+                return paraula;
+            }
+        }
+    }
+    for raw in prompt
+        .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '-'))
+        .filter(|w| (3..=32).contains(&w.len()))
+    {
+        let baixa = pla(raw);
+        if s.triggers.contains(&baixa.as_str()) || s.strong.contains(&baixa.as_str()) {
+            continue;
+        }
+        let especial =
+            raw.chars().any(|c| c.is_uppercase()) || raw.contains('-') || raw.contains('_');
+        let te_vocals = "aeiouàèéíòóú".chars().any(|v| baixa.contains(v));
+        if especial && te_vocals {
+            return raw.to_string();
+        }
+    }
+    default_per_titol(s).to_string()
+}
+
+fn default_per_titol(s: &Snippet) -> &'static str {
+    match s.title {
+        "Component React" => "Exemple",
+        "Pàgina HTML" => "index",
+        "Full CSS" => "estils",
+        "Servidor HTTP Python" | "Servidor Node" => "servidor",
+        "Eina de terminal Python" => "tasques",
+        "Joc d'endevinament (Python)" => "endevina",
+        "Programa Rust" => "main",
+        "Pàgina PHP" => "taula",
+        "Projecte Godot 4" | "Projecte Defold" => "Joc",
+        "Joc Bevy (Rust)" | "Escena Panda3D (Python)" => "joc",
+        "Escena Blender (bpy)" => "escena",
+        "Animació Blender (bpy)" => "animacio",
+        "Material Blender (bpy)" => "material",
+        "Blender → glTF (assets per a jocs)" => "export",
+        "Projecte Unreal lleuger" | "Script Unreal (Python)" => "joc",
+        _ => "app",
+    }
+}
+
+/// Nom en slug per a les rutes: minúscules, sense accents, amb guions.
+fn slug(nom: &str) -> String {
+    let n = crate::learning::tokens(nom).join("-");
+    if n.is_empty() {
+        "app".to_string()
+    } else {
+        n
+    }
+}
+
+/// Nom en identificador per al codi (CamelCase, sempre lletra inicial).
+fn identificador(nom: &str) -> String {
+    let parts: Vec<String> = crate::learning::tokens(nom)
+        .into_iter()
+        .map(|w| {
+            let mut c = w.chars();
+            match c.next() {
+                Some(a) => a.to_uppercase().collect::<String>() + c.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect();
+    let id = parts.join("");
+    let be = id.chars().next().map(|c| c.is_alphabetic()).unwrap_or(false);
+    if !be {
+        "Exemple".to_string()
+    } else {
+        id
+    }
+}
+
+fn omple(text: &str, nom_slug: &str, nom_id: &str) -> String {
+    text.replace("{nom}", nom_slug).replace("{Nom}", nom_id)
+}
+
+/// Una línia amb el catàleg, per a la reserva i per al «què pots fer».
+pub fn catalog_line() -> String {
+    let noms: Vec<&str> = catalog().iter().map(|s| s.title).collect();
+    format!("Plantilles integrades: {}.", noms.join(", "))
+}
+
+/// Resposta MATERIALITZABLE de la nativa: format estricte «@file:» + tanca de
+/// codi, exactament el que `parseFileBlocks` (fitxers) i `chatSegments`
+/// (renderitzat del xat) reconeixen. L'usuari veu la targeta del fitxer amb
+/// el botó per crear'l; amb l'aplicació automàtica activa, el fitxer escriu
+/// sol i es mostra amb la revisió verd/roig de sempre.
+pub fn starter(prompt: &str) -> Option<String> {
+    // Només la PREGUNTA de l'usuari: el context del projecte que el xat
+    // anteposa («PREGUNTA / TASCA:») pot contenir «blender», «render» o el
+    // nom del projecte, i llavors una pregunta innocent («què fa aquest
+    // projecte») dispararia una plantilla per culpa del README.
+    let q = super::project::question_of(prompt);
+    let s = match_snippet(&q)?;
+    let demanat = nom_demanat(&q, &s);
+    let nom_slug = slug(&demanat);
+    let nom_id = identificador(&demanat);
+    let fitxer = omple(s.file, &nom_slug, &nom_id);
+    let cos = omple(s.code, &nom_slug, &nom_id);
+    // Fitxers EXTRA (motors de joc: escena + script + configuració).
+    let mut extres = String::new();
+    let mut n_extra = 0usize;
+    for (f, lang, c) in extras(s.title) {
+        let f = omple(f, &nom_slug, &nom_id);
+        let c = omple(c, &nom_slug, &nom_id);
+        extres.push_str(&format!("\n\n@file: {f}\n```{lang}\n{c}```"));
+        n_extra += 1;
+    }
+    let quants = if n_extra > 0 {
+        format!(" i {n_extra} fitxers més")
+    } else {
+        String::new()
+    };
+    Some(format!(
+        "Això ho sé programar: et creo **{fitxer}**{quants} ({title}). \
+         Prem «Crea al projecte» a la targeta de sota per materialitzar'l.\n\n\
+         @file: {fitxer}\n```{lang}\n{cos}```{extres}\n\
+         Si el vols amb un altre nom, digues-ho («fes un {lower} que s'anomeni X»). \
+         {catalog}",
+        title = s.title,
+        lower = s.title.to_lowercase(),
+        lang = s.lang,
+        catalog = catalog_line(),
+    ))
+}
+
+/// Llenguatges i formats que la nativa RECONÈIX però pels quals no té
+/// plantilla escrita. Sense aquesta llista, «fes un backend en golang»
+/// cauria a la reserva genèrica («tria una IA amb eines») i la resposta
+/// seria inútil. Només noms de 3+ lletres: `learning::tokens` descarta els
+/// mots de menys de tres caràcters (per això «golang», no «go»).
+const SENSE_PLANTILLA: &[&str] = &[
+    "golang", "java", "kotlin", "swift", "cpp", "csharp", "ruby", "perl", "scala",
+    "haskell", "elixir", "erlang", "dart", "lua", "julia", "sql", "bash", "zsh",
+    "powershell", "docker", "dockerfile", "makefile", "yaml", "assembly", "zig",
+    "ocaml", "fortran", "matlab",
+];
+
+/// La petició vol programar però no encaixa amb cap plantilla: catàleg honest
+/// en lloc de la reserva genèrica. Només respon si esmenta un llenguatge que
+/// reconèixerem però que NO tenim escrit (una conversa sobre «crear una
+/// història» no mereix un catàleg de codi).
+pub fn sense_plantilla(prompt: &str) -> Option<String> {
+    // Mateixa regla que a `starter`: només la PREGUNTA, mai el context.
+    let q = super::project::question_of(prompt);
+    let tokens = crate::learning::tokens(&q);
+    if tokens.is_empty() || !te_intencio(&q) || match_snippet(&q).is_some() {
+        return None;
+    }
+    let menciona = SENSE_PLANTILLA
+        .iter()
+        .any(|t| tokens.iter().any(|w| w == t));
+    if !menciona {
+        return None;
+    }
+    let llista = catalog_line()
+        .replace("Plantilles integrades: ", "")
+        .trim_end_matches('.')
+        .to_string();
+    Some(format!(
+        "Aquest llenguatge el comprenc, però no tinc cap plantilla escrita per a ell. \
+         De soca-rel sí que sé programar: {}. Dig-me'n una i te la creo com a fitxer real \
+         al projecte. Si el que necessites va més lluny (un programa sencer des de zero en \
+         {}), demana-ho a una IA amb eines: jo treballo amb el catàleg integrat i amb el \
+         que hagi après dels llocs lliures (StackOverflow i companyia).",
+        llista,
+        tokens
+            .iter()
+            .find(|w| SENSE_PLANTILLA.contains(&w.as_str()))
+            .cloned()
+            .unwrap_or_else(|| "aquest llenguatge".to_string())
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plantilles_no_son_buides() {
+        for s in catalog() {
+            assert!(s.code.chars().count() > 120, "{}: buida", s.title);
+            assert!(!s.triggers.is_empty() || !s.strong.is_empty());
+            assert!(!s.file.is_empty());
+            // Cap marcador sense emplenar després del `omple` (cos i extres).
+            let omplert = omple(s.code, "exemple", "Exemple");
+            assert!(!omplert.contains("{nom}"), "{}: queda {{nom}}", s.title);
+            assert!(!omplert.contains("{Nom}"), "{}: queda {{Nom}}", s.title);
+            for (f, _, c) in extras(s.title) {
+                let fc = omple(f, "exemple", "Exemple");
+                assert!(!fc.contains("{nom}"), "{}: extra {{nom}} a {f}", s.title);
+                assert!(!fc.contains("{Nom}"), "{}: extra {{Nom}} a {f}", s.title);
+                let cc = omple(c, "exemple", "Exemple");
+                assert!(!cc.contains("{nom}"), "{}: extra {{nom}} al codi de {f}", s.title);
+                assert!(!cc.contains("{Nom}"), "{}: extra {{Nom}} al codi de {f}", s.title);
+            }
+        }
+    }
+
+    #[test]
+    fn motors_de_joc_emeten_projectes_complets() {
+        // Godot: tres fitxers i el renderer «Compatibility» per a Mac Intel.
+        let r = starter("fes un joc en godot").unwrap();
+        assert!(r.contains("@file: project.godot"), "{}", r);
+        assert!(r.contains("@file: main.tscn"), "{}", r);
+        assert!(r.contains("@file: main.gd"), "{}", r);
+        assert!(r.contains("gl_compatibility"), "{}", r);
+        // Defold: configuració + col·lecció + script Lua.
+        let r = starter("crea un joc amb defold").unwrap();
+        assert!(r.contains("@file: game.project"), "{}", r);
+        assert!(r.contains("@file: main.collection"), "{}", r);
+        assert!(r.contains("@file: main.script"), "{}", r);
+        // Bevy: Cargo.toml + src/main.rs.
+        let r = starter("vull un joc bevy").unwrap();
+        assert!(r.contains("@file: Cargo.toml"), "{}", r);
+        assert!(r.contains("@file: src/main.rs"), "{}", r);
+        // Panda3D: un sol fitxer Python.
+        let r = starter("fes una escena panda3d").unwrap();
+        assert!(r.contains("@file: joc.py"), "{}", r);
+        // El nom explícit es respecta també als motors.
+        let r = starter("fes un joc en godot que s'anomeni Salt").unwrap();
+        assert!(r.contains("config/name=\"Salt\""), "{}", r);
+    }
+
+    #[test]
+    fn blender_des_de_la_nativa() {
+        // Escena: bpy + EEVEE (el render lleuger per a Mac Intel).
+        let r = starter("fes una escena en blender").unwrap();
+        assert!(r.contains("@file: blender/escena.py"), "{}", r);
+        assert!(r.contains("import bpy"), "{}", r);
+        assert!(r.contains("EEVEE"), "{}", r);
+        // Animació: keyframes reals, no un simple print.
+        let r = starter("crea una animacio en blender").unwrap();
+        assert!(r.contains("@file: blender/animacio_"), "{}", r);
+        assert!(r.contains("keyframe_insert"), "{}", r);
+        // Material procedural amb nodes.
+        let r = starter("crea un material en blender").unwrap();
+        assert!(r.contains("@file: blender/material_"), "{}", r);
+        assert!(r.contains("ShaderNodeTexNoise"), "{}", r);
+        // Export glTF per a motors: guanya l'empat amb l'escena (és primer).
+        let r = starter("exporta de blender a godot un asset que s'anomeni Nau").unwrap();
+        assert!(r.contains("@file: blender/export_nau.py"), "{}", r);
+        assert!(r.contains("export_scene.gltf"), "{}", r);
+    }
+
+    #[test]
+    fn unreal_lleuger_des_de_la_nativa() {
+        // Projecte: .uproject + configuració sense Lumen/Nanite + Python inicial.
+        let r = starter("fes un joc en unreal").unwrap();
+        assert!(r.contains("@file: joc.uproject"), "{}", r);
+        assert!(r.contains("@file: Config/DefaultEngine.ini"), "{}", r);
+        assert!(r.contains("@file: Content/Python/inici.py"), "{}", r);
+        assert!(r.contains("PythonScriptPlugin"), "{}", r);
+        assert!(r.contains("r.DynamicGlobalIlluminationMethod=0"), "{}", r);
+        assert!(r.contains("r.Shadow.Virtual.Enable=0"), "{}", r);
+        // Script: Python via subsistema modern, MAI EditorLevelLibrary (deprecat).
+        let r = starter("crea un script python per unreal").unwrap();
+        assert!(r.contains("@file: unreal/joc.py"), "{}", r);
+        assert!(r.contains("EditorActorSubsystem"), "{}", r);
+        assert!(!r.contains("EditorLevelLibrary."), "{}", r);
+        // Regressió: Godot continua guanyant les seves peticions.
+        let r = starter("fes un joc en godot").unwrap();
+        assert!(r.contains("@file: project.godot"), "{}", r);
+    }
+
+    #[test]
+    fn detecta_peticions_de_programar() {
+        assert!(match_snippet("fes un component React").is_some());
+        assert!(match_snippet("crea una pàgina html").is_some());
+        assert!(match_snippet("genera un servidor python").is_some());
+        assert!(match_snippet("vull un joc en python").is_some());
+        assert!(match_snippet("escriu un programa en rust").is_some());
+        assert!(match_snippet("crea un full css").is_some());
+    }
+
+    #[test]
+    fn no_segresta_converses() {
+        assert!(match_snippet("hola com estàs").is_none());
+        assert!(match_snippet("calcula 2+2").is_none());
+        assert!(match_snippet("què és NoOrbit").is_none());
+        // Intenció de crear, però cap paraula de plantilla.
+        assert!(match_snippet("crea un projecte nou de cero").is_none());
+        // Parla del llenguatge, no demana crear res.
+        assert!(match_snippet("què és rust").is_none());
+    }
+
+    #[test]
+    fn preguntes_no_disparen_plantilles() {
+        // Una pregunta sobre el projecte no pot crear fitxers, ni que el
+        // context del xat continga «blender», «render» o el nom del projecte:
+        // només es mira el text darrere de «PREGUNTA / TASCA:».
+        let amb_context = "Context: carpeta blender/, render EEVEE i NoOrbit.\n\n---\nPREGUNTA / TASCA:\nquè fa aquest projecte";
+        assert!(starter(amb_context).is_none());
+        // Ni una pregunta directa sobre una tecnologia de plantilla.
+        assert!(match_snippet("què fa un render en blender").is_none());
+        assert!(match_snippet("què fa aquest projecte").is_none());
+        // En canvi, l'ordre de crear sí que dispara, també amb context.
+        let ordre = "Context: projecte amb godot.\n\n---\nPREGUNTA / TASCA:\nfes una escena en blender";
+        let r = starter(ordre).unwrap();
+        assert!(r.contains("@file: blender/escena.py"), "{}", r);
+        // Les peticions educades («com puc fer…») continuen sent ordres.
+        assert!(match_snippet("com puc fer un servidor en python").is_some());
+        assert!(match_snippet("com puc crear una animacio en blender").is_some());
+    }
+
+    #[test]
+    fn emet_format_materialitzable() {
+        let r = starter("fes un component React que s'anomeni Cart").unwrap();
+        assert!(r.contains("@file: src/Cart.tsx"), "{}", r);
+        assert!(r.contains("```tsx"), "{}", r);
+        assert!(r.contains("export default function Cart"), "{}", r);
+        // La tanca ha d'estar tancada (2 marcadors).
+        assert_eq!(r.matches("```").count(), 2, "{}", r);
+    }
+
+    #[test]
+    fn nom_explicite_vs_arrencada() {
+        let amb_nom = starter("crea una pàgina html anomenada botiga").unwrap();
+        assert!(amb_nom.contains("@file: botiga.html"), "{}", amb_nom);
+        let sense = starter("fes una pàgina html").unwrap();
+        assert!(sense.contains("@file: index.html"), "{}", sense);
+    }
+
+    #[test]
+    fn peticio_sense_plantilla_respon_catalog() {
+        let r = sense_plantilla("fes un backend en golang").unwrap();
+        assert!(r.contains("Component React"), "{}", r);
+        // «golang» no té plantilla, però sí que és un llenguatge reconegut.
+        assert!(r.contains("golang"), "{}", r);
+        assert!(sense_plantilla("fes un resum del projecte").is_none());
+        // Amb plantilla: no cal el catàleg de reserva.
+        assert!(sense_plantilla("fes un component React").is_none());
+    }
+
+    #[test]
+    fn codi_generat_no_deixa_marcadors() {
+        // Un bug clàssic: queda «{Nom}» al fitxer creat i el codi no compila.
+        for (prompt, marcador) in [
+            ("fes un component React", "{Nom}"),
+            ("crea una pàgina html", "{nom}"),
+            ("genera un servidor python", "{Nom}"),
+            ("crea un programa rust", "{nom}"),
+        ] {
+            let r = starter(prompt).unwrap_or_default();
+            assert!(!r.contains(marcador), "{}: queda {} al codi", prompt, marcador);
+        }
+    }
+}

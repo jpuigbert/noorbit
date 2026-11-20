@@ -9,7 +9,7 @@ import { ExternalLink, Terminal as TerminalIcon } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useT } from "../i18n";
-import { applyTheme, loadTheme } from "../stores/uiStore";
+import { applyTheme, loadFunCursor, loadTheme, useUIStore } from "../stores/uiStore";
 import { alignChatBucket } from "../stores/agentStore";
 import { closePanelWindow, CHAT_LABEL, TERM_LABEL } from "../windowing";
 import { useFunCursor } from "../utils/useFunCursor";
@@ -98,6 +98,13 @@ export function mountDetached(kind: "chat" | "terminal") {
   // de seguir-lo (és un webview independent amb el seu propi estat). El tema
   // nou ja és al localStorage compartit: el rellegim d'allà.
   void listen("theme://changed", () => applyTheme(loadTheme())).catch(() => undefined);
+  // El cursor (divertit o clàssic de l'ordinador) també es canvia des del menú
+  // Vista del programa principal: aquí només rellegim el que ja és al
+  // localStorage compartit, sense tornar a emetre (si no, les finestres
+  // s'enviarien l'avís en cercle).
+  void listen("fun-cursor://changed", () =>
+    useUIStore.setState({ funCursor: loadFunCursor() })
+  ).catch(() => undefined);
   initFunFx();
   const el = document.getElementById("root");
   if (!el) return;

@@ -17,6 +17,43 @@ pub mod llamacpp;
 /// sense baixar cap model ni motor de cap altre lloc.
 pub mod native;
 
+/// Edició simbòlica de fitxers de la IA nativa (esborrar, reemplaçar,
+/// afegir al final, crear amb contingut enganxat).
+pub mod edit;
+
+/// Plantilles de codi de la IA nativa: el que el motor simbòlic sap crear de
+/// soca-rel i emet en format «@file:» perquè el programa el materialitze.
+pub mod codegen;
+
+/// Consulta nativa de les skills d'ECC de sèrie (i builtin/instal·lades):
+/// el motor simbòlic respon amb el SKILL.md quan la petició l'anomena.
+pub mod ecc_native;
+
+/// Preguntes sobre EL PROJECTE OBERT (workspace): la nativa el llegeix i en
+/// fa un resum real, en lloc de respondre la FAQ genèrica de NoOrbit.
+pub mod project;
+
+/// Motor NEURONAL de la IA nativa: un LLM real (GGUF petit + llama.cpp) que
+/// cab en 4 GB i genera llenguatge natural, amb accés a internet sota demanda
+/// i alimentat per l'aprenentatge local. El simbòlic (native.rs) en és la
+/// reserva quan no hi ha model, motor ni RAM.
+pub mod native_llm;
+
+/// Aprenentatge AUTÒNOM en repòs: la nativa navega sola i aprén de
+/// contingut lliure (StackOverflow → Viquipèdia → web → profunda) quan
+/// ningú no fa servir el programa i la RAM està lliure.
+pub mod wander;
+
+/// Predicció d'ENCAIX abans de baixar o carregar un model (pes + cua de
+/// claus del context contra la RAM real de la màquina), amb el motiu quan
+/// la dada que falta impedeix comprovar-ho.
+pub mod fit;
+
+/// PORTA d'avaluació del cervell natiu: abans de quedar-se un coneixement
+/// nou se'n comprova l'efecte sobre les respostes que l'usuari ja va
+/// aprovar; si les empitjora, es fa marxa enrere.
+pub mod brain_gate;
+
 mod cloud;
 mod reasoning;
 mod repetition;
@@ -91,14 +128,14 @@ impl WaitCtx {
         Self { model, size, ram, last: None }
     }
 
-    /// El model no cap còmodament a la RAM (més del 60 %: el mateix criteri
-    /// que usa `best_fit_model` per triar-lo). Aleshores carregar-lo vol dir
-    /// anar lent i intercanviar dades amb el disc.
+    /// El model no cap còmodament a la RAM. Criteri ÚNIC: el mateix mòdul
+    /// (`ai::fit`) que consulta el gestor de models abans de baixar res, perquè
+    /// l'avís de la descàrrega i l'avís de l'espera no es contradeixin. Amb
+    /// «just» i amb «no hi cap» cal dir-ho: carregar-lo vol dir anar lent i
+    /// intercanviar dades amb el disc.
     fn tight(&self) -> bool {
-        match (self.size, self.ram) {
-            (Some(s), Some(r)) if r > 0 => s * 5 > r * 3,
-            _ => false,
-        }
+        let e = fit::comprova(self.size, self.ram, None, fit::CONTEXT_ESTIMAT);
+        matches!(e.verdicte, fit::Verdicte::Just | fit::Verdicte::NoCap)
     }
 
     /// Mida i RAM entre parèntesis, si les sabem.
@@ -229,6 +266,12 @@ pub struct ChatOpts {
     /// veient el text (i la ruta, per si la IA vol descriure-la després).
     #[serde(default)]
     pub images: Vec<String>,
+    /// Generació LLARGA (feines autònomes: Jam, millora autopilotada). Fa
+    /// servir els clients HTTP amb sostre d'hora en lloc dels 120–240 s de la
+    /// interacció humana: un model local en CPU triga més d'un quart d'hora a
+    /// escriure un fitxer sencer.
+    #[serde(default)]
+    pub long_run: bool,
 }
 
 /// Estat propi de cada xat que pot treballar en paral·lel: bandera d'aturada,
@@ -610,13 +653,23 @@ fn ollama_error_note(model: &str, status: reqwest::StatusCode, body: &str) -> St
 pub fn context_window_for(model: &str) -> u64 {
     let m = model.to_lowercase();
     if m.contains("claude") {
-        200_000
+        // Les generacions 4.6, 4.7, 4.8 i 5.x porten 1M de context; les
+        // anteriors (4.5, 4.x, 3.x) es queden als 200k de sempre. Mesurar
+        // l'ocupació sobre 200k feia que un Claude nou semblés «sense memòria».
+        let (maj, min) = crate::api::model_version(&m);
+        if maj > 4 || (maj == 4 && min >= 6) {
+            1_000_000
+        } else {
+            200_000
+        }
     } else if m.contains("gpt-4o") || m.contains("gpt-4.1") || m.contains("gpt-5") {
         128_000
     } else if m.contains("gpt-4") || m.contains("gpt-3.5") {
         8_192
     } else if m.contains("deepseek") {
-        65_536
+        // DeepSeek (V4, V4-Pro i el «flash») admet 1M de context: amb 65k la
+        // interfície deia «context gairebé ple» en un xat de dues pantalles.
+        1_000_000
     } else if m.contains("qwen3") {
         40_960
     } else if m.contains("qwen") {
@@ -1856,9 +1909,72 @@ impl AiManager {
         self.keep_alive.read().await.clone()
     }
 
+    /// Models que l'usuari ha dit «baixa'l IGUALMENT» després que l'encaix
+    /// digués que no hi cap. Viu només la sessió: cada intenció nova s'ha de
+    /// tornar a confirmar (baixar 5 GB que la màquina no podrà fer servir és
+    /// el tipus d'error que NoOrbit no torna a cometre sol).
+    fn forcats() -> &'static Mutex<std::collections::HashSet<String>> {
+        static C: std::sync::OnceLock<Mutex<std::collections::HashSet<String>>> =
+            std::sync::OnceLock::new();
+        C.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+    }
+
+    /// Autoritza una descàrrega que l'encaix refusava (la UI ho demana amb un
+    /// segon clic conscient).
+    pub fn autoritza_baixada(name: &str) {
+        if let Ok(mut s) = Self::forcats().lock() {
+            s.insert(Self::ps_key(name));
+        }
+    }
+
+    /// L'encaix ABANS de baixar un model d'Ollama: la mida la sap NoOrbit de la
+    /// seva taula de suggerits (Ollama encara no la pot reportar, el model no és
+    /// al disc). `None` = no se'n sap la mida, i aleshores NO es fingeix cap
+    /// veredicte: es baixa i es diu per què no s'ha pogut comprovar.
+    pub fn encaix_davant_baixar(name: &str) -> Option<fit::Encaix> {
+        let mida = Self::mida_sugerida(name)?;
+        Some(fit::comprova(
+            Some(mida),
+            fit::ram_total_aqui(),
+            fit::ram_lliure_aqui(),
+            fit::CONTEXT_ESTIMAT,
+        ))
+    }
+
     /// descarrega un model amb streaming de progrés (event "ai://pull").
     pub async fn pull_model(&self, app: Option<&tauri::AppHandle>, name: &str) -> Result<String> {
         use tauri::Emitter;
+        // PREDICCIÓ D'ENCAIX abans de gastar xarxa i disc: si el model (més la
+        // seva cua de claus) no cap al sostre de RAM d'aquest equip, NO es
+        // baixa — es diu per què i què fer, i només continua si l'usuari ho ha
+        // autoritzat expressament ara mateix.
+        if let Some(e) = Self::encaix_davant_baixar(name) {
+            let autoritzat = Self::forcats()
+                .lock()
+                .map(|s| s.contains(&Self::ps_key(name)))
+                .unwrap_or(false);
+            if e.verdicte == fit::Verdicte::NoCap && !autoritzat {
+                return Err(anyhow!("{}", e.missatge()));
+            }
+            // El que se sap, es diu: l'usuari veu els números reals al progrés.
+            if let Some(app) = app {
+                if e.verdicte != fit::Verdicte::Cap {
+                    let _ = app.emit(
+                        "ai://pull",
+                        serde_json::json!({ "model": name, "message": e.missatge() }),
+                    );
+                }
+            }
+        } else if let Some(app) = app {
+            let _ = app.emit(
+                "ai://pull",
+                serde_json::json!({
+                    "model": name,
+                    "message": fit::comprova(None, fit::ram_total_aqui(), fit::ram_lliure_aqui(), fit::CONTEXT_ESTIMAT)
+                        .missatge()
+                }),
+            );
+        }
         let body = serde_json::json!({ "name": name, "stream": true });
         let resp = self
             .http
@@ -2003,12 +2119,13 @@ impl AiManager {
         Ok(())
     }
 
-    pub fn suggested_models() -> Vec<serde_json::Value> {
-        // La mida és l'APROXIMACIÓ real del pes de descàrrega a ollama.com
-        // (quantització Q4 per defecte): l'usuari la veu ABANS de prémer
-        // «Baixa» — sense això no sabia si li cabria al disc ni a la RAM.
-        [
-            ("qwen3:8b", "Qwen3 8B — raonament i codi; pesos oberts (Apache 2.0), modificables/afinables", 5_200_000_000u64),
+    /// Models que NoOrbit proposa al gestor: (nom, descripció, bytes aproximats
+    /// de la descàrrega a ollama.com amb Q4 — 0 si no la sabem). ÉS LA TAULA
+    /// ÚNICA: la mateixa que dona l'encaix a la interfície i la que permet
+    /// comprovar la RAM ABANS de prémer «Baixa». L'usuari veu la mida i si li
+    /// cabrà; sense això no sabia si li cabria al disc ni a la RAM.
+    pub const SUGGERITS: &'static [(&'static str, &'static str, u64)] = &[
+            ("qwen3:8b", "Qwen3 8B — raonament i codi; pesos oberts (Apache 2.0), modificables/afinables", 5_200_000_000),
             ("qwen2.5-coder:7b", "Codi — equilibri qualitat/velocitat", 4_700_000_000),
             ("qwen2.5-coder:3b", "Codi — lleuger, per a màquines modestes", 1_900_000_000),
             ("llama3.2:3b", "General — ràpid i multilingüe", 2_000_000_000),
@@ -2034,18 +2151,44 @@ impl AiManager {
             // amb `ollama pull`): no donem mida perquè canvia per quantització.
             ("glm-5.3-flash", "Z.ai GLM-5.3 Flash — MoE multimodal 18B actius, codi/agents de primer nivell; veu imatges", 0),
             ("glm-ocr", "Z.ai GLM OCR — llegeix text de fitxes, captures i documents en imatge", 0),
-        ]
-        .iter()
-        .map(|(name, desc, size)| {
-            // Mida 0 = no la sabem: serialitzem null i la UI no mostra xip.
-            let size = if *size == 0 {
-                serde_json::Value::Null
-            } else {
-                serde_json::json!(*size)
-            };
-            serde_json::json!({ "name": name, "description": desc, "size": size })
-        })
-        .collect()
+        ];
+
+    /// Mida aproximada (bytes) del model que es demana, segons la taula de
+    /// suggerits. `None` = NoOrbit no en sap la mida: l'encaix NO es pot
+    /// comprovar i així ho ha de dir (mai inventar-se un veredicte).
+    pub fn mida_sugerida(name: &str) -> Option<u64> {
+        let want = Self::ps_key(name);
+        Self::SUGGERITS
+            .iter()
+            .find(|(n, _, _)| Self::ps_key(n) == want)
+            .and_then(|(_, _, s)| if *s > 0 { Some(*s) } else { None })
+    }
+
+    pub fn suggested_models() -> Vec<serde_json::Value> {
+        let ram = fit::ram_total_aqui();
+        let lliure = fit::ram_lliure_aqui();
+        Self::SUGGERITS
+            .iter()
+            .map(|(name, desc, size)| {
+                // Mida 0 = no la sabem: serialitzem null i la UI no mostra xip.
+                let mida = if *size == 0 { None } else { Some(*size) };
+                let size = match mida {
+                    Some(s) => serde_json::json!(s),
+                    None => serde_json::Value::Null,
+                };
+                // L'encaix va amb la mida: l'usuari veu «NO hi cap» ABANS de
+                // baixar 5 GB que la seva màquina no podrà mai fer servir.
+                let e = fit::comprova(mida, ram, lliure, fit::CONTEXT_ESTIMAT);
+                serde_json::json!({
+                    "name": name,
+                    "description": desc,
+                    "size": size,
+                    "encaix": e.etiqueta(),
+                    "encaixOk": e.acceptable(),
+                    "encaixMotiu": e.missatge(),
+                })
+            })
+            .collect()
     }
 
     /// Cerca models a la biblioteca del NÚVOL d'Ollama (ollama.com).
@@ -2384,6 +2527,64 @@ impl AiManager {
         (provider, model)
     }
 
+    /// Etiqueta (proveïdor, model) amb la qual treballarà una crida SENSE
+    /// sessió pròpia: la Jam, el treball autopilotat, els agents.
+    ///
+    /// És el mateix criteri que aplica `chat_opts`: el proveïdor actiu, amb
+    /// la caiguda a la IA remota o a la IA nativa si Ollama no està en marxa.
+    /// La UI el mostra a l'usuari perquè sense això no es sap QUI està
+    /// construint el joc (ni quin model hi treballa).
+    pub async fn active_labels(&self) -> (String, String) {
+        let mut provider = self.active_provider.read().await.clone();
+        if provider == "ollama" {
+            // Ollama pot estar aturat: en 3 s n'hi ha prou per saber-ho i el
+            // panell no ha d'esperar un timeout llarg si el port està tapat.
+            let running = tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                self.is_running(),
+            )
+            .await
+            .unwrap_or(false);
+            if !running {
+                if let Some(remot) = self.first_working_remote() {
+                    provider = remot;
+                } else {
+                    provider = native::PROVIDER_ID.to_string();
+                }
+            }
+        }
+        let model = self.model_for_provider(&provider).await;
+        (provider, model)
+    }
+
+    /// Model corresponent a un proveïdor: el d'Ollama (triat o per defecte),
+    /// el de la IA nativa o el que té configurat el proveïdor en línia.
+    async fn model_for_provider(&self, provider: &str) -> String {
+        if provider == native::PROVIDER_ID {
+            return native::MODEL_NAME.to_string();
+        }
+        if provider != "ollama" {
+            if let Some(remote) = &self.remote {
+                // El guard es deixa abans de l'await (MutexGuard no és Send).
+                let model = remote.lock().ok().and_then(|guard| {
+                    guard
+                        .providers
+                        .iter()
+                        .find(|p| p.id == provider)
+                        .map(|p| p.model.clone())
+                        .filter(|m| !m.trim().is_empty())
+                });
+                if let Some(m) = model {
+                    return m;
+                }
+                // Sense model configurat no hi ha res a ensenyar: NO es posa
+                // el model d'Ollama (seria el model d'un altre proveïdor).
+                return String::new();
+            }
+        }
+        self.effective_model().await
+    }
+
     /// La comanda de xat només ha de contar un faliment si cap backend (Ollama
     /// o remot) no n'ha llançat ja un amb explicació i temps real.
     pub fn session_error_shown(&self, session: &str) -> bool {
@@ -2410,6 +2611,8 @@ impl AiManager {
         model: Option<&'a str>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String>> + Send + 'a>> {
         Box::pin(async move {
+            // També és un torn real: l'aprenentatge en repòs no hi competeix.
+            let _torn = wander::obri_torn();
             let ctl = self.ctl_now();
             if let Some(m) = model {
                 if !m.trim().is_empty() {
@@ -2425,9 +2628,11 @@ impl AiManager {
 
     /// Resposta de la IA NATIVA (motor integrat al binari). Si l'usuari demana
     /// millorar/reprogramar el seu context, ho fa en SILENCI amb una IA
-    /// open-source disponible i respon naturalment; si no, respon amb el
-    /// cervell (matemàtiques + coneixement + aprenentatge local). La resposta
-    /// no ix d'aquest Mac: tot és codi integrat, sense descàrregues.
+    /// open-source disponible; si és una edició de fitxers, la resol contra el
+    /// projecte real; si no, respon amb el cervell (matemàtiques, plantilles
+    /// de codi, coneixement, aprenentatge local) i, quan res cobreix la
+    /// petició, l'encarrega a una IA disponible (generació llarga). Sense cap
+    /// IA i sense cap fitxer, la reserva honesta. Res no es baixa de cap lloc.
     async fn native_compute(
         &self,
         prompt: &str,
@@ -2437,10 +2642,46 @@ impl AiManager {
         let text = if let Some(topic) = native::improvement_request(prompt) {
             let n = self.native_improve(&topic, prompt).await;
             native::improved_message(&topic, n)
+        } else if let Some(ed) = edit::handle(prompt) {
+            ed
         } else {
             let brain = native::load_brain();
             let lessons = native::lessons_from_system(system);
-            native::answer(prompt, &brain, &lessons)
+            // 1) Capacitats deterministes (matemàtiques exactes, plantilles de
+            //    codi, skills, informe del vagueig, resum factual del projecte):
+            //    manen SEMPRE, també al LLM neuronal, perquè són més fiables.
+            if let Some(d) = native::deterministic(prompt, &brain, &lessons) {
+                d
+            // 2) IA NEURONAL de ple dret: un LLM local (GGUF petit + llama.cpp)
+            //    que cab en 4 GB, amb internet sota demanda i alimentat per les
+            //    lliçons d'aprenentatge. És la resposta principal quan hi ha
+            //    model, motor i RAM.
+            } else if let Some(llm) =
+                native_llm::ask(&self.http_client(), prompt, system, &lessons).await
+            {
+                llm
+            // 3) Sense LLM disponible: reserva simbòlica (cervell + lliçons +
+            //    conversa) i, si cal, delegació a una IA disponible o la reserva
+            //    honesta.
+            } else {
+                match native::generic(prompt, &brain, &lessons) {
+                    Some(a) => a,
+                    None => {
+                        // Generació lliure (articles, programes sencers…): la
+                        // nativa encarrega la feina a una IA disponible i la torna
+                        // com a resposta pròpia (cap event delata el teacher).
+                        ctl.set_thinking(Some(
+                            "El meu motor simbòlic no ho genera: encarrego la feina a una IA disponible…"
+                                .to_string(),
+                        ))
+                        .await;
+                        match self.native_task_delegate(prompt, system).await {
+                            Some(gen) => gen,
+                            None => native::fallback(),
+                        }
+                    }
+                }
+            }
         };
         ctl.set_thinking(None).await;
         Ok(text)
@@ -2486,7 +2727,7 @@ impl AiManager {
             let prep = self
                 .remote
                 .as_ref()
-                .and_then(|r| r.lock().unwrap().prepare(&remot).ok());
+                .and_then(|r| r.lock().unwrap().prepare(&remot, false).ok());
             match prep {
                 Some((prov, client)) => match tokio::time::timeout(
                     std::time::Duration::from_secs(90),
@@ -2513,7 +2754,73 @@ impl AiManager {
             // predefinit del tema. Silenciós i sense xarxa.
             incoming = native::builtin_topic_knowledge(topic);
         }
-        native::merge_knowledge(incoming)
+        brain_gate::fusiona_amb_porta(incoming).peces
+    }
+
+    /// Delegació de GENERACIÓ LLARGA de la IA nativa. Quan la petició no és ni
+    /// matemàtiques, ni coneixement, ni plantilla, ni edició («escriu un
+    /// article de 600 paraules», «fes-me un joc de tres en ratlla complet»…),
+    /// la nativa encarrega la generació a una IA open-source JA disponible —
+    /// el model LOCAL d'Ollama si el motor està en marxa, si no un proveïdor
+    /// en línia de l'usuari — i en torna la resposta com si fos seva. La
+    /// sessió és AÏLLADA («native_task») per no tocar el ctl del xat, i el
+    /// system prompt del xat hi viatja sencer: el teacher ja coneix les
+    /// convencions «@file:»/«@edit:» i el que generi es materialitza al
+    /// projecte com qualsevol resposta. MAI baixa cap model. Sense cap
+    /// teacher, retorna None i el xat respon la reserva honesta.
+    async fn native_task_delegate(&self, prompt: &str, system: Option<&str>) -> Option<String> {
+        let raw: Option<String> = if self.is_running().await {
+            let models = self.list_models().await.unwrap_or_default();
+            if models.is_empty() {
+                None
+            } else {
+                // Preferix un qwen3 (open-source, multilingüe) ja instal·lat.
+                let model = models
+                    .iter()
+                    .find(|m| m.name.to_lowercase().contains("qwen3"))
+                    .or_else(|| models.first())
+                    .map(|m| m.name.clone());
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(240),
+                    in_session(
+                        "native_task",
+                        self.chat_local_only(prompt, system, model.as_deref()),
+                    ),
+                )
+                .await
+                {
+                    Ok(Ok(text)) if !text.trim().is_empty() => Some(text),
+                    _ => None,
+                }
+            }
+        } else if let Some(remot) = self.first_working_remote() {
+            // Teacher EN LÍNIA: api::chat (sense streaming) no emet cap event
+            // de procés, així que l'usuari no veu quina IA ho genera.
+            let prep = self
+                .remote
+                .as_ref()
+                .and_then(|r| r.lock().unwrap().prepare(&remot, false).ok());
+            match prep {
+                Some((prov, client)) => match tokio::time::timeout(
+                    std::time::Duration::from_secs(240),
+                    api::chat(
+                        &client,
+                        &prov,
+                        &[("user".to_string(), prompt.to_string())],
+                        system,
+                    ),
+                )
+                .await
+                {
+                    Ok(Ok((text, _))) if !text.trim().is_empty() => Some(text),
+                    _ => None,
+                },
+                None => None,
+            }
+        } else {
+            None
+        };
+        raw
     }
 
     /// Envia un prompt de xat i retorna la resposta completa.
@@ -2535,6 +2842,7 @@ impl AiManager {
             model: model_override.map(|m| m.to_string()),
             history: Vec::new(),
             images: Vec::new(),
+            long_run: false,
         };
         self.chat_opts(prompt, system, &opts).await
     }
@@ -2547,6 +2855,9 @@ impl AiManager {
         system: Option<&str>,
         opts: &ChatOpts,
     ) -> Result<String> {
+        // Torn obert: l'aprenentatge en repòs (wander) NO començarà mentre
+        // això duri, encara que l'usuari hagi deixat el teclat quiet.
+        let _torn = wander::obri_torn();
         let ctl = self.ctl_now();
         self.bind(&ctl, opts).await;
         // Cada generació nova comença sense bandera d'aturada i sense raonament.
@@ -2610,6 +2921,8 @@ impl AiManager {
         system: Option<&str>,
         opts: &ChatOpts,
     ) -> Result<String> {
+        // Torn obert (vegeu `chat_opts`): el vagueig espera que acabi.
+        let _torn = wander::obri_torn();
         let ctl = self.ctl_now();
         self.bind(&ctl, opts).await;
         ctl.begin().await;
@@ -2660,13 +2973,14 @@ impl AiManager {
         // com Ollama). La cancel·lació és la del XAT que ha enviat el missatge.
         if active != "ollama" {
             if let Some(remote) = &self.remote {
-                let (provider, client) = remote.lock().unwrap().prepare(&active)?;
-                let mut res = api::chat_stream(
+                let (provider, client) = remote.lock().unwrap().prepare(&active, false)?;
+                let mut res = api::chat_stream_with_images(
                     app,
                     &client,
                     &provider,
                     &conversation(&opts.history, prompt),
                     system,
+                    &opts.images,
                     &ctl,
                     start,
                 )
@@ -2684,12 +2998,13 @@ impl AiManager {
                                 "La memòria no abastava tot el context: el comprimeix i ho torna a provar.",
                                 0,
                             );
-                            res = api::chat_stream(
+                            res = api::chat_stream_with_images(
                                 app,
                                 &client,
                                 &provider,
                                 &conversation(&compact_history(&opts.history), &compacted),
                                 system,
+                                &opts.images,
                                 &ctl,
                                 start,
                             )
@@ -3366,11 +3681,14 @@ impl AiManager {
         if provider != "ollama" {
             if let Some(remote) = &self.remote {
                 // prepare() retorna dades propietàries; el guard allibera abans de l'await
-                let (prov, client) = remote.lock().unwrap().prepare(provider)?;
+                let (prov, client) = remote.lock().unwrap().prepare(provider, opts.long_run)?;
                 let conv = conversation(&opts.history, prompt);
                 let system = system.map(|s| s.to_string());
+                // Les imatges adjuntes també arriben als proveïdors remots
+                // (Claude i DeepSeek tenen visió); abans només les veia Ollama.
+                let images = opts.images.clone();
                 let (content, thinking) = race_cancel(ctl, async move {
-                    api::chat(&client, &prov, &conv, system.as_deref()).await
+                    api::chat_with_images(&client, &prov, &conv, system.as_deref(), &images).await
                 })
                 .await?;
                 ctl.set_thinking(thinking).await;
@@ -3422,7 +3740,11 @@ impl AiManager {
             // Podem instal·lar Ollama en segon pla? Només si l'usuari NO
             // té cap IA en línia configurada.
             let auto_install = self.first_working_remote().is_none();
-            let mut resp = Self::send_chat(&self.http, &chat_url, &req, auto_install).await?;
+            // Feina AUTONÒMICA: el client de 240 s tallava generacions que en
+            // CPU necessiten mitja hora. `http_stream` no té sostre total i la
+            // seguretat la dona el timeout del propi bucle de la Jam.
+            let http = if opts.long_run { &self.http_stream } else { &self.http };
+            let mut resp = Self::send_chat(http, &chat_url, &req, auto_install).await?;
             // USUARI NOU SENSE CAP MODEL: el primer enviament a un Ollama
             // acabat d'instal·lar (o JA en marxa però buit) retorna 404.
             // Mateixa recuperació que el camí streaming: si Ollama no té cap
@@ -3442,24 +3764,24 @@ impl AiManager {
                     // El model DEMANAT no és: DESCARREGA'L (silenciós, sense
                     // AppHandle) i reintent una vegada amb ell.
                     if self.pull_model(None, &model_label).await.is_ok() {
-                        resp = Self::send_chat(&self.http, &chat_url, &req, auto_install).await?;
+                        resp = Self::send_chat(http, &chat_url, &req, auto_install).await?;
                     } else if let Some(fb) = Self::pick_fallback_model(&instalats) {
                         // La descàrrega ha fallat: reserva amb un JA instal·lat.
                         req.model = fb;
-                        resp = Self::send_chat(&self.http, &chat_url, &req, auto_install).await?;
+                        resp = Self::send_chat(http, &chat_url, &req, auto_install).await?;
                     } else {
                         // Res instal·lat útil: baixa l'inicial i reintent.
                         let nom = Self::starter_model_name();
                         self.pull_model(None, &nom).await?;
                         req.model = nom;
-                        resp = Self::send_chat(&self.http, &chat_url, &req, auto_install).await?;
+                        resp = Self::send_chat(http, &chat_url, &req, auto_install).await?;
                     }
                 } else {
                     // Ollama SENSE CAP model: baixem l'inicial i reintentem.
                     let nom = Self::starter_model_name();
                     self.pull_model(None, &nom).await?;
                     req.model = nom;
-                    resp = Self::send_chat(&self.http, &chat_url, &req, auto_install).await?;
+                    resp = Self::send_chat(http, &chat_url, &req, auto_install).await?;
                 }
             }
             if !resp.status().is_success() {
@@ -3727,7 +4049,7 @@ impl AiManager {
         };
         let sys = "Respon en català, de forma concisa i directa.";
         for (id, name, model) in ids {
-            let prepared = remote.lock().unwrap().prepare(&id);
+            let prepared = remote.lock().unwrap().prepare(&id, false);
             let (provider, client) = match prepared {
                 Ok(v) => v,
                 Err(_) => continue,

@@ -15,7 +15,7 @@ fn skills_dir(state: &State<'_, AppState>) -> Result<PathBuf, String> {
 /// Valida un nom de skill derivat d'entrada externa (repo, URL, zip): ha de ser
 /// un únic component de ruta. Sense això, un nom com `..` fa que
 /// `remove_dir_all(dir.join(name))` esborri la carpeta de dades de NoOrbit.
-fn safe_name(name: &str, fallback: &str) -> String {
+pub(crate) fn safe_name(name: &str, fallback: &str) -> String {
     let n = name.trim();
     if !n.is_empty()
         && n != "."
@@ -30,7 +30,7 @@ fn safe_name(name: &str, fallback: &str) -> String {
     }
 }
 
-fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), String> {
+pub(crate) fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), String> {
     std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
     for entry in std::fs::read_dir(from).map_err(|e| e.to_string())?.flatten() {
         let path = entry.path();
@@ -41,6 +41,11 @@ fn copy_dir_recursive(from: &Path, to: &Path) -> Result<(), String> {
         // Els SYMLINKS es salten: el seu contingut podseria venir de fora del
         // repositori (i copiant-lo es duria el que altres enllocs no tenen).
         if entry.file_type().map(|t| t.is_symlink()).unwrap_or(false) {
+            continue;
+        }
+        // La carpeta `.git` no es copia mai: en un clonatge és la meitat del
+        // pes i no conté cap skill (i alenteix l'escaneig posterior).
+        if entry.file_name() == ".git" {
             continue;
         }
         if is_real_dir {
@@ -60,6 +65,76 @@ pub async fn skills_store_list(state: State<'_, AppState>) -> Result<Vec<Skill>,
     Ok(guard.list())
 }
 
+/// Una font GitHub desxifrada: "usuari/repo[/subcarpeta...]@branca".
+pub(crate) struct GitHubRef {
+    /// URL de clonatge completa (usuari i repositori: l'un sense l'altre no
+    /// existeix a GitHub).
+    pub url: String,
+    pub repo: String,
+    /// Subcarpeta dins el repositori; buida = arrel.
+    pub subpath: String,
+    pub branch: Option<String>,
+    /// Nom de la skill: l'última component de la ruta (subcarpeta o repo).
+    pub leaf: String,
+}
+
+/// Un segment de l'usuari, el repositori o la subcarpeta de GitHub: sense punts
+/// relatius ni caràcters que puguin alterar la comanda `git` o escapar de la
+/// carpeta temporal.
+fn seg_ok(s: &str) -> bool {
+    s != "."
+        && s != ".."
+        && !s.starts_with('-')
+        && s.chars().all(|c| c.is_alphanumeric() || "-_.".contains(c))
+}
+
+pub(crate) fn parse_github_ref(source: &str) -> Result<GitHubRef, String> {
+    let (path_part, branch) = match source.split_once('@') {
+        Some((p, b)) => (p.trim(), Some(b.trim().to_string())),
+        None => (source.trim(), None),
+    };
+    if let Some(b) = &branch {
+        if !seg_ok(b) {
+            return Err("Nom de branca no vàlid".into());
+        }
+    }
+    let segs: Vec<&str> = path_part
+        .split('/')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    if segs.len() < 2 {
+        return Err("Format esperat: usuari/repo[/carpeta]".into());
+    }
+    if !seg_ok(segs[0]) || !seg_ok(segs[1]) || segs[2..].iter().any(|s| !seg_ok(s)) {
+        return Err("Nom d'usuari o de repositori no vàlid".into());
+    }
+    let owner = segs[0];
+    let repo = segs[1];
+    Ok(GitHubRef {
+        url: format!("https://github.com/{}/{}.git", owner, repo),
+        repo: repo.to_string(),
+        subpath: segs[2..].join("/"),
+        branch,
+        leaf: segs.last().copied().unwrap_or(repo).to_string(),
+    })
+}
+
+/// Hi ha un SKILL.md a la carpeta (fins a la profunditat que després explorarà
+/// `scan_skills`)? Sense SKILL.md no hi ha res a instal·lar: és el cas més
+/// habitual quan el cercador troba un repo que no fa servir el format.
+fn has_skill_md(root: &Path) -> bool {
+    if root.join("SKILL.md").is_file() {
+        return true;
+    }
+    walkdir::WalkDir::new(root)
+        .max_depth(3)
+        .into_iter()
+        .filter_entry(|e| !(e.file_type().is_dir() && e.file_name() == ".git"))
+        .flatten()
+        .any(|e| e.file_name() == "SKILL.md")
+}
+
 /// Instal·la una skill des d'un repo GitHub: "usuari/repo[/subcarpeta]@branca".
 #[command]
 pub async fn skills_install_github(
@@ -67,24 +142,14 @@ pub async fn skills_install_github(
     repo: String,
 ) -> Result<Skill, String> {
     let dir = skills_dir(&state)?;
-    let (repo_part, branch) = match repo.split_once('@') {
-        Some((r, b)) => (r.to_string(), Some(b.to_string())),
-        None => (repo.clone(), None),
-    };
-    let (owner, name_sub) = match repo_part.split_once('/') {
-        Some((o, rest)) => (o.to_string(), rest.to_string()),
-        None => return Err("Format esperat: usuari/repo[/carpeta]".into()),
-    };
-    if !owner.chars().all(|c| c.is_alphanumeric() || "-_".contains(c)) {
-        return Err("Nom d'usuari no vàlid".into());
-    }
+    let git = parse_github_ref(&repo)?;
 
-    let url = format!("https://github.com/{}.git", owner.trim_matches('/'));
     let tmp = std::env::temp_dir().join(format!("noorbit-skill-{}", uuid::Uuid::new_v4()));
     // El clonatge pot trigar MINUTS (xarxa): es fa en un fil a part perquè
     // el runtime async no quedi congelat (i la interfície, bloquejada).
-    let url_clone = url.clone();
+    let url_clone = git.url.clone();
     let tmp_clone = tmp.clone();
+    let branch = git.branch.clone();
     let cloned = tauri::async_runtime::spawn_blocking(move || {
         let mut cmd = std::process::Command::new("git");
         cmd.args(["clone", "--depth", "1"]);
@@ -101,23 +166,35 @@ pub async fn skills_install_github(
     let status = cloned.map_err(|e| e)?;
     if !status.success() {
         let _ = std::fs::remove_dir_all(&tmp);
-        return Err(format!("git clone ha fallat per {}", url));
+        return Err(format!("git clone ha fallat per {}", git.url));
     }
 
-    let src = if name_sub.is_empty() { tmp.clone() } else { tmp.join(&name_sub) };
+    let src = if git.subpath.is_empty() {
+        tmp.clone()
+    } else {
+        tmp.join(&git.subpath)
+    };
     if !src.is_dir() {
         let _ = std::fs::remove_dir_all(&tmp);
-        return Err(format!("La carpeta {} no existeix al repositori", name_sub));
+        return Err(format!(
+            "La carpeta {} no existeix al repositori {}",
+            git.subpath, git.repo
+        ));
+    }
+    if !has_skill_md(&src) {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return Err(format!(
+            "El repositori {} no conté cap SKILL.md{}. Indica la subcarpeta que en té: usuari/repo/carpeta",
+            git.repo,
+            if git.subpath.is_empty() {
+                String::new()
+            } else {
+                format!(" a {}", git.subpath)
+            }
+        ));
     }
 
-    let skill_name = safe_name(
-        name_sub
-            .rsplit('/')
-            .next()
-            .filter(|s| !s.is_empty())
-            .unwrap_or(&owner),
-        &owner,
-    );
+    let skill_name = safe_name(&git.leaf, &git.repo);
     let dest = dir.join(&skill_name);
     let _ = std::fs::remove_dir_all(&dest);
     copy_dir_recursive(&src, &dest)?;
@@ -579,7 +656,12 @@ fn find_skill_md(root: &Path) -> Option<PathBuf> {
             }
         }
     }
-    for e in walkdir::WalkDir::new(root).max_depth(3).into_iter().flatten() {
+    for e in walkdir::WalkDir::new(root)
+        .max_depth(4)
+        .into_iter()
+        .filter_entry(|e| !(e.file_type().is_dir() && e.file_name() == ".git"))
+        .flatten()
+    {
         if e.path().file_name().map(|n| n == "SKILL.md").unwrap_or(false) {
             return Some(e.path().to_path_buf());
         }
@@ -705,7 +787,12 @@ fn analyze_skill(root: &Path) -> SkillPreview {
     let mut scripts: Vec<String> = Vec::new();
     let mut file_count = 0usize;
     let mut total_bytes = 0u64;
-    for e in walkdir::WalkDir::new(root).max_depth(4).into_iter().flatten() {
+    for e in walkdir::WalkDir::new(root)
+        .max_depth(4)
+        .into_iter()
+        .filter_entry(|e| !(e.file_type().is_dir() && e.file_name() == ".git"))
+        .flatten()
+    {
         if !e.file_type().is_file() {
             continue;
         }
@@ -735,20 +822,10 @@ pub async fn skills_preview(kind: String, source: String) -> Result<SkillPreview
     let result = async {
         match kind.as_str() {
             "github" => {
-                let (repo_part, branch) = match source.split_once('@') {
-                    Some((r, b)) => (r.to_string(), Some(b.to_string())),
-                    None => (source.clone(), None),
-                };
-                let (owner, name_sub) = match repo_part.split_once('/') {
-                    Some((o, rest)) => (o.to_string(), rest.to_string()),
-                    None => return Err("Format esperat: usuari/repo[/carpeta]".into()),
-                };
-                if !owner.chars().all(|c| c.is_alphanumeric() || "-_".contains(c)) {
-                    return Err("Nom d'usuari no vàlid".into());
-                }
-                let url = format!("https://github.com/{}.git", owner.trim_matches('/'));
-                let url_clone = url.clone();
+                let git = parse_github_ref(&source)?;
+                let url_clone = git.url.clone();
                 let tmp_clone = tmp.clone();
+                let branch = git.branch.clone();
                 let cloned = tauri::async_runtime::spawn_blocking(move || {
                     let mut cmd = std::process::Command::new("git");
                     cmd.args(["clone", "--depth", "1"]);
@@ -762,11 +839,18 @@ pub async fn skills_preview(kind: String, source: String) -> Result<SkillPreview
                 .map_err(|e| e.to_string())?;
                 let status = cloned.map_err(|e| e)?;
                 if !status.success() {
-                    return Err(format!("git clone ha fallat per {}", url));
+                    return Err(format!("git clone ha fallat per {}", git.url));
                 }
-                let src = if name_sub.is_empty() { tmp.clone() } else { tmp.join(&name_sub) };
+                let src = if git.subpath.is_empty() {
+                    tmp.clone()
+                } else {
+                    tmp.join(&git.subpath)
+                };
                 if !src.is_dir() {
-                    return Err(format!("La carpeta {} no existeix al repositori", name_sub));
+                    return Err(format!(
+                        "La carpeta {} no existeix al repositori {}",
+                        git.subpath, git.repo
+                    ));
                 }
                 Ok(analyze_skill(&src))
             }
@@ -801,7 +885,39 @@ pub async fn skills_preview(kind: String, source: String) -> Result<SkillPreview
 
 #[cfg(test)]
 mod proves {
-    use super::{detect_warnings, extract_code_blocks, safe_name};
+    use super::{
+        detect_warnings, extract_code_blocks, parse_github_ref, safe_name, seg_ok,
+    };
+
+    /// La font GitHub es desxifra en usuari + repositori (l'URL anterior
+    /// només portava l'usuari i cap clonatge external no funcionava) i la
+    /// subcarpeta on viu realment el SKILL.md.
+    #[test]
+    fn una_font_github_desxifra_usuari_repo_i_carpeta() {
+        let g = parse_github_ref("anthropics/skills").unwrap();
+        assert_eq!(g.url, "https://github.com/anthropics/skills.git");
+        assert_eq!(g.subpath, "");
+        assert_eq!(g.leaf, "skills");
+        assert_eq!(g.branch, None);
+
+        let g = parse_github_ref("anthropics/skills/document-skills/pdf").unwrap();
+        assert_eq!(g.url, "https://github.com/anthropics/skills.git");
+        assert_eq!(g.subpath, "document-skills/pdf");
+        assert_eq!(g.leaf, "pdf");
+
+        let g = parse_github_ref("obra/superpowers@main").unwrap();
+        assert_eq!(g.branch.as_deref(), Some("main"));
+
+        //Formats incomplets o malament: no s'intenta ni el clonatge.
+        assert!(parse_github_ref("anthropics").is_err());
+        assert!(parse_github_ref("").is_err());
+        assert!(parse_github_ref("../../etc/passwd").is_err());
+        assert!(parse_github_ref("usuari/repo/..").is_err());
+        assert!(parse_github_ref("usuari/repo@--upload-pack=evil").is_err());
+        assert!(parse_github_ref("usuari/repo.git;rm -rf").is_err());
+        // Els caràcters permesos en un nom de repo real.
+        assert!(seg_ok("my-repo_2") && seg_ok("noorbit-paquet") && !seg_ok("-x"));
+    }
 
     /// Un nom de skill derivat de l'exterior ha de ser un únic component de
     /// ruta: si no, `remove_dir_all(dir.join(name))` esborria la carpeta de

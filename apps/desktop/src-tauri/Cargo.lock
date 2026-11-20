@@ -2501,11 +2501,12 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "no-orbit"
-version = "0.71.11-alpha"
+version = "0.71.13-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
+ "block2",
  "chrono",
  "dirs 5.0.1",
  "futures",
@@ -2522,6 +2523,8 @@ dependencies = [
  "noorbit-reporter",
  "noorbit-signal",
  "notify",
+ "objc2",
+ "objc2-foundation",
  "once_cell",
  "regex",
  "reqwest 0.12.28",

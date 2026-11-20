@@ -1,0 +1,239 @@
+/* PANELL «VÍDEO»: muntatge Blender → Kdenlive/ffmpeg dirigit per IA.
+   Reutilitza els tokens globals (--bg, --border, --accent…) i només afegeix
+   el que és propi del panell: pestanyes, graella d'orígens i mesures. */
+
+.vs-modal {
+  width: min(980px, 94vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.vs-body {
+  overflow-y: auto;
+  padding: 0 16px 12px;
+}
+
+/* ── Pestanyes ─────────────────────────────────────────────────────────────── */
+.vs-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border, #2a2a33);
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.vs-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim, #9a9aa8);
+  padding: 7px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.vs-tab.on {
+  color: var(--text, #eee);
+  border-bottom-color: var(--accent, #6c5ce7);
+}
+
+/* ── Capçalera d'eines ─────────────────────────────────────────────────────── */
+.vs-tools {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 11px;
+  color: var(--text-dim, #9a9aa8);
+  margin-bottom: 10px;
+}
+.vs-chip {
+  border: 1px solid var(--border, #2a2a33);
+  border-radius: 999px;
+  padding: 2px 8px;
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+.vs-chip.ok {
+  border-color: rgba(74, 222, 128, 0.5);
+  color: #4ade80;
+}
+.vs-chip.bad {
+  border-color: rgba(248, 113, 113, 0.5);
+  color: #f87171;
+}
+
+/* ── Graella de dos i tres camps ───────────────────────────────────────────── */
+.vs-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.vs-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+}
+@media (max-width: 720px) {
+  .vs-2,
+  .vs-3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Orígens ───────────────────────────────────────────────────────────────── */
+.vs-src {
+  border: 1px solid var(--border, #2a2a33);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+.vs-src h4 {
+  margin: 0 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  word-break: break-all;
+}
+.vs-meters {
+  display: flex;
+  gap: 10px;
+  font-size: 10px;
+  color: var(--text-dim, #9a9aa8);
+  flex-wrap: wrap;
+}
+.vs-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.vs-bar {
+  width: 42px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-3, #26262f);
+  overflow: hidden;
+}
+.vs-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--accent, #6c5ce7);
+}
+.vs-sheet {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+}
+.vs-sheet img {
+  width: 100%;
+  border-radius: 6px;
+  border: 1px solid var(--border, #2a2a33);
+}
+
+/* ── Llista de clips de l'EDL ──────────────────────────────────────────────── */
+.vs-clip {
+  border: 1px solid var(--border, #2a2a33);
+  border-left: 3px solid var(--accent, #6c5ce7);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  font-size: 11px;
+}
+.vs-clip .t {
+  color: var(--text-dim, #9a9aa8);
+}
+.vs-clip b {
+  font-weight: 600;
+}
+
+/* ── Registre i missatges ──────────────────────────────────────────────────── */
+.vs-log {
+  background: var(--bg-1, #14141a);
+  border: 1px solid var(--border, #2a2a33);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  max-height: 150px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  color: var(--text-dim, #9a9aa8);
+}
+.vs-cmd {
+  background: var(--bg-1, #14141a);
+  border: 1px solid var(--border, #2a2a33);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 10px;
+  word-break: break-all;
+  max-height: 120px;
+  overflow: auto;
+}
+.vs-msg {
+  font-size: 11.5px;
+  margin-top: 8px;
+  color: var(--text-dim, #9a9aa8);
+}
+.vs-msg.err {
+  color: #f87171;
+}
+.vs-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.vs-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border, #2a2a33);
+  background: var(--bg-2, #1a1a22);
+  font-size: 11px;
+  color: var(--text-dim, #9a9aa8);
+}
+
+/* Cau de crèdits (mateixa idea que el panell «Treball autopilotat», pero el
+   seu CSS es carrega només amb aquell menú: cada panell porta el seu). */
+.vs-credit {
+  font-size: 10.5px;
+  color: var(--text-3, #7a7a88);
+}
+.vs-credit b {
+  color: var(--text-2, #c6c6d2);
+  font-weight: 600;
+}
+
+/* ── Bloc de feina en curs (progrés + temps) ─────────────────────────────── */
+.vs-work {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border, #2a2a33);
+  border-radius: 8px;
+  background: var(--bg-2, #1a1a22);
+}
+
+/* ── Caselles de verificació ────────────────────────────────────────────── */
+.vs-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-dim, #9a9aa8);
+  cursor: pointer;
+}
+.vs-check input {
+  accent-color: var(--accent, #6c5ce7);
+}
+

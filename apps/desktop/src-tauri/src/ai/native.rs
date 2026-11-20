@@ -75,10 +75,12 @@ pub fn builtin() -> Vec<Knowledge> {
         ),
         Knowledge::new(
             "codi",
-            &["codi", "code", "program", "programacio", "rust", "tauri", "typescript", "react", "python", "compila", "error"],
+            &["codi", "code", "program", "programacio", "rust", "tauri", "typescript", "react", "python", "compila", "error", "plantilla", "plantilles", "fitxer", "fitxers"],
             "NoOrbit està fet amb Rust (Tauri v2) al backend i React + TypeScript + Zustand al frontend. \
-             Puc explicar conceptes de programació i estructura del projecte; per generar o editar fitxers del projecte, \
-             les IAs amb eines (local o en línia) materialitzen els canvis amb directrius «@file:» i «RUN|».",
+             Puc explicar conceptes de programació i estructura del projecte i, a més, PROGRAMAR de debò: \
+             demana'm «crea un component React», «fes una pàgina html», «genera un servidor python» o \
+             «crea un joc en godot» i et crearé els fitxers reals al projecte. \
+             També puc editar o esborrar fitxers si em dius exactament què canviar (p. ex. «canvia X per Y a app.py»).",
         ),
         Knowledge::new(
             "noorbit",
@@ -94,10 +96,21 @@ pub fn builtin() -> Vec<Knowledge> {
              Funciono en aquest Mac amb un cervell de coneixement que pot créixer amb l'ús i l'aprenentatge local.",
         ),
         Knowledge::new(
+            "motors de joc",
+            &["godot", "defold", "bevy", "panda3d", "motor", "motors", "videojoc", "joc", "jocs", "2d", "3d"],
+            "Sé crear projectes d'arrencada de motors de joc lliures que van bé en un Mac Intel: \
+             Godot 4 (amb el renderer Compatibility, el més equilibrat), Defold (el més lleuger), \
+             Bevy (Rust) i Panda3D (Python). Demana-m'ho: «crea un joc en godot», «fes un joc amb defold», \
+             «vull un joc bevy» o «fes una escena panda3d».",
+        ),
+        Knowledge::new(
             "ajuda",
             &["ajuda", "help", "que pots fer", "què pots fer", "com funciona", "habilitats", "capacitats"],
             "Puc: calcular expressions matemàtiques, respondre sobre el projecte i conceptes de codi, \
-             i conversar en català. El meu coneixement s'amplia amb l'aprenentatge local i quan em demanes millorar un tema.",
+             PROGRAMAR amb plantilles (component React, pàgina HTML, servidor Python/Node, motors de joc Godot/Defold/Bevy/Panda3D…), \
+             editar i esborrar fitxers del projecte quan em diguis exactament què, i conversar en català. \
+             Per a generacions llargues encarrego la feina a una IA local o en línia si n'hi ha cap disponible. \
+             El meu coneixement s'amplia amb l'aprenentatge local i quan em demanes millorar un tema.",
         ),
     ]
 }
@@ -117,6 +130,34 @@ pub fn load_brain() -> Vec<Knowledge> {
         }
     }
     brain
+}
+
+/// Digest del coneixement APRÈS (no el predefinit del binari) en text compact,
+/// perquè el LLM NEURONAL de la nativa sàpiga tot el que el motor simbòlic ha
+/// après vaguejant i amb les millores silencioses. Així el sistema
+/// d'aprenentatge (cervell après + diari del vagueig, que aboca conceptes al
+/// cervell) SERVEIX TAMBÉ al model neuronal, no només a la reserva simbòlica.
+pub fn learned_digest(max: usize) -> String {
+    let built = builtin();
+    let learned: Vec<Knowledge> = load_brain()
+        .into_iter()
+        .filter(|k| !built.iter().any(|b| same_knowledge(b, k)))
+        .collect();
+    if learned.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from(
+        "[CONEIXEMENT APRÈS] El que la IA nativa ha après vaguejant per la xarxa \
+         i en millores anteriors. Fonamenta-t'hi quan tingui relació amb la \
+         pregunta, i no ho contradiguis si és el que ja saps:",
+    );
+    // Els més recents van al final de la llista: agafa'ls a la inversa.
+    for k in learned.iter().rev().take(max.max(1)) {
+        let cont = k.content.trim();
+        let retall: String = cont.chars().take(400).collect();
+        out.push_str(&format!("\n- {}: {}", k.topic, retall));
+    }
+    out
 }
 
 /// Fusiona coneixement nou al cervell persistent (dedup) i retorna quantes
@@ -486,21 +527,80 @@ fn format_num(v: f64) -> String {
     }
 }
 
-// ── Resposta (matemàtiques → coneixement → lliçons → conversa) ────────────
+// ── Resposta (matemàtiques → plantilles → coneixement → conversa) ──────────
 
 /// Resposta de la IA nativa a un prompt. `brain` és el cervell carregat i
 /// `lessons` el bloc d'aprenentatge local injectat al system prompt (pot ser
-/// buit). Tot local, sense xarxa.
+/// buit). Tot local, sense xarxa. Si cap peça del motor cobreix la petició,
+/// torna la reserva honesta.
 pub fn answer(prompt: &str, brain: &[Knowledge], lessons: &str) -> String {
+    answer_or_none(prompt, brain, lessons).unwrap_or_else(fallback)
+}
+
+/// Resposta de la IA nativa o `None` si cap peça del motor simbòlic cobreix
+/// la petició (aleshores el xat pot encarregar la generació a una IA
+/// disponible, i si no n'hi ha cap, respondre la reserva).
+pub fn answer_or_none(prompt: &str, brain: &[Knowledge], lessons: &str) -> Option<String> {
+    // Primer, les capacitats deterministes (matemàtiques exactes, plantilles
+    // de codi, skills, informe del vagueig, resum real del projecte): són més
+    // fiables que un LLM petit, així que manen sempre.
+    if let Some(d) = deterministic(prompt, brain, lessons) {
+        return Some(d);
+    }
+    generic(prompt, brain, lessons)
+}
+
+/// Les capacitats DURAS del motor simbòlic, que han de guanyar sempre (també
+/// al LLM neuronal): càlcul exacte, generació de fitxers amb plantilla,
+/// consulta de skills, l'informe del vagueig i el resum factual del projecte.
+/// Retorna `None` si la petició és una pregunta oberta (aleshores hi pot
+/// respondre el LLM neuronal, i si no n'hi ha, el `generic`).
+pub fn deterministic(prompt: &str, _brain: &[Knowledge], _lessons: &str) -> Option<String> {
     let p = prompt.trim();
+    // Només la PREGUNTA de l'usuari: el context del projecte que el xat
+    // anteposa («PREGUNTA / TASCA:») pot contenir «blender», «render» o el
+    // nom del projecte, i segrestaria una pregunta innocent («què fa aquest
+    // projecte») amb una plantilla de codi, una skill o un informe après.
+    let q = super::project::question_of(p);
     // 1. Matemàtiques: si hi ha una expressió, la calcula de veritat.
-    if let Some(expr) = extract_math(p) {
+    if let Some(expr) = extract_math(&q) {
         if let Some(v) = eval_math(&expr) {
-            return format!("{} = {}", expr.trim(), format_num(v));
+            return Some(format!("{} = {}", expr.trim(), format_num(v)));
         }
     }
+    // 2. Programar amb plantilles: la nativa CREA fitxers reals al projecte
+    //    (motors de joc, React, HTML, servidors, Python, Rust…). Va ABANS del
+    //    cervell perquè «crea un programa en rust» dispari la PLANTILLA, no
+    //    la FAQ genèrica de codi.
+    if let Some(r) = super::codegen::starter(&q) {
+        return Some(r);
+    }
+    if let Some(r) = super::codegen::sense_plantilla(&q) {
+        return Some(r);
+    }
+    // 2b. SKILLS DE SÈRIE (ECC + builtin): si la petició anomena una skill
+    //    («com faig tdd workflow»), la nativa respon amb el seu SKILL.md.
+    if let Some(r) = super::ecc_native::answer(&q) {
+        return Some(r);
+    }
+    // 2c. QUÈ HA APRÈS SOLA: l'informe del vagueig en repòs.
+    if super::wander::informe_demana(&q) {
+        return Some(super::wander::informe());
+    }
+    // 2d. QUÈ FA AQUEST PROJECTE (l'obert al workspace): resum factual dels
+    //    fitxers reals, més fiable que un LLM de 4 GB.
+    if let Some(r) = super::project::answer(p) {
+        return Some(r);
+    }
+    None
+}
+
+/// La part tova del simbòlic: recuperació de coneixement (cervell + lliçons)
+/// i conversa. Només s'usa quan no hi ha LLM neuronal disponible.
+pub fn generic(prompt: &str, brain: &[Knowledge], lessons: &str) -> Option<String> {
+    let p = prompt.trim();
     let q: std::collections::HashSet<String> = crate::learning::tokens(p).into_iter().collect();
-    // 2. Coneixement del cervell i 3. aprenentatge local: es comparen ELS DOS
+    // 3. Coneixement del cervell i 4. aprenentatge local: es comparen ELS DOS
     // i guanya el que cobreix més paraules de la pregunta. Les lliçons van
     // abans en cas d'empat perquè són dades CONCRETES de l'usuari, mentre que
     // el cervell predefinit és documentació genèrica de NoOrbit.
@@ -519,22 +619,37 @@ pub fn answer(prompt: &str, brain: &[Knowledge], lessons: &str) -> String {
         .unwrap_or(0);
     if let Some(line) = &lesson_hit {
         if covered(line, &q) >= brain_cov {
-            return format!("Segons el que he après: {}", line);
+            return Some(format!("Segons el que he après: {}", line));
         }
     }
     if let Some(k) = brain_hit {
-        return k.content.clone();
+        return Some(k.content.clone());
     }
-    // 4. Conversa (salutacions, agraïments, comiat).
+    // 5. Conversa (salutacions, agraïments, comiat).
     if let Some(reply) = small_talk(p) {
-        return reply.to_string();
+        return Some(reply.to_string());
     }
-    // 5. Reserva honesta: el motor natiu no genera text lliure com un LLM.
+    // 6. Res a dir: el xat prova la delegació a una IA disponible o respon
+    //    la reserva honesta (el motor natiu no genera text lliure com un LLM).
+    None
+}
+
+/// Reserva honesta: ni el motor simbòlic ni cap IA disponible cobreixen la
+/// petició.
+pub fn fallback() -> String {
     "Sóc la IA nativa de NoOrbit (motor integrat, sense descàrregues). Puc calcular \
-     expressions matemàtiques i respondre sobre el projecte, codi i el meu funcionament. \
-     Per a tasques de generació llarga o edició de fitxers, tria una IA local (Ollama) o en \
-     línia al selector de proveïdors. Si vols que amplïi el meu coneixement sobre un tema, \
-     demana-m'ho (p. ex. «millora el context matemàtic»)."
+     expressions matemàtiques, respondre sobre el projecte i el codi, crear fitxers amb les \
+     meves plantilles (components React, pàgines HTML, servidors Python/Node, motors de joc \
+     com Godot, Defold, Bevy o Panda3D…), dissenyar escenes i animacions en Blender i \
+     projectes lleugers d'Unreal, i editar o esborrar fitxers del projecte quan em \
+     diguis exactament què canviar. També consulte les skills d'ECC que venen de sèrie \
+     (digues «quines skills ecc tens» o anomena'n una, p. ex. «tdd workflow»). A més, quan el programa està en repòs i la RAM és lliure, \
+     navego SOLA i aprèn de contingut lliure (StackOverflow, la Viquipèdia, pàgines públiques): \
+     pregunta’m «què has après» per veure el diari. Aquesta petició demana una generació \
+     lliure que el meu motor simbòlic no pot fer, i ara mateix no hi ha cap IA local ni en \
+     línia disponible per encarregar-l'hi: engega Ollama (o connecta un proveïdor) i \
+     torna-ho a demanar. Si vols que amplïi el meu coneixement sobre un tema, demana-m'ho \
+     (p. ex. «millora el context matemàtic»)."
         .to_string()
 }
 
@@ -839,6 +954,21 @@ mod tests {
     }
 
     #[test]
+    fn el_context_no_segresta_la_pregunta() {
+        // El context del projecte pot esmentar «blender», «render» o el nom
+        // del projecte: una pregunta innocent no ha de disparar cap plantilla
+        // ni cap skill («què fa aquest projecte» ha de descriure el projecte,
+        // no crear fitxers).
+        let amb_context = "Context: carpeta blender/, render EEVEE, NoOrbit i godot.\n\n---\nPREGUNTA / TASCA:\nquè fa aquest projecte";
+        let r = deterministic(amb_context, &[], "");
+        assert!(r.as_deref().map(|x| !x.contains("@file:")).unwrap_or(true), "{:?}", r);
+        // Una ORDRE amb context sí que dispara la plantilla corresponent.
+        let ordre = "Context: projecte amb godot.\n\n---\nPREGUNTA / TASCA:\nfes una escena en blender";
+        let r = deterministic(ordre, &[], "");
+        assert!(r.as_deref().map(|x| x.contains("@file: blender/")).unwrap_or(false), "{:?}", r);
+    }
+
+    #[test]
     fn fa_servir_les_llissons_apreses() {
         let brain = builtin();
         let lessons = "[APRENENATGE LOCAL] Lliçons:\n- L'usuari treballa amb Rust i Tauri (rust, projecte)";
@@ -902,5 +1032,15 @@ mod tests {
         assert_eq!(loaded.len(), 1);
         assert!(same_knowledge(&loaded[0], &k));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn digest_del_cervell_apres_es_compacte() {
+        // Sense cervell après el digest és buit; amb un, comença pel capçalera
+        // i NO inclou mai el coneixement predefinit del binari.
+        let buit = learned_digest(12);
+        assert!(buit.is_empty() || buit.starts_with("[CONEIXEMENT APRÈS]"));
+        // El predefinit («noorbit», «identitat»…) no ha d'aparèixer com après.
+        assert!(!buit.contains("Sóc la IA nativa de NoOrbit"));
     }
 }

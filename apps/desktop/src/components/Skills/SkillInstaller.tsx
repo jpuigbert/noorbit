@@ -16,6 +16,7 @@ import {
   FolderPlus,
   AlertTriangle,
   ShieldAlert,
+  Sparkles,
 } from "lucide-react";
 import { useT } from "../../i18n";
 import { useSkillStore, type SkillPreview } from "../../stores/skillStore";
@@ -42,6 +43,7 @@ export default function SkillInstaller() {
     skills,
     busy,
     lastError,
+    lastErrorDetail,
     load,
     reload,
     installGithub,
@@ -57,6 +59,7 @@ export default function SkillInstaller() {
       skills: st.skills,
       busy: st.busy,
       lastError: st.lastError,
+      lastErrorDetail: st.lastErrorDetail,
       load: st.load,
       reload: st.reload,
       installGithub: st.installGithub,
@@ -81,6 +84,9 @@ export default function SkillInstaller() {
   const [searching, setSearching] = useState(false);
   // ── Importació de VS Code (comandes + fragments de les extensions) ──
   const [vscodeBusy, setVscodeBusy] = useState(false);
+  // ── ECC (affaan-m): importació d'un clic amb consentiment previ ──
+  const [eccBusy, setEccBusy] = useState(false);
+  const [eccConfirm, setEccConfirm] = useState(false);
   // ── Consentiment: preview de la skill ABANS d'instal·lar-la ──
   const [previewData, setPreviewData] = useState<SkillPreview | null>(null);
   const [pending, setPending] = useState<{ kind: Source; source: string } | null>(null);
@@ -205,6 +211,29 @@ export default function SkillInstaller() {
     if (n !== null) setInfo(t(okKey, { n }));
   };
 
+  // ECC: ja ve DE SÈRIE (sembrat a l'arrencada des de ecc-builtin/). Aquest
+  // botó el reimporta de la còpia local del bundle (sense xarxa): skills
+  // (carpeta ecc/), agents com a especialistes i regles comunes. Els
+  // hooks/MCP d'ECC NO s'executen.
+  const importEcc = async () => {
+    setEccConfirm(false);
+    setEccBusy(true);
+    setInfo(t("skills.eccBusy"));
+    try {
+      const rep = await invoke<{ skills: number; agents: number; rules: number }>("ecc_install");
+      setInfo(
+        rep.skills > 0 || rep.agents > 0
+          ? t("skills.eccOk", { skills: rep.skills, agents: rep.agents, rules: rep.rules })
+          : t("skills.eccFail"),
+      );
+      await reload();
+    } catch {
+      setInfo(t("skills.eccFail"));
+    } finally {
+      setEccBusy(false);
+    }
+  };
+
   const exportTargets: { key: string; label: string; dir: string; disabled?: boolean }[] = [
     { key: "opencode", label: t("skills.exportOpencode"), dir: "~/.config/opencode/skills" },
     { key: "claude", label: t("skills.exportClaude"), dir: "~/.claude/skills" },
@@ -326,11 +355,12 @@ export default function SkillInstaller() {
         </button>
         {lastError && (
           <div className="si-error">
-            {lastError === "export"
-              ? t("skills.exportFail")
-              : lastError === "restore"
-                ? t("skills.restoreFail")
-                : t("skills.installFail")}
+            {lastErrorDetail ??
+              (lastError === "export"
+                ? t("skills.exportFail")
+                : lastError === "restore"
+                  ? t("skills.restoreFail")
+                  : t("skills.installFail"))}
           </div>
         )}
         {info && <div className="si-info">{info}</div>}
@@ -433,7 +463,45 @@ export default function SkillInstaller() {
             {vscodeBusy ? t("skills.vscodeBusy") : t("skills.vscodeImport")}
           </button>
         </div>
+        {/* COMPATIBILITAT ECC: el sistema d'optimització per a agents
+            d'affaan-m, DE SÈRIE a NoOrbit; aquest botó el reimporta de la
+            còpia local del bundle (o clona la font oficial si no hi és). */}
+        <div className="si-export">
+          <Sparkles size={12} />
+          <span>ECC · affaan-m</span>
+          <button
+            className="btn sm"
+            disabled={eccBusy || busy}
+            onClick={() => setEccConfirm(true)}
+          >
+            {eccBusy ? t("skills.eccBusy") : t("skills.eccImport")}
+          </button>
+        </div>
       </div>
+
+      {/* ── CONSENTIMENT ECC: què s'importa i què NO s'executa ── */}
+      {eccConfirm && (
+        <div className="si-preview">
+          <div className="si-preview-head">
+            <ShieldAlert size={14} />
+            <span>{t("skills.eccTitle")}</span>
+          </div>
+          <div className="si-preview-desc">{t("skills.eccDesc")}</div>
+          <div className="si-preview-warns">
+            <div className="si-warn">
+              <AlertTriangle size={12} /> {t("skills.eccNote")}
+            </div>
+          </div>
+          <div className="si-preview-actions">
+            <button className="btn primary sm" disabled={eccBusy} onClick={() => void importEcc()}>
+              <FolderPlus size={12} /> {t("skills.eccConfirm")}
+            </button>
+            <button className="btn sm ghost" onClick={() => setEccConfirm(false)}>
+              {t("skills.cancel")}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="si-list-head">
         <span>{t("skills.installed")}</span>

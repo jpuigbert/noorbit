@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Plus, Trash2, Zap, Star, Pencil, Loader2, Power, Cpu } from "lucide-react";
 import { useT } from "../../i18n";
@@ -30,16 +30,54 @@ const isLocal = (url: string): boolean =>
 
 /// Preconfiguracions d'un sol clic: omplin el formulari amb la URL i el
 /// model adequats perquè l'usuari només hi enganxe el token.
-export const PRESETS: { key: string; label: string; data: Partial<ProviderInput> }[] = [
+/// `models` és la llista de noms que el servei reconeix AVUI (nov 2026):
+/// escriure'n un de vell («claude-3-5-sonnet», «deepseek-chat») és el que feia
+/// que Claude i DeepSeek «no funcionessin» encara que la clau fos bona.
+export type Preset = {
+  key: string;
+  label: string;
+  data: Partial<ProviderInput>;
+  /// Buit = NoOrbit no en coneix cap llista fiable; aleshores el camp de
+  /// model queda com a text lliure (proposar un nom vell fa més mal que
+  /// no proposar-ne cap).
+  models?: string[];
+};
+
+const CLAUDE_MODELS = [
+  "claude-sonnet-5-5",
+  "claude-opus-5-5",
+  "claude-haiku-5-5",
+  "claude-sonnet-5",
+  "claude-opus-4-8",
+  "claude-opus-4-6",
+  "claude-sonnet-4-5",
+  "claude-haiku-4-5",
+];
+
+const DEEPSEEK_MODELS = ["deepseek-flash", "deepseek-v4-pro"];
+
+export const PRESETS: Preset[] = [
   {
     key: "openai",
     label: "OpenAI",
     data: { name: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", kind: "openai", auth: "bearer" },
   },
   {
+    // Claude (Anthropic): l'API oficial NO és compatible amb OpenAI. Tres
+    // detalls la fan anar o no: la base amb «/v1», el tipus «anthropic» i la
+    // clau a la capçalera «x-api-key» (Anthropic rebutja «Bearer»). Abans
+    // aquest preset deia «bearer» i un model antic: d'aquí el «no funciona».
     key: "claude",
     label: "Claude (Anthropic)",
-    data: { name: "Claude", baseUrl: "https://api.anthropic.com", model: "claude-sonnet-4-5", kind: "anthropic", auth: "bearer" },
+    data: {
+      name: "Claude (Anthropic)",
+      baseUrl: "https://api.anthropic.com/v1",
+      model: "claude-sonnet-5-5",
+      kind: "anthropic",
+      auth: "header",
+      headerName: "x-api-key",
+    },
+    models: CLAUDE_MODELS,
   },
   {
     key: "ollamacloud",
@@ -67,9 +105,28 @@ export const PRESETS: { key: string; label: string; data: Partial<ProviderInput>
   {
     // DeepSeek: API compatible amb OpenAI. No queda configurada fins que
     // l'usuari hi enganxe el seu token (creat al seu compte de DeepSeek).
+    // La base documentada ja no porta «/v1» i el model «deepseek-chat» és el
+    // nom antic: avui és «deepseek-flash».
     key: "deepseek",
     label: "DeepSeek",
-    data: { name: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-chat", kind: "openai", auth: "bearer" },
+    data: { name: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-flash", kind: "openai", auth: "bearer" },
+    models: DEEPSEEK_MODELS,
+  },
+  {
+    // DeepSeek també exposa una entrada d'estil Anthropic (mateix token, la
+    // clau del mateix compte hi serveix). Amb el format Claude funciona amb
+    // tot el que fa servir Anthropic: clients, eines i l'harness «dsh».
+    key: "deepseek-anthropic",
+    label: "DeepSeek (format Claude)",
+    data: {
+      name: "DeepSeek (format Claude)",
+      baseUrl: "https://api.deepseek.com/anthropic",
+      model: "deepseek-flash",
+      kind: "anthropic",
+      auth: "header",
+      headerName: "x-api-key",
+    },
+    models: DEEPSEEK_MODELS,
   },
   {
     // Perplexity: API oficial (compatible amb OpenAI) de cerca web amb
@@ -94,6 +151,21 @@ export const PRESETS: { key: string; label: string; data: Partial<ProviderInput>
     },
   },
 ];
+
+export function presetModelsFor(baseUrl: string, model = ""): string[] {
+  const low = baseUrl.trim().toLowerCase();
+  if (!low) return model ? [model] : [];
+  const exact = PRESETS.find((x) => (x.data.baseUrl ?? "").toLowerCase() === low);
+  let list: string[] = exact?.models ?? [];
+  if (list.length === 0) {
+    // El preset no hi és (l'usuari ha escrit la URL a mà), però el SERVEI el
+    // coneixem: la llista va per domini, no pel botó premut.
+    if (low.includes("anthropic.com")) list = CLAUDE_MODELS;
+    else if (low.includes("deepseek.com")) list = DEEPSEEK_MODELS;
+  }
+  if (model && !list.includes(model)) return [model, ...list];
+  return list;
+}
 
 export default function ProviderManager() {
   const { t } = useT();
@@ -140,6 +212,17 @@ export default function ProviderManager() {
   }, [load]);
 
   const set = (patch: Partial<ProviderInput>) => setForm((f) => ({ ...f, ...patch }));
+
+  // Suggiments del camp «Model»: els del servei escollit; si no en sabem res
+  // però la URL és el núvol d'Ollama, la seva llista de models gratuïts.
+  const modelOptions = useMemo(() => {
+    const list = presetModelsFor(form.baseUrl, form.model);
+    if (list.length > 0) return list;
+    if (form.baseUrl.toLowerCase().includes("ollama.com")) {
+      return allCloudModels().map((m) => m.name);
+    }
+    return [];
+  }, [form.baseUrl, form.model]);
 
   const startEdit = (id: string) => {
     const p = providers.find((x) => x.id === id);
@@ -313,17 +396,21 @@ export default function ProviderManager() {
         </div>
         <div className="field">
           <label>{t("providers.model")}</label>
-          {/* El camp admet qualsevol nom escrit a mà; el «datalist» ofereix els
-              models gratuïts del núvol d'Ollama com a suggeriments. */}
+          {/* El camp admet qualsevol nom escrit a mà; els suggeriments són els
+              models que el servei d'aquesta URL reconeix avui (Claude,
+              DeepSeek…) o, si és el núvol d'Ollama, els seus gratuïts. */}
           <input
-            list="noorbit-cloud-models"
+            list="noorbit-model-options"
             value={form.model}
             onChange={(e) => set({ model: e.target.value })}
-            placeholder="gpt-4o-mini"
+            placeholder="claude-sonnet-5-5"
           />
-          <datalist id="noorbit-cloud-models">
-            {allCloudModels().map((m) => (
-              <option key={m.name} value={m.name} />
+          {modelOptions.length > 0 && (
+            <div className="lp-hint">{t("providers.modelOptions")}</div>
+          )}
+          <datalist id="noorbit-model-options">
+            {modelOptions.map((m) => (
+              <option key={m} value={m} />
             ))}
           </datalist>
         </div>

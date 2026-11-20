@@ -187,7 +187,8 @@ export const AGENT_CREATION_SYSTEM =
   "@use: NomAgent | tasca concreta que ha de resoldre\n" +
   "NoOrbit llançarà ESE agent (un model local) perquè treballe en la seua " +
   "part ARA MATEIX, i et retornarà la seua solució ací mateix perquè la " +
-  "CONSOLIDIS amb la resta del teu treball. Usa el NOM exacte de l'especialista. " +
+  "CONSOLIDIS amb la resta del teu treball. Usa el NOM exacte de l'especialista " +
+  "(NoOrbit te'n dona la llista real quan n'hi ha; MAI inventis noms). " +
   "Pots delegar diverses subtasques en diversos agents al mateix missatge.\n\n" +
   "LLISTA DE TASQUES (per no perdre't ni tu ni els agents): manté un checklist. " +
   "Quan identifiques una tasca pendient, afegeix-la amb una línia:\n" +
@@ -285,3 +286,32 @@ export const CONSOLIDATION_SYSTEM =
   "feina és CONSOLIDAR-LES: integra-les en una única resposta final coherent, " +
   "resol incoherències entre agents i completa el que els falti. No delegues " +
   "de nou. Respon en català i, si generes codi, usa el format «@file: ruta».";
+
+/// Bloc compacte que s'injjecta DAMUNT del system prompt quan hi ha
+/// especialistes creats: la llista REAL amb els seus noms exactes. Sense
+/// això la IA no pot delegar — les instruccions diuen «usa el nom exacte»
+/// però el model no ha vist mai cap nom, i per això mai emetia «@use:».
+/// Per a models petits (COMPACT_SYSTEM) només va aquest bloc, sense la
+/// nota llarga d'agents.
+export function rosterContext(
+  experts: { name: string; role: string }[],
+  selfName?: string,
+): string {
+  const others = selfName
+    ? experts.filter((e) => e.name.trim().toLowerCase() !== selfName.trim().toLowerCase())
+    : experts;
+  if (others.length === 0) return "";
+  const lines = others
+    .slice(0, 12)
+    .map((e) => `• ${e.name}${e.role ? ` — ${e.role}` : ""}`)
+    .join("\n");
+  return (
+    "ESPECIALISTES DISPONIBLES (els TEUS EQUIPS — treballa amb ells, no sol):\n" +
+    lines +
+    "\nQuan la tasca toqui el domini d'un d'ells, DELEGA-HI la subtasca emetent " +
+    "una línia amb el seu nom EXACTE:\n@use: NomExacte | tasca concreta\n" +
+    "NoOrbit l'executarà ara mateix i et tornarà la solució per consolidar-la. " +
+    "Si cap expert existeix per a una part clau, crea'l amb «@agent:» i delega-hi " +
+    "al mateix missatge.\n\n"
+  );
+}

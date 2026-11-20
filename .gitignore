@@ -10,8 +10,14 @@ apps/desktop/src-tauri/gen/
 # fer doble clic i instal·lar; es genera amb `pnpm installers`.
 /NoOrbit-Instalador/
 
-# Clon local de la wiki (repo git separat, no forma part del codi)
+# Clon local de la wiki (repo git separat, no forma part del codi):
+# el repo pare no enllaça res — el clone es fa amb
+#   git clone https://github.com/jpuigbert/noorbit.wiki.git .wiki-edit
+/.wiki-edit/
 /.wiki-staging/
+
+# Wiki autogenerada de Qoder (repowiki): és una sortida de l'eina, no codi.
+/.qoder/
 
 # descarregats temporals dels artefactes de CI per a penjar-los al Release
 /.release-dl/
@@ -26,3 +32,16 @@ promo/chk/
 promo/build/vo/
 promo/build/audio/
 promo/package-lock.json
+
+# Model GGUF i motor llama.cpp empaquetats per a la IA NATIVA neuronal.
+# S'obtenen amb `pnpm native:model` (scripts/fetch-native-model.mjs) i van als
+# recursos de l'instal·lador. NO es committen (pesen); es conserva només el
+# LLEGEIX-ME.md perquè el directori existeixi quan Tauri l'empaqueta.
+apps/desktop/src-tauri/native-model/*
+apps/desktop/src-tauri/native-engine/*
+!apps/desktop/src-tauri/native-model/LLEGEIX-ME.md
+!apps/desktop/src-tauri/native-engine/LLEGEIX-ME.md
+
+# Proves brutes de verificació d'ffmpeg/MLT (filtres provats a mà). La prova
+# bona ja viu com a test `#[ignore]` a src/video/render.rs.
+.tmp-video-check/

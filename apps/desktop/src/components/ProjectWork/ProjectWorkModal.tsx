@@ -35,6 +35,11 @@ import "./ProjectWorkModal.css";
 
 const LOCAL = "local|";
 const PROV = "prov|";
+/// IA nativa integrada al binari («noorbit_native»): sense descàrregues ni
+/// claus. El backend la reconeix a chat_inner i respon amb el motor simbòlic
+/// (que delega les generacions llargues en qualsevol IA disponible).
+const NATIVE = "nat|";
+const NATIVE_ID = "noorbit_native";
 /// Opció «Personalitzat»: temps exacte (valor + unitat), com a la Jam i WordPress.
 const CUSTOM = -1;
 
@@ -72,7 +77,6 @@ export default function ProjectWorkModal() {
   const models = useAIStore((s) => s.models);
   const loadModels = useAIStore((s) => s.loadModels);
   const providers = useProviderStore((s) => s.providers);
-  const active = useProviderStore((s) => s.active);
   const loadProviders = useProviderStore((s) => s.load);
 
   const [projectPath, setProjectPath] = useState<string | null>(null);
@@ -99,20 +103,25 @@ export default function ProjectWorkModal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show]);
 
-  /// IA per defecte: el model local si n'hi ha; si no, el proveïdor actiu.
+  /// IA per defecte: el model local si n'hi ha; si no, la IA NATIVA integrada
+  /// (sempre funciona, sense tokens); els proveïdors actius queden triables.
   useEffect(() => {
     if (ai) return;
     if (models.length > 0) {
       setAi(LOCAL + models[0].name);
       return;
     }
-    if (active) setAi(PROV + active);
+    setAi(NATIVE + NATIVE_ID);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [models, active]);
+  }, [models]);
 
   /// L'IA triada es resol en (proveïdor, model) per als arguments del backend.
   const resolveAi = useMemo((): { provider: string | undefined; model: string | undefined } => {
     if (ai.startsWith(LOCAL)) return { provider: "ollama", model: ai.slice(LOCAL.length) };
+    if (ai.startsWith(NATIVE)) {
+      const nat = providers.find((x) => x.kind === "native");
+      return { provider: NATIVE_ID, model: nat?.model };
+    }
     if (ai.startsWith(PROV)) {
       const p = providers.find((x) => x.id === ai.slice(PROV.length));
       return { provider: p?.id, model: p?.model };
@@ -228,6 +237,10 @@ export default function ProjectWorkModal() {
               disabled={running}
               onChange={(e) => setAi(e.target.value)}
             >
+              {/* La IA integrada va primer de tot: funciona amb tot instal·lat. */}
+              <optgroup label={t("projectWork.aiNativeGroup")}>
+                <option value={NATIVE + NATIVE_ID}>{t("projectWork.aiNativeOption")}</option>
+              </optgroup>
               {models.length > 0 && (
                 <optgroup label={t("wpTheme.aiLocal")}>
                   {models.map((m) => (
@@ -237,20 +250,22 @@ export default function ProjectWorkModal() {
                   ))}
                 </optgroup>
               )}
-              {providers.length > 0 && (
+              {providers.filter((p) => p.kind !== "native").length > 0 && (
                 <optgroup label={t("wpTheme.aiCloud")}>
-                  {providers.map((p) => (
-                    <option key={p.id} value={PROV + p.id}>
-                      {p.name} · {p.model}
-                      {p.has_token ? "" : ` (${t("wpTheme.noToken")})`}
-                    </option>
-                  ))}
+                  {providers
+                    .filter((p) => p.kind !== "native")
+                    .map((p) => (
+                      <option key={p.id} value={PROV + p.id}>
+                        {p.name} · {p.model}
+                        {p.has_token ? "" : ` (${t("wpTheme.noToken")})`}
+                      </option>
+                    ))}
                 </optgroup>
               )}
             </select>
-            {models.length === 0 && providers.length === 0 && (
+            {models.length === 0 && providers.filter((p) => p.kind !== "native" && p.has_token).length === 0 && (
               <div className="lp-hint" style={{ marginTop: 4 }}>
-                {t("projectWork.aiNone")}
+                {t("projectWork.aiNativeOnlyHint")}
               </div>
             )}
           </div>

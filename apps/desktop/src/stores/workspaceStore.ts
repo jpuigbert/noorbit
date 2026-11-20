@@ -20,6 +20,9 @@ export interface OpenFile {
   /// Ruta absoluta si el fitxer obert és una IMATGE: l'editor la mostra com a
   /// previsualització (no la llegeix com a text, eixiria basura).
   imagePath?: string;
+  /// Ruta absoluta si el fitxer obert és un VÍDEO: l'editor el reprodueix
+  /// dins del programa (no el llegeix com a text).
+  videoPath?: string;
 }
 
 interface WorkspaceState {
@@ -67,6 +70,13 @@ let loadFileSeq = 0;
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp|ico|tiff?|heic|avif)$/i;
 export function isImagePath(path: string): boolean {
   return IMAGE_EXT.test(path);
+}
+
+/// Extensions de vídeo que l'editor ha de reproduir dins del programa, no
+/// llegir-les com a text (eixiria basura binària).
+const VIDEO_EXT = /\.(mp4|mov|mkv|webm|avi|m4v|mts|m2ts|f4v)$/i;
+export function isVideoPath(path: string): boolean {
+  return VIDEO_EXT.test(path);
 }
 
 function loadRecents(): string[] {
@@ -171,6 +181,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           content: "",
           dirty: false,
           imagePath: path,
+        },
+      });
+      return;
+    }
+    // Els vídeos NO es llegeixen com a text: es marquen perquè l'editor els
+    // reprodueixi dins del programa (Monaco mostraria bytes binaris sense sentit).
+    if (isVideoPath(path)) {
+      if (myCall !== loadFileSeq) return;
+      set({
+        openFile: {
+          path,
+          name: path.split(/[/\\]/).pop() ?? path,
+          content: "",
+          dirty: false,
+          videoPath: path,
         },
       });
       return;

@@ -175,6 +175,13 @@ pub enum Progress {
     TaskError { id: String, error: String },
     TaskBlocked { id: String, error: String },
     MemoryPressure { id: String, peak_bytes: u64 },
+    /// Què està fent la IA ARA mateix dins d'una tasca (p. ex. «cercant a
+    /// internet…», «generant codi…»). Va a la UI perquè l'usuari vegi que
+    /// la Jam està viva, no penjada.
+    Note { id: String, text: String },
+    /// Extracte del raonament del model (prosa + línia RESUM, sense blocs de
+    /// codi). És el «procés de pensament» que l'usuari vol veure.
+    Thinking { id: String, text: String },
     Compacted,
     Finished,
 }
@@ -255,9 +262,21 @@ impl JamDeps {
 pub struct JamConfig {
     pub task_memory_budget_bytes: u64,
     pub max_memory_failures_per_task: u32,
+    /// Temps màxim d'UNA intent de worker (generar + escriure els fitxers).
+    /// Amb models locals sobre CPU (un Mac intel amb pocs nuclis) un fitxer
+    /// de 300 línies pot tardar MOLTS minuts: amb un sostre baix (abans eren
+    /// 5 minuts fixes) TODUS els intents morien en timeout, la tasca es
+    /// bloquejava i la Jam acabava sense haver escrit codi.
+    pub worker_timeout: Duration,
 }
 impl Default for JamConfig {
-    fn default() -> Self { Self { task_memory_budget_bytes: 6*1024*1024*1024, max_memory_failures_per_task: 2 } }
+    fn default() -> Self {
+        Self {
+            task_memory_budget_bytes: 6*1024*1024*1024,
+            max_memory_failures_per_task: 2,
+            worker_timeout: Duration::from_secs(45 * 60),
+        }
+    }
 }
 
 pub struct JamRuntime {
@@ -315,7 +334,6 @@ impl Drop for JamRuntime {
 }
 
 const MAX_ATTEMPTS_PER_TASK: u32 = 3;
-const WORKER_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const VERIFY_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const APPLY_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_DIFF_LINES: usize = 500;
@@ -387,7 +405,7 @@ async fn run_inner(
             let worker_result = tokio::select! {
                 biased;
                 _ = rt.cancelled() => { guard.stop(); stats.skipped += (plan.tasks.len() - idx) as u32; break 'outer; }
-                r = tokio::time::timeout(WORKER_TIMEOUT, deps.worker.run(task, &ctx)) => r,
+                r = tokio::time::timeout(cfg.worker_timeout, deps.worker.run(task, &ctx)) => r,
             };
             let peak = guard.peak_bytes();
             guard.stop(); let _ = guard.join().await;

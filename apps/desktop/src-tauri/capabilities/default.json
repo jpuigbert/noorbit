@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capacitats per defecte de NoOrbit. fs:allow-read-file/write-file són les comandes BINÀRIES del plugin fs (la captura del viewport d'Unreal llegeix el PNG amb readFile binari); l'scope «**» cobreix totes les rutes. Les finestres «noorbit-chat» i «noorbit-terminal» són els PANELLS SEPARATS (xat i terminal posables a qualsevol pantalla): comparteixen capacitats amb «main» perquè el xat hi ha de funcionar igual.",
-  "windows": ["main", "noorbit-chat", "noorbit-terminal"],
+  "windows": ["main", "noorbit-chat", "noorbit-terminal", "noorbit-screensaver"],
   "permissions": [
     "core:default",
     "core:window:allow-close",

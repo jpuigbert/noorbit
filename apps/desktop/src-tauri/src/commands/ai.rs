@@ -663,6 +663,7 @@ pub async fn send_prompt(
         model,
         history: history.unwrap_or_default(),
         images: images.unwrap_or_default(),
+        long_run: false,
     };
     // Dins del xat: els events i la cancel·lació són d'aquell xat, no globals.
     chat_with_tools(
@@ -699,6 +700,7 @@ pub async fn ai_chat_plain(
         model,
         history: Vec::new(),
         images: Vec::new(),
+        long_run: false,
     };
     ai.chat_opts(&prompt, system.as_deref(), &opts)
         .await
@@ -730,6 +732,7 @@ pub async fn send_prompt_stream(
         model,
         history: history.unwrap_or_default(),
         images: images.unwrap_or_default(),
+        long_run: false,
     };
     // També en streaming: si el model escriu directrius «NB|…» o «RUN|…»,
     // s'executen i la segona resposta continua al mateix xat (els chunks
@@ -809,8 +812,13 @@ pub async fn ollama_pull_model(
     app: AppHandle,
     state: State<'_, AppState>,
     name: String,
+    // Segon clic conscient quan l'encaix diu que NO hi cap: baixa'l igualment.
+    force: Option<bool>,
 ) -> Result<String, String> {
     use tauri::Emitter;
+    if force == Some(true) {
+        crate::ai::AiManager::autoritza_baixada(&name);
+    }
     // Abans de descarregar: si hi ha un disc extern configurat, assegurem que el
     // servidor l'utilitzi (si cal, l'arrenca o el reinicia amb OLLAMA_MODELS).
     // Sense això, un Ollama en marxa iniciat des del Finder baixaria els
@@ -881,6 +889,74 @@ pub async fn ollama_set_keep_alive(
 #[command]
 pub async fn ollama_suggested_models() -> Result<Vec<serde_json::Value>, String> {
     Ok(AiManager::suggested_models())
+}
+
+/// PREDICCIÓ D'ENCAIX d'un model concret en aquest equip (idea de `soup
+/// doctor` / hardware-fit): la interfície la consulta per als resultats de
+/// cerca que NoOrbit no té a la seva taula, així el xip «NO hi cap» apareix
+/// ABANS de prémer «Baixa». Sense mida ni RAM no es fingeix res: el veredicte
+/// és «desconegut» i el motiu diu què falta.
+#[command]
+pub async fn ai_fit_check(
+    name: Option<String>,
+    size_bytes: Option<u64>,
+) -> Result<serde_json::Value, String> {
+    let mida = size_bytes.or_else(|| name.as_deref().and_then(AiManager::mida_sugerida));
+    let e = crate::ai::fit::comprova(
+        mida,
+        crate::ai::fit::ram_total_aqui(),
+        crate::ai::fit::ram_lliure_aqui(),
+        crate::ai::fit::CONTEXT_ESTIMAT,
+    );
+    // S'hi afegeix l'etiqueta curta: els xips de la UI (Hugging Bay) mostren el
+    // mateix text que el catàleg, i el text el decideix `ai::fit`, no el front.
+    let mut v = e.to_json();
+    if let Some(o) = v.as_object_mut() {
+        o.insert(
+            "etiqueta".to_string(),
+            serde_json::Value::String(e.etiqueta()),
+        );
+    }
+    Ok(v)
+}
+
+/// Encaix d'un model de Hugging Bay ABANS de baixar-lo. La mida real és la del
+/// fitxer GGUF; si el mirror a més dona la seva xifra de RAM, es respecta (diu
+/// més que la nostra aproximació). `None` = es pot baixar; `Some(missatge)` =
+/// no hi cap i cal un segon clic conscient.
+fn encaix_bay(det: &crate::ai::hf_bay::BayDetails, force: Option<bool>) -> Option<String> {
+    use crate::ai::fit;
+    if force == Some(true) {
+        return None;
+    }
+    let mida = det
+        .recommended
+        .as_ref()
+        .and_then(|f| f.size)
+        .or(det.model.size);
+    let e = fit::comprova(
+        mida,
+        fit::ram_total_aqui(),
+        fit::ram_lliure_aqui(),
+        fit::CONTEXT_ESTIMAT,
+    );
+    // El mirror també calcula quanta RAM demana: si en demana més del sostre
+    // d'aquest equip, tampoc hi cap (i ho diu ell, no ho endevinem nosaltres).
+    let demana = det.ram_gb.filter(|g| *g > 0);
+    let demaisa = demana.map(|g| (g * 1_000_000_000) > e.sostre && e.sostre > 0);
+    if e.verdicte == fit::Verdicte::NoCap || demaisa == Some(true) {
+        let mut m = e.missatge();
+        if demaisa == Some(true) {
+            m = format!(
+                "{} La font demana {} GB de RAM per aquest model.",
+                m,
+                demana.unwrap_or(0)
+            );
+        }
+        Some(format!("{} Prem de nou per baixar-lo IGUALMENT.", m))
+    } else {
+        None
+    }
 }
 
 /// Llista/cerca models al NÚVOL d'ollama.com. No requereix Ollama en marxa
@@ -1207,6 +1283,8 @@ pub async fn hf_bay_install_native(
     app: AppHandle,
     id: String,
     quant: Option<String>,
+    // Segon clic conscient quan l'encaix diu que el model NO hi cap.
+    force: Option<bool>,
 ) -> Result<BayDownloadResult, String> {
     use tauri::Emitter;
     let http = state.ai_manager.http_client();
@@ -1223,6 +1301,12 @@ pub async fn hf_bay_install_native(
             .await
             .map_err(|e| e.to_string())?;
         if let Some(w) = crate::ai::hf_bay::avisa_si_no_xateja(&det.model) {
+            return Err(w);
+        }
+        // I ARA S'HI CAP? Es comprova ABANS de baixar un GGUF de gigabytes que
+        // aquest equip no podrà mai carregar (el motor natiu llama.cpp no té
+        // el marge d'Ollama: necessita el model + el context a la RAM).
+        if let Some(w) = encaix_bay(&det, force) {
             return Err(w);
         }
     }
@@ -1316,6 +1400,8 @@ pub async fn hf_bay_download(
     app: AppHandle,
     id: String,
     quant: Option<String>,
+    // Segon clic conscient quan l'encaix diu que el model NO hi cap.
+    force: Option<bool>,
 ) -> Result<BayDownloadResult, String> {
     use tauri::Emitter;
     let http = state.ai_manager.http_client();
@@ -1325,6 +1411,11 @@ pub async fn hf_bay_download(
     // Abans de baixar res: el model serveix per XATAR? (els d'embeddings
     // ocupen centenars de MB i no serveixen per a res dins de NoOrbit).
     if let Some(w) = crate::ai::hf_bay::avisa_si_no_xateja(&det.model) {
+        return Err(w);
+    }
+    // I ARA S'HI CAP a la RAM d'aquest equip? Es diu ABANS de gastar la
+    // descàrrega, no cinc minuts després de carregar-lo.
+    if let Some(w) = encaix_bay(&det, force) {
         return Err(w);
     }
     let file = det
@@ -2275,8 +2366,24 @@ pub async fn ia_catalog(state: State<'_, AppState>) -> Result<Vec<IaCatalogEntry
                 true,
                 "Genera imatges amb «dall-e-3»/«gpt-image-1» via l'API d'imatges".to_string(),
             )
+        } else if base.contains("deepseek") {
+            // DeepSeek és de text (la seva entrada d'estil Anthropic tampoc no
+            // rep imatges) però porta 1M de context: dir-ho evita que es
+            // legis com una limitació de la clau.
+            (
+                false,
+                false,
+                false,
+                "Només text, amb context d'1M (deepseek-flash / deepseek-v4-pro)".to_string(),
+            )
         } else if base.contains("anthropic") {
-            (false, true, false, "Rep imatges com a entrada (visió); no en genera".to_string())
+            (
+                false,
+                true,
+                false,
+                "Rep imatges com a entrada (visió); no en genera. Context d'1M i \
+                 128k de sortida als models 4.6, 4.7, 4.8 i 5.x".to_string(),
+            )
         } else if base.contains("ollama.com") {
             (false, false, false, "Models al núvol d'Ollama: no cal baixar res".to_string())
         } else if base.contains("venice") {
@@ -2287,8 +2394,6 @@ pub async fn ia_catalog(state: State<'_, AppState>) -> Result<Vec<IaCatalogEntry
                 "Inferència sense filtres; model de xat «venice-uncensored», \
                  imatges amb «venice-sd15»; API pròpia".to_string(),
             )
-        } else if base.contains("deepseek") {
-            (false, false, false, "Només text (deepseek-chat / reasoner)".to_string())
         } else if base.contains("perplexity") {
             (false, false, false, "Cerca web en línia amb citacions; només text".to_string())
         } else {
@@ -2308,6 +2413,56 @@ pub async fn ia_catalog(state: State<'_, AppState>) -> Result<Vec<IaCatalogEntry
     }
     drop(guard);
     Ok(out)
+}
+
+// ── APRENENTATGE AUTÒNOM EN REPÒS (la IA nativa navega sola) ──────────────
+
+/// Estat del vagueig per al panell d'Ajustos: si està activat, quant fa que
+/// ningú no toca el programa, PER QUÈ no aprèn ara, què ha après i si hi ha
+/// accés real a la Internet profunda.
+#[command]
+pub async fn wander_status() -> Result<crate::ai::wander::Estat, String> {
+    Ok(crate::ai::wander::estat())
+}
+
+/// Activa o desactiva l'aprenentatge en repòs (per defecte: ACTIVAT).
+#[command]
+pub async fn wander_set(actiu: bool) -> Result<bool, String> {
+    let mut cfg = crate::config::AppConfig::load().unwrap_or_default();
+    cfg.ai.aprenentatge_repos = actiu;
+    cfg.save().map_err(|e| e.to_string())?;
+    Ok(actiu)
+}
+
+/// Una sessió ARA mateix (el botó «Aprèn ara»). Salta el refrigeri, però MAI
+/// no comença si hi ha una generació en curs: l'usuari no es pot quedar sense
+/// resposta perquè la nativa estava llegint pàgines.
+#[command]
+pub async fn wander_run(app: AppHandle) -> Result<usize, String> {
+    if crate::ai::wander::ia_occupada() {
+        return Err("hi ha una resposta de la IA en curs: espera que acabi".to_string());
+    }
+    Ok(crate::ai::wander::sessio(Some(&app)).await)
+}
+
+/// Punts d'entrada a la Internet profunda: llista d'adreces `.onion` (separa
+/// per comes o salts). BUIDA = no s'hi navega mai. Cal a més un proxy HTTP
+/// local (Privoxy/Tor): sense proxy, la interfície ho diu clar.
+#[command]
+pub async fn wander_profunda_set(adreces: String) -> Result<usize, String> {
+    let mut cfg = crate::config::AppConfig::load().unwrap_or_default();
+    cfg.ai.internet_profunda = adreces.trim().to_string();
+    cfg.save().map_err(|e| e.to_string())?;
+    Ok(crate::ai::wander::adreces_profundes().len())
+}
+
+/// Cor d'activitat des de la interfície: cada vegada que l'usuari fa res, el
+/// compte enrere del vagueig torna a zero (mai no aprèn mentre algú el fa
+/// servir, encara que toqui teclats que el backend no veu).
+#[command]
+pub async fn native_note_activity() -> Result<(), String> {
+    crate::ai::wander::note_activity();
+    Ok(())
 }
 
 #[cfg(test)]

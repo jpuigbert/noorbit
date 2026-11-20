@@ -15,6 +15,33 @@ export interface SuggestedModel {
   /// Enllaç a la fitxa del model (Hugging Bay: ruta de l'artifacte, d'on
   /// s'extreu l'id per baixar-lo).
   url?: string | null;
+  /// Xip curt d'ENCAIX en aquest equip («hi cap» / «NO hi cap» / «encaix
+  /// sense comprovar»). Ve del backend (`ai::fit`), no ho endevineem aquí.
+  encaix?: string | null;
+  /// Cert quan es pot baixar amb garanties (hi cap o hi cap just).
+  encaixOk?: boolean | null;
+  /// Explicació llarga: els números reals i què fer si no hi cap.
+  encaixMotiu?: string | null;
+}
+
+/// Veredicte d'encaix per a un model que NoOrbit no té al catàleg (resultats
+/// de cerca, GGUF de Hugging Bay). Les xifres són les del backend: si no
+/// tenen dada, `mida`/`ramLliure` són `null` i el veredicte «desconegut».
+export interface FitInfo {
+  verdicte: "cap" | "just" | "nocap" | "desconegut";
+  mida?: number | null;
+  ramTotal?: number | null;
+  ramLliure?: number | null;
+  /// Bytes que necessitaria: pes del model + cua de claus del context.
+  cal: number;
+  /// Sostre aplicat segons la RAM total de la màquina.
+  sostre: number;
+  motiu: string;
+  /// Què fer per fer-ho cabre; `null` quan hi cap bé.
+  sortida?: string | null;
+  /// Xip curt, calculat pel backend (`ai::fit::etiqueta`): «hi cap»,
+  /// «just d'RAM», «NO hi cap», «encaix sense comprovar».
+  etiqueta?: string | null;
 }
 
 /// Model disponible al núvol d'Ollama (ollama.com).
@@ -196,9 +223,13 @@ interface AIState {
   setModelsDir: (path: string | null) => Promise<void>;
   migrateModels: () => Promise<void>;
   selectModel: (name: string | null) => Promise<void>;
-  pullModel: (name: string) => Promise<void>;
+  /// Baixa un model. `force` és el SEGON CLIC conscient quan l'encaix diu que
+  /// NO hi cap: el backend refusarà la baixada si no ve marcat.
+  pullModel: (name: string, force?: boolean) => Promise<void>;
   /// Descarrega un model de Hugging Bay (mirror verificat) i el registra a Ollama.
-  pullBayModel: (id: string) => Promise<string | null>;
+  pullBayModel: (id: string, force?: boolean) => Promise<string | null>;
+  /// Comprova l'encaix d'un model fora del catàleg (per nom o per mida).
+  fitCheck: (name?: string | null, sizeBytes?: number | null) => Promise<FitInfo | null>;
   deleteModel: (name: string) => Promise<void>;
 }
 
@@ -387,6 +418,20 @@ export const useAIStore = create<AIState>((set, get) => ({
       set({ suggested: suggested ?? [] });
     } catch {
       /* ignore */
+    }
+  },
+
+  /// Encaix d'un model que NO és al catàleg (resultats de cerca, GGUF del
+  /// mirror). El veredicte el dona el backend amb la RAM real de la màquina;
+  /// si falta alguna dada, diu «desconegut» i què falta — mai un «sí» còmode.
+  fitCheck: async (name?: string | null, sizeBytes?: number | null) => {
+    try {
+      return await invoke<FitInfo | null>("ai_fit_check", {
+        name: name ?? null,
+        sizeBytes: sizeBytes ?? null,
+      });
+    } catch {
+      return null;
     }
   },
 
@@ -621,7 +666,8 @@ export const useAIStore = create<AIState>((set, get) => ({
   /// Descarrega un model de HUGGING BAY: el mirror dóna el fitxer GGUF amb un
   /// enllaç signat, el baixem amb progrés i el registrem a Ollama (Modelfile
   /// «FROM»), de manera que apareix al gestor com qualsevol altre model.
-  pullBayModel: async (id: string) => {
+  /// `force` = segon clic conscient quan l'encaix diu que NO hi cap.
+  pullBayModel: async (id: string, force?: boolean) => {
     const key = `huggingbay:${id}`;
     set((s) => ({ pulling: { ...s.pulling, [key]: "Iniciant descàrrega…" } }));
     const { listen } = await import("@tauri-apps/api/event");
@@ -636,7 +682,7 @@ export const useAIStore = create<AIState>((set, get) => ({
         ok: boolean;
         model: string | null;
         message: string;
-      }>("hf_bay_download", { id, quant: null });
+      }>("hf_bay_download", { id, quant: null, force: force ? true : null });
       if (!res.ok) {
         // Sense Ollama (o sense permís): el fitxer és baixat, però cal el
         // motor per usar-lo. S'ho expliquem a l'usuari.
@@ -660,7 +706,7 @@ export const useAIStore = create<AIState>((set, get) => ({
     }
   },
 
-  pullModel: async (name) => {
+  pullModel: async (name, force?: boolean) => {
     set((s) => ({ pulling: { ...s.pulling, [name]: "Iniciant descàrrega…" } }));
     const { listen } = await import("@tauri-apps/api/event");
     const unlisten = listen<{ model: string; message: string }>(
@@ -672,7 +718,7 @@ export const useAIStore = create<AIState>((set, get) => ({
       }
     );
     try {
-      await invoke("ollama_pull_model", { name });
+      await invoke("ollama_pull_model", { name, force: force ? true : null });
       await get().loadModels();
       // Un model acabat de baixar es tria automàticament per treballar-hi.
       await get().selectModel(name);

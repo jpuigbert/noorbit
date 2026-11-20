@@ -39,6 +39,24 @@ pub struct AiConfig {
     /// de NoOrbit. Si es posa en un disc extern, tot el motor local hi viu.
     #[serde(default)]
     pub llamacpp_dir: String,
+    /// APRENENTATGE AUTÒNOM EN REPÒS: la IA nativa navega sola i aprén de
+    /// contingut lliure (StackOverflow, Viquipèdia, web) quan ningú no fa
+    /// servir el programa i la RAM està lliure. ACTIU per defecte.
+    #[serde(default = "default_repos_aprenent")]
+    pub aprenentatge_repos: bool,
+    /// Punts d'entrada a la Internet profunda: URLs `.onion` separades per
+    /// comes o salts de línia. BUIT = mai no hi naveguem (no inventem
+    /// accessos: cal un proxy HTTP local, Privoxy/Tor, a més d'aquestes
+    /// adreces).
+    #[serde(default)]
+    pub internet_profunda: String,
+}
+
+/// L'aprenentatge en repòs ve ACTIVAT: és el comportament que l'usuari
+/// demana («que es dediqui a aprendre sola») i no costa ni CPU ni xarxa
+/// mentre algú fa servir el programa.
+fn default_repos_aprenent() -> bool {
+    true
 }
 
 impl Default for AiConfig {
@@ -58,6 +76,8 @@ impl Default for AiConfig {
             keep_alive: "1m".into(),
             gguf_dir: String::new(),
             llamacpp_dir: String::new(),
+            aprenentatge_repos: default_repos_aprenent(),
+            internet_profunda: String::new(),
         }
     }
 }

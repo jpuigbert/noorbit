@@ -6,7 +6,7 @@ use super::launcher;
 use super::python;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::{command, AppHandle, State};
+use tauri::{command, AppHandle, Emitter, State};
 
 use crate::AppState;
 
@@ -110,6 +110,18 @@ pub async fn unreal_detect_installations() -> Result<Vec<String>, String> {
         .collect())
 }
 
+/// Instal·lacions A MITGES: l'Epic Games Launcher encara està baixant el
+/// motor (o la descàrrega es va cancel·lar). No serveixen per connectar,
+/// però l'UI les mostra perquè l'usuari sap on les té i per què NoOrbit diu
+/// que no hi ha cap motor.
+#[command]
+pub async fn unreal_detect_pending_installations() -> Result<Vec<String>, String> {
+    Ok(launcher::detect_pending_installations()
+        .into_iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect())
+}
+
 /// Cerca un fitxer `.uproject` a la carpeta del projecte obert (arrel + un
 /// nivell de subcarpetes): el fa servir la UI per AUTO-OMPLIR el projecte
 /// sense que l'usuari hagui de seleccionar-lo a mà.
@@ -144,12 +156,21 @@ pub async fn unreal_find_uproject(root: String) -> Result<Option<String>, String
     Ok(nested.map(|p| p.to_string_lossy().to_string()))
 }
 
+/// Conecta (i arrenca si cal) l'editor amb un projecte.
+///
+/// `engine_root` és opcional: si l'usuari ha triat a mà la carpeta del motor
+/// (per exemple un Unreal instal·lat en un DISC EXTERN que la detecció
+/// automàtica no ha vist), es fa servir aquesta; si no, es detecta sol.
 #[command]
 pub async fn unreal_auto_connect(
     project: String,
     timeout: u64,
+    engine_root: Option<String>,
 ) -> Result<launcher::LaunchReport, String> {
-    launcher::auto_connect(&PathBuf::from(&project), timeout)
+    let root = engine_root
+        .filter(|p| !p.trim().is_empty())
+        .map(PathBuf::from);
+    launcher::auto_connect(&PathBuf::from(&project), timeout, root.as_deref())
         .await
         .map_err(|e| e.to_string())
 }
@@ -250,6 +271,67 @@ pub async fn unreal_package_game(
     options: PackageOptions,
 ) -> Result<builder::BuildResult, String> {
     builder::package_game(&PathBuf::from(&engine_root), &options, &app)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+// ── Agent MCP (plugin oficial d'Unreal 5.8+) ─────────────────────────────
+
+/// ORQUESTRADOR «Activar Agent Unreal»: Ollama, plugins MCP al .uproject,
+/// auto-arrencada del servidor (ini), arrencada de l'editor si es demana i
+/// handshake MCP amb el catàleg d'eines. Idempotent i amb registre de passos.
+#[command]
+pub async fn unreal_agent_setup(
+    app: AppHandle,
+    project: String,
+    launch: bool,
+) -> Result<super::agent::SetupReport, String> {
+    super::agent::run_agent_setup(&app, &PathBuf::from(project), launch)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Executa UNA tasca de l'usuari contra l'editor: el model local tria les
+/// eines MCP rellevants i les crida en un bucle fins a la resposta final.
+///
+/// L'error també s'emet com a esdeveniment (`unreal://agent-task`, fase
+/// `error`): la UI el mostra al moment, sense dependre que la promesa
+/// resolgui (si el webview es tanca, l'esdeveniment ja és fora).
+#[command]
+pub async fn unreal_agent_task(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    prompt: String,
+) -> Result<String, String> {
+    let model = state.ai_manager.effective_model().await;
+    match super::agent::run_agent_task(&app, &prompt, Some(model)).await {
+        Ok(answer) => Ok(answer),
+        Err(e) => {
+            let _ = app.emit(
+                "unreal://agent-task",
+                serde_json::json!({ "phase": "error", "text": e.to_string() }),
+            );
+            Err(e.to_string())
+        }
+    }
+}
+
+/// Catàleg d'eines MCP de l'editor (perquè la UI el pugui mostrar).
+#[command]
+pub async fn unreal_mcp_tools() -> Result<Vec<super::mcp::McpTool>, String> {
+    let sess = super::mcp::open_session().await.map_err(|e| e.to_string())?;
+    Ok(sess.tools)
+}
+
+/// Executa una eina MCP concreta (per depurar o per ordres puntuals).
+#[command]
+pub async fn unreal_mcp_call(
+    name: String,
+    args: serde_json::Value,
+) -> Result<super::mcp::McpCallResult, String> {
+    let sess = super::mcp::open_session().await.map_err(|e| e.to_string())?;
+    sess.client
+        .tools_call(&name, args)
         .await
         .map_err(|e| e.to_string())
 }

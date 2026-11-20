@@ -144,9 +144,12 @@ pub async fn ai_provider_test(
     let mgr: Arc<Mutex<api::ApiManager>> = state.api_manager.clone();
     let (provider, client) = {
         let guard = mgr.lock().unwrap();
-        guard.prepare(&id).map_err(|e| e.to_string())?
+        // `true`: la prova pot trobar-se amb un motor local que encara ha de
+        // CARREGAR el model a RAM (més d'un minut en un Mac intel); el client
+        // curt de 120 s donava «no funciona» a un proveïdor que sí que va bé.
+        guard.prepare(&id, true).map_err(|e| e.to_string())?
     };
-    api::chat(
+    api::chat_quick(
         &client,
         &provider,
         &[("user".to_string(), "Respon només amb la paraula: OK".to_string())],
@@ -193,7 +196,14 @@ pub async fn endpoint_check_inner(
     use std::time::Duration;
 
     let base = crate::api::normalize_base(&base_url);
-    let is_anthropic = kind.as_deref() == Some("anthropic");
+    // Anthropic es detecta TAMBÉ per la URL, no només pel camp «tipus»: un
+    // servei del format Claude creat a mà (o l'entrada Anthropic de DeepSeek)
+    // es comprovava amb la ruta d'OpenAI i deia «404, la clau no va» quan la
+    // clau era perfectament bona. És el mateix criteri que usa `api`.
+    let low_base = base.to_lowercase();
+    let is_anthropic = kind.as_deref() == Some("anthropic")
+        || low_base.contains("anthropic.com")
+        || low_base.ends_with("/anthropic");
     // /models (OpenAI-compatible) o /v1/models (Anthropic).
     let url = if is_anthropic {
         if base.to_lowercase().ends_with("/v1") {
@@ -300,11 +310,21 @@ pub async fn endpoint_check_inner(
         });
     }
     if status.as_u16() == 404 {
+        // Anthropic: molts serveis compatibles (DeepSeek n'és un) NO publiquen
+        // l'endpoint «/models». Si no el podem demanar, comprovem el que de
+        // veritat importa: que una petició mínima respon amb la clau i el
+        // model que l'usuari ha posat.
+        if is_anthropic {
+            if let Some(probe) = anthropic_probe(&client, &base, &model, tok.as_deref()).await {
+                return Ok(probe);
+            }
+        }
         let mut hint = if is_anthropic {
             format!("La URL {} no té l'endpoint de models d'Anthropic: la base ha de ser https://api.anthropic.com (NoOrbit hi afegeix /v1/models).", url)
         } else {
             format!("La URL {} no existeix (404). Motius habituals: falta el sufix «/v1» a la base (hauria de ser …/v1 i demanar …/v1/models), el port és erroni, o el servei és una versió sense l'API HTTP habilitada.", url)
         };
+        hint.push_str(&known_models_hint(&base, &model));
         if !platform_note.is_empty() {
             hint.push_str(&platform_note);
         }
@@ -323,10 +343,11 @@ pub async fn endpoint_check_inner(
             stage: "url".into(),
             title: format!("El servidor ha respost {} ", status),
             detail: format!(
-                "{}\nResposta del servidor: {}{}",
+                "{}\nResposta del servidor: {}{}{}",
                 url,
                 if body.is_empty() { "—".to_string() } else { body.chars().take(300).collect() },
-                if platform_note.is_empty() { String::new() } else { format!("{}{}", "\n", platform_note) }
+                if platform_note.is_empty() { String::new() } else { format!("{}{}", "\n", platform_note) },
+                known_models_hint(&base, &model)
             ),
             models: Vec::new(),
         });
@@ -358,6 +379,14 @@ pub async fn endpoint_check_inner(
         .unwrap_or_default();
 
     let wanted = model.trim();
+    if is_anthropic && models.is_empty() {
+        // El servei ha contestat bé a «/models» però no n'ha donat cap (o
+        // l'ha respost buit): sense llista, l'única prova vàlida és demanar-li
+        // una generació mínima.
+        if let Some(probe) = anthropic_probe(&client, &base, wanted, tok.as_deref()).await {
+            return Ok(probe);
+        }
+    }
     if wanted.is_empty() {
         return Ok(EndpointCheck {
             ok: true,
@@ -377,9 +406,10 @@ pub async fn endpoint_check_inner(
             stage: "model".into(),
             title: format!("El model «{}» no és al servidor", wanted),
             detail: format!(
-                "El servidor està en marxa i contesta bé, però no té aquest model. Aquests són els que ofereix (clica'n un per triar-lo): {}{}",
+                "El servidor està en marxa i contesta bé, però no té aquest model. Aquests són els que ofereix (clica'n un per triar-lo): {}{}{}",
                 listed.join(", "),
-                if models.len() > listed.len() { format!(" … i {} més.", models.len() - listed.len()) } else { String::new() }
+                if models.len() > listed.len() { format!(" … i {} més.", models.len() - listed.len()) } else { String::new() },
+                known_models_hint(&base, wanted)
             ),
             models,
         });
@@ -391,6 +421,103 @@ pub async fn endpoint_check_inner(
         title: "Tot a punt".to_string(),
         detail: format!("El servidor contesta bé a {} i el model «{}» hi és.", url, wanted),
         models,
+    })
+}
+
+/// Models que funcionen ARA mateix als serveis on NoOrbit els coneix. Quan el
+/// diagnòstic diu «aquest model no és al servidor», donar la llista vigent és
+/// el que evita que l'usuari s'obstine en un nom antic («claude-3-5-sonnet»,
+/// «deepseek-chat») i acabi creient que «la clau no va».
+fn known_models_hint(base: &str, model: &str) -> String {
+    let low = base.to_lowercase();
+    let m = model.to_lowercase();
+    let list: &[&str] = if low.contains("anthropic") || m.contains("claude") {
+        &[
+            "claude-opus-5-5",
+            "claude-sonnet-5-5",
+            "claude-haiku-5-5",
+            "claude-sonnet-5",
+            "claude-opus-4-8",
+            "claude-sonnet-4-5",
+        ]
+    } else if low.contains("deepseek") || m.contains("deepseek") {
+        &["deepseek-flash", "deepseek-v4-pro"]
+    } else {
+        return String::new();
+    };
+    format!("\nModels vigents ací: {}.", list.join(", "))
+}
+
+/// Comprovació REAL d'un servei d'Anthropic quan no se'n pot llistar els
+/// models: una petició mínima a `/v1/messages`. Si respon, la clau, la ruta i
+/// el model són bons — que és precisament el que l'usuari vol saber. Retorna
+/// `None` només si no ho podem jutjar (ha fallat el transport), perquè
+/// aleshores decideixi el diagnòstic general.
+async fn anthropic_probe(
+    client: &reqwest::Client,
+    base: &str,
+    model: &str,
+    token: Option<&str>,
+) -> Option<EndpointCheck> {
+    let wanted = model.trim();
+    if wanted.is_empty() {
+        return None;
+    }
+    let url = if base.to_lowercase().ends_with("/v1") {
+        format!("{}/messages", base)
+    } else {
+        format!("{}/v1/messages", base)
+    };
+    let body = serde_json::json!({
+        "model": wanted,
+        // Prou per validar la credencial, la ruta i el model sense gastar res.
+        // Sense bloc «thinking»: els models nous el posen ells i demanar-lo
+        // a la manera antiga es rebutja amb un 400 que no és cap error de
+        // configuració.
+        "max_tokens": 16,
+        "messages": [{ "role": "user", "content": "Respon només: OK" }],
+    });
+    let mut req = client.post(&url).header("anthropic-version", "2023-06-01").json(&body);
+    if let Some(t) = token {
+        req = req.header("x-api-key", t);
+    }
+    let resp = req.send().await.ok()?;
+    let status = resp.status();
+    if status.is_success() {
+        return Some(EndpointCheck {
+            ok: true,
+            stage: "llest".into(),
+            title: "Tot a punt".into(),
+            detail: format!(
+                "El servei d'Anthropic ha respost bé una generació mínima amb el model «{}». {} no publica llista de models, així que la prova real és aquesta.",
+                wanted, base
+            ),
+            models: Vec::new(),
+        });
+    }
+    let text = resp.text().await.unwrap_or_default();
+    let code = status.as_u16();
+    let (stage, title) = if code == 401 || code == 403 {
+        ("auth", format!("La clau no s'ha acceptat ({})", code))
+    } else if code == 404 {
+        (
+            "model",
+            format!("El model «{}» no existeix en aquest servei", wanted),
+        )
+    } else {
+        ("url", format!("El servidor ha respost {}", code))
+    };
+    Some(EndpointCheck {
+        ok: false,
+        stage: stage.into(),
+        title,
+        detail: format!(
+            "{}\nResposta del servidor: {}{}",
+            url,
+            if text.is_empty() { "—".to_string() } else { text.chars().take(300).collect() },
+            known_models_hint(base, wanted)
+        ),
+        models: Vec::new(),
     })
 }
 
@@ -924,7 +1051,7 @@ pub async fn ai_inline_complete(
     let mgr: Arc<Mutex<api::ApiManager>> = state.api_manager.clone();
     let (provider, client) = {
         let guard = mgr.lock().unwrap();
-        match guard.prepare(&id) {
+        match guard.prepare(&id, false) {
             Ok(v) => v,
             Err(e) => return Err(e.to_string()),
         }
@@ -964,7 +1091,9 @@ pub async fn ai_inline_complete(
             (rid.to_string(), flag)
         });
 
-    let chat_fut = api::chat(&client, &provider, &turns, Some(system));
+    // Mode CURT (sense raonament, sortida breu): amb Claude pensant per
+    // endavant el fragment no arribava mai dins dels 8 segons.
+    let chat_fut = api::chat_quick(&client, &provider, &turns, Some(system));
     tokio::pin!(chat_fut);
 
     let outcome: Result<(String, Option<String>), String> = match cancel {
@@ -1031,7 +1160,7 @@ pub async fn ai_provider_chat(
     let mgr: Arc<Mutex<api::ApiManager>> = state.api_manager.clone();
     let (provider, client) = {
         let guard = mgr.lock().unwrap();
-        guard.prepare(&id).map_err(|e| e.to_string())?
+        guard.prepare(&id, false).map_err(|e| e.to_string())?
     };
     api::chat(
         &client,

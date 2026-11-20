@@ -7,6 +7,7 @@ import { useBlenderLiveStore } from "./stores/blenderLiveStore";
 import { registerProcessListener } from "./stores/processStore";
 import { registerTaskListeners } from "./stores/taskStore";
 import { useComputerStore } from "./stores/computerStore";
+import { useVideoStudioStore } from "./stores/videoStudioStore";
 import { installConsoleCapture, logBackend } from "./stores/consoleStore";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
@@ -41,6 +42,8 @@ import HuggingBayModal from "./components/AI/HuggingBayModal";
 import PublishThemeModal from "./components/Publish/PublishThemeModal";
 const WordPressThemeModal = lazy(() => import("./components/WordPress/WordPressThemeModal"));
 const ProjectWorkModal = lazy(() => import("./components/ProjectWork/ProjectWorkModal"));
+// Menú «Vídeo» propi: muntatge Blender → Kdenlive/ffmpeg dirigit per IA.
+const VideoStudioModal = lazy(() => import("./components/VideoStudio/VideoStudioModal"));
 const VsCodeExtensionsModal = lazy(() => import("./components/Extensions/VsCodeExtensionsModal"));
 const GameStudiosModal = lazy(() => import("./components/GameStudios/GameStudiosModal"));
 import ComputerConfirmModal from "./components/Computer/ComputerConfirmModal";
@@ -51,6 +54,7 @@ import TerminalPanel from "./components/Terminal/TerminalPanel";
 import ReviewPill from "./components/Editor/ReviewPill";
 import { markForPath, resolveMark } from "./stores/editReviewStore";
 import { useFunCursor } from "./utils/useFunCursor";
+import { useActivityPulse } from "./utils/useActivityPulse";
 import { initFunFx } from "./utils/funFx";
 import StartupScreen from "./components/StartupScreen";
 import Toaster from "./components/Toaster";
@@ -120,6 +124,9 @@ export default function App() {
   // Cursor divertit: personatge SVG segons la zona de sota el punter,
   // disfresses que roten cada 5 minuts i mode «avorrit» quan no fas res.
   useFunCursor();
+  // Pol d'activitat: diu al backend cada vegada que toques alguna cosa,
+  // perquè l'aprenentatge autònom en repòs no navegui mentre treballes.
+  useActivityPulse();
 
   // Finestres de panells separats: quan es tanquen (creu X o «Torna al
   // programa»), tornen a enganxar-se aquí sense reiniciar el programa.
@@ -183,6 +190,11 @@ export default function App() {
   useEffect(() => {
     useUnrealStore.getState().init();
     useBlenderLiveStore.getState().init();
+    // El muntatge de vídeo també escolta DES DE L'ARRANCAIDA: un render o un
+    // director de 40 minuts pot haver començat des del xat (`@video:`) o des
+    // del menú, i els seus avisos han d'arribar encara que el panell no s'haja
+    // obert mai en aquesta sessió.
+    useVideoStudioStore.getState().init();
     // Escoltadors globals: el procés de qualsevol IA (ai://process) i
     // l'estat de les tasques degradades a segon pla (task://state), perquè
     // funcionen encara que el seu panell no estiga obert ara mateix.
@@ -462,6 +474,8 @@ export default function App() {
         {useUIStore((s) => s.showWpTheme) && <WordPressThemeModal />}
         {/* Menú «Treball autopilotat»: la IA millora qualsevol projecte un temps triat. */}
         {useUIStore((s) => s.showProjectWork) && <ProjectWorkModal />}
+        {/* Menú «Vídeo»: muntatge professional dirigit per IA (un motor nou). */}
+        {useUIStore((s) => s.showVideoStudio) && <VideoStudioModal />}
         {useUIStore((s) => s.showVsCodeExtensions) && <VsCodeExtensionsModal />}
         {useUIStore((s) => s.showGameStudios) && <GameStudiosModal />}
       </Suspense>

@@ -23,7 +23,9 @@ import "./SetupCheckModal.css";
  *  1. Ollama (motor de la IA local)  → instal·la (nadiu del SO)
  *  2. Servei en marxa (port 11434)   → engega
  *  3. Model inicial (mínim 1)        → baixa (segons la RAM de la màquina)
- *  4. Eines 3D (Blender / ComfyUI)   → instal·lador oficial
+ *  4. Eines 3D (Blender / Unreal / ComfyUI) → 1 clic: instal·lació o
+ *     pàgina de descàrrega JA segons el sistema operatiu instal·lat
+ *  5. Motors alternatius (Godot 4 / Rust per a Bevy) → opcional, com Unreal
  *
  * La finestra apareix SEMPRE que falti alguna cosa, tret que l'usuari premi
  * «No tornar-la a mostrar» (persistit a localStorage).
@@ -85,11 +87,14 @@ export default function SetupCheckModal() {
   const cloudActive = useProviderStore((s) => s.active !== "ollama" && s.active !== "");
 
   const detect = async () => {
-    const [ollama, ollamaUp, blender, comfy] = await Promise.all([
+    const [ollama, ollamaUp, blender, comfy, unreal, godot, rust] = await Promise.all([
       invoke<boolean>("ollama_installed").catch(() => false),
       invoke<boolean>("ollama_is_running").catch(() => false),
       invoke<{ installed: boolean }>("blender_status").catch(() => ({ installed: false })),
       invoke<boolean>("comfyui_installed").catch(() => false),
+      invoke<string[]>("unreal_detect_installations").catch(() => []),
+      invoke<{ installed: boolean }>("godot_status").catch(() => ({ installed: false })),
+      invoke<{ installed: boolean }>("bevy_status").catch(() => ({ installed: false })),
     ]);
     await loadModels().catch(() => undefined);
     let starterName = starter;
@@ -159,18 +164,64 @@ export default function SetupCheckModal() {
       {
         id: "blender",
         name: "Blender — 3D i vídeo",
-        desc: "Per modelar en 3D i fer vídeos amb ordres de la IA.",
+        desc: "Per modelar en 3D i fer vídeos amb ordres de la IA. Un clic: amb Homebrew s'instal·la sol; si no, s'obre la descàrrega oficial del teu sistema operatiu.",
         state: blender.installed ? "ok" : "todo",
         action: blender.installed
           ? undefined
           : {
               label: "Instal·la",
               run: async () => {
-                await invoke("open_externally", {
-                  path: "https://www.blender.org/download/",
-                });
+                setMsg(await invoke<string>("install_blender"));
+              },
+            },
+      },
+      {
+        id: "unreal",
+        name: "Unreal Engine — videojocs (opcional)",
+        desc: "Per treballar dins de l'editor d'Unreal 5 amb la IA. Cal l'Epic Games Launcher: un clic obre la descàrrega oficial segons el teu sistema operatiu.",
+        state: unreal.length > 0 ? "ok" : "warn",
+        action: unreal.length > 0
+          ? undefined
+          : {
+              label: "Instal·la",
+              run: async () => {
+                await invoke("open_tool_download", { tool: "unreal" });
                 setMsg(
-                  "S'ha obert la pàgina oficial de Blender. Un cop instal·lat, prem «Revisa» i NoOrbit el detectarà sol."
+                  "S'ha obert la descàrrega oficial d'Unreal per al teu sistema: instal·la l'Epic Games Launcher i, a la seva pestanya «Unreal Engine ▸ Biblioteca», instal·la UE 5. Després prem «Revisa» i NoOrbit el detectarà sol."
+                );
+              },
+            },
+      },
+      {
+        id: "godot",
+        name: "Godot 4 — videojuegos (opcional)",
+        desc: "Per treballar en projectes de Godot 4 amb la IA, exactament com amb Unreal. Un clic obre la descàrrega oficial del teu sistema operatiu.",
+        state: godot.installed ? "ok" : "warn",
+        action: godot.installed
+          ? undefined
+          : {
+              label: "Instal·la",
+              run: async () => {
+                await invoke("open_tool_download", { tool: "godot" });
+                setMsg(
+                  "S'ha obert la descàrrega oficial de Godot 4 per al teu sistema. Descomprime'l i posa'l a «Aplicacions» (a Linux, a /usr/local/bin). Després prem «Revisa» i NoOrbit el detectarà sol."
+                );
+              },
+            },
+      },
+      {
+        id: "rust",
+        name: "Rust — Bevy (opcional)",
+        desc: "Bevy és un motor de jocs escrit en Rust: cal el «cargo» per compilar-lo. Un clic obre l'instal·lador oficial.",
+        state: rust.installed ? "ok" : "warn",
+        action: rust.installed
+          ? undefined
+          : {
+              label: "Instal·la",
+              run: async () => {
+                await invoke("open_tool_download", { tool: "rust" });
+                setMsg(
+                  "S'ha obert l'instal·lador oficial de Rust (rustup). Executa'l i, quan acabi, prem «Revisa» i NoOrbit detectarà el «cargo» sol."
                 );
               },
             },
@@ -192,7 +243,8 @@ export default function SetupCheckModal() {
     ];
     setSteps(next);
     // Obre la finestra si falta alguna cosa IMPORTANT (Ollama, servei, model
-    // o Blender). ComfyUI és opcional i no la fa obrir sol.
+    // o Blender). ComfyUI, Unreal, Godot i Rust són opcionals i no la fan
+    // obrir sol.
     // Amb IA EN LÍNIA, que falti Ollama NO és un problema: el modal no s'obre
     // sol (sinó NoOrbit «avisaria» de res en cada arrencada).
     const faltaImportant = next.some(

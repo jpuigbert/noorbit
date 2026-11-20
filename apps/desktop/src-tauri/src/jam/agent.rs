@@ -117,6 +117,12 @@ impl ProgressSink for StdoutProgress {
             Progress::TaskBlocked { id, error } => serde_json::json!({
                 "kind": "task_error", "task": id, "detail": error, "ok": false
             }),
+            Progress::Note { id, text } => serde_json::json!({
+                "kind": "note", "task": id, "detail": text, "ok": true
+            }),
+            Progress::Thinking { id, text } => serde_json::json!({
+                "kind": "thinking", "task": id, "detail": text, "ok": true
+            }),
             Progress::MemoryPressure { id, peak_bytes } => serde_json::json!({
                 "kind": "memory", "task": id,
                 "detail": format!(
@@ -249,6 +255,9 @@ async fn run_agent(args: AgentArgs) -> i32 {
         &data_dir,
         &args.repo_path,
     )));
+    // Receptor de progrés: ES CREA ABANS del worker perquè aquest pugui
+    // emetre «què fa la IA» i el seu pensament (línies `JAM|` per stdout).
+    let progress: Arc<dyn ProgressSink> = Arc::new(StdoutProgress);
     let worker: Arc<dyn Worker> = Arc::new(
         NoOrbitWorker::new(llm, args.repo_path.clone())
             .with_lessons(lessons.clone())
@@ -256,14 +265,14 @@ async fn run_agent(args: AgentArgs) -> i32 {
             // sense finestres ni permisos) per fonamentar el codi de cada tasca.
             .with_research(Arc::new(crate::agent::AgentOrchestrator::new(
                 crate::agent::AgentConfig::default(),
-            ))),
+            )))
+            .with_progress(progress.clone()),
     );
     let verifier: Arc<dyn Verifier> =
         Arc::new(NoOrbitVerifier::new(args.repo_path.clone(), args.build_cmd.clone()));
     let report_path = args.repo_path.join("REPORT.md");
     let reporter: Arc<dyn Reporter> = Arc::new(NoOrbitReporter::new(report_path));
     let cache: Arc<dyn Cache> = Arc::new(NoOrbitCache::new(args.repo_path.clone()));
-    let progress: Arc<dyn ProgressSink> = Arc::new(StdoutProgress);
 
     // ── Persistència (reprendre després d'un crash/reinici) ───────────────
     // Id ESTABLE: la del pare o, si no ve, derivada del brief + repo. Mai del

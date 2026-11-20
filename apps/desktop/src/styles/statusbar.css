@@ -87,3 +87,22 @@
   background: var(--warning);
   opacity: 0.9;
 }
+
+/* ---- Barra d'estat: RELLOTGE TEMPORAL del treball autònom (Jam o
+   treball autopilotat). Apareix només mentre hi ha feina i desapareix
+   sol en acabar; un clic porta al lloc on es veu en viu. */
+.status-item.status-auton {
+  cursor: pointer;
+  padding: 0 4px;
+  margin: 0 -4px;
+  border-radius: 4px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  transition: background var(--speed-fast) var(--ease-out),
+    color var(--speed-fast) var(--ease-out);
+}
+.status-item.status-auton:hover {
+  background: var(--bg-3);
+  color: var(--accent-hover);
+}

@@ -95,6 +95,55 @@ export function parseUseDirectives(
   return out;
 }
 
+/// Normalitza un nom d'agent per comparar-lo sense que importen majúscules,
+/// accents, articles inicials, cometes o la puntuació: la IA mai escriu el nom
+/// EXACTAMENT com va ser creat (p. ex. «el Tester de QA» ≠ «Tester de QA»).
+function normalizeExpertName(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[`'"\[\]()«».*]/g, " ")
+    .replace(/\b(?:el|la|els|les|un|una)\b/g, " ")
+    .replace(/l'/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/// Busca l'especialista pel nom amb tolerància (exacte normalitzat → inclòs
+/// per qualsevol costat → majoria de paraules coincidents). Null si no hi ha
+/// cap candidat raonable: abans una delegació «@use:» amb el nom lleugerament
+/// diferent moria aquí i l'usuari no veia mai treballar l'agent.
+export function matchExpert<T extends { name: string }>(
+  wanted: string,
+  list: T[],
+): T | null {
+  const norm = normalizeExpertName(wanted);
+  if (!norm) return null;
+  const exact = list.find((e) => normalizeExpertName(e.name) === norm);
+  if (exact) return exact;
+  const contained = list.find((e) => {
+    const en = normalizeExpertName(e.name);
+    return en.length > 2 && (en.includes(norm) || norm.includes(en));
+  });
+  if (contained) return contained;
+  const wantedTokens = new Set(norm.split(/\s+/).filter((t) => t.length > 2));
+  if (wantedTokens.size === 0) return null;
+  let best: T | null = null;
+  let bestScore = 0;
+  for (const e of list) {
+    const tokens = new Set(normalizeExpertName(e.name).split(/\s+/).filter((t) => t.length > 2));
+    let hits = 0;
+    for (const t of wantedTokens) if (tokens.has(t)) hits++;
+    const score = hits / Math.min(wantedTokens.size, tokens.size || 1);
+    if (score > bestScore) {
+      bestScore = score;
+      best = e;
+    }
+  }
+  return bestScore >= 0.5 ? best : null;
+}
+
 // ── LLISTA DE TASQUES («@todo:» / «@done:») ──────────────────────────────────
 export function parseTodoDirectives(raw: string): { add: string[]; done: string[]; doing: string[] } {
   const add: string[] = [];

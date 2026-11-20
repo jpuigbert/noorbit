@@ -238,7 +238,7 @@ async fn distill_now(
     store: &Arc<LearningStore>,
     cfg: &LearningConfig,
 ) -> Result<usize, String> {
-    let pending = store.pending();
+    let pending = store.pending_distillable();
     if pending.is_empty() {
         return Ok(0);
     }
@@ -307,7 +307,7 @@ pub fn maybe_auto_distill(
         if !learning_cfg.enabled || !learning_cfg.auto_distill {
             return;
         }
-        if store.pending().len() < AUTO_DISTILL_MIN {
+        if store.pending_distillable().len() < AUTO_DISTILL_MIN {
             return;
         }
         // RAM: la destil·lació fa servir el model LOCAL. Si l'usuari treballa

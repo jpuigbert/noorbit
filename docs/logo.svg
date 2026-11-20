@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="NoOrbit">
+  <title>NoOrbit</title>
+  <defs>
+    <linearGradient id="lbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#12294a"/>
+      <stop offset="1" stop-color="#0a1830"/>
+    </linearGradient>
+    <radialGradient id="lcore" cx="42%" cy="38%" r="62%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.28" stop-color="#dceaff"/>
+      <stop offset="0.66" stop-color="#5f9fe8"/>
+      <stop offset="1" stop-color="#1d4f90"/>
+    </radialGradient>
+    <radialGradient id="lmoon" cx="42%" cy="38%" r="62%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.3" stop-color="#c2f7f4"/>
+      <stop offset="0.72" stop-color="#2cb6bd"/>
+      <stop offset="1" stop-color="#0d5f68"/>
+    </radialGradient>
+    <linearGradient id="lring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2c63c4"/>
+      <stop offset="0.45" stop-color="#5aa0ee"/>
+      <stop offset="1" stop-color="#1d4d99"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#lbg)"/>
+  <g transform="translate(256 256)">
+    <ellipse cx="0" cy="0" rx="164" ry="82" fill="none" stroke="url(#lring)" stroke-width="15" transform="rotate(-22)"/>
+    <ellipse cx="0" cy="0" rx="164" ry="82" fill="none" stroke="#8fc4ff" stroke-width="3" opacity="0.4" transform="rotate(-22)"/>
+    <circle cx="-8" cy="-4" r="58" fill="url(#lcore)"/>
+    <circle cx="106" cy="-34" r="30" fill="url(#lmoon)"/>
+  </g>
+</svg>

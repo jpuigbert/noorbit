@@ -9,6 +9,7 @@ import { saveCurrentFile, useWorkspaceStore } from "./stores/workspaceStore";
 import { useUIStore } from "./stores/uiStore";
 import { toastSuccess, toastError, toastInfo } from "./stores/toastStore";
 import { usePreviewStore } from "./stores/previewStore";
+import { openVideoStudio } from "./stores/videoStudioStore";
 import { detachChat, detachTerminal, reattachChat, reattachTerminal } from "./windowing";
 
 const rawActions = {
@@ -72,6 +73,13 @@ const rawActions = {
     void (useUIStore.getState().chatDetached ? reattachChat() : detachChat()),
   "view.wordWrap": ed.toggleWordWrap,
   "view.minimap": ed.toggleMinimap,
+  // Cursor: «divertit» (es disfressa segons on apuntes) o «clàssic» (el
+  // puntador normal de l'ordinador). El menú Vista i la paleta de comandes
+  // oferisquen els dos; l'ajust es recorda entre sessions (uiStore).
+  "view.cursorFun": () => useUIStore.getState().setFunCursor(true),
+  "view.cursorClassic": () => useUIStore.getState().setFunCursor(false),
+  "view.cursorToggle": () =>
+    useUIStore.getState().setFunCursor(!useUIStore.getState().funCursor),
   "view.zoomIn": () => useUIStore.getState().zoomIn(),
   "view.zoomOut": () => useUIStore.getState().zoomOut(),
   "view.zoomReset": () => useUIStore.getState().zoomReset(),
@@ -150,19 +158,26 @@ const rawActions = {
   "ai.gameStudios": () => useUIStore.getState().setShowGameStudios(true),
   // Millora autopilotada de QUALSEVOL projecte (temps de treball personalitzable).
   "ai.projectWork": () => useUIStore.getState().setShowProjectWork(true),
-  // Panell «Jam» (agent autònom): es viu DINS de l'Agent.
+  // Panell «Jam» (agent autònom): es viu DINS de l'Agent. Cal obrir també el
+  // panell dret: si era plegat, canviar de pestanya no el tornava a mostrar.
   "ai.jam": () => {
+    useUIStore.getState().setRightPanelOpen(true);
     usePreviewStore.getState().setRightTab("agent");
     usePreviewStore.getState().setAgentSub("jam");
   },
-  "ai.agent": () => usePreviewStore.getState().setRightTab("agent"),
+  "ai.agent": () => {
+    useUIStore.getState().setRightPanelOpen(true);
+    usePreviewStore.getState().setRightTab("agent");
+  },
   // Sub-pestanyes DINS de la pestanya Agent (les «Integracions» ja no són
   // una pestanya a part: sempre es veuen servides al costat del xat).
   "ai.computer": () => {
+    useUIStore.getState().setRightPanelOpen(true);
     usePreviewStore.getState().setRightTab("agent");
     usePreviewStore.getState().setAgentSub("computer");
   },
   "ai.experts": () => {
+    useUIStore.getState().setRightPanelOpen(true);
     usePreviewStore.getState().setRightTab("agent");
     usePreviewStore.getState().setAgentSub("experts");
   },
@@ -174,6 +189,27 @@ const rawActions = {
     usePreviewStore.getState().setRightTab("agent");
     usePreviewStore.getState().setAgentSub("blender");
   },
+
+  // ── MENÚ «VÍDEO» (nou, independent del d'«IA») ─────────────────────────
+  // Muntatge professional Blender → Kdenlive/ffmpeg dirigit per IA. Cada
+  // entrada obre el panell nou i, quan toca, demana la feina AL MOTOR real
+  // (el mateix que la IA fa servir des del xat amb `@video:`).
+  "video.panel": () => openVideoStudio((v) => useUIStore.getState().setShowVideoStudio(v)),
+  "video.scan": () =>
+    openVideoStudio((v) => useUIStore.getState().setShowVideoStudio(v), "scan"),
+  // La IA ho fa TOT: mira, escriu el guió, es critica i renderitza (40 min).
+  "video.director": () =>
+    openVideoStudio((v) => useUIStore.getState().setShowVideoStudio(v), "director"),
+  "video.auto": () =>
+    openVideoStudio((v) => useUIStore.getState().setShowVideoStudio(v), "auto"),
+  "video.preview": () =>
+    openVideoStudio((v) => useUIStore.getState().setShowVideoStudio(v), "preview"),
+  "video.render": () =>
+    openVideoStudio((v) => useUIStore.getState().setShowVideoStudio(v), "render"),
+  "video.export": () =>
+    openVideoStudio((v) => useUIStore.getState().setShowVideoStudio(v), "export"),
+  "video.kdenlive": () =>
+    openVideoStudio((v) => useUIStore.getState().setShowVideoStudio(v), "kdenlive"),
 
   // Temes de colors (tota la pantalla + editor)
   "view.themeDark": () => useUIStore.getState().setTheme("dark"),
@@ -239,6 +275,8 @@ export const commandList: CommandDef[] = [
   { id: "view.rightPanel", labelKey: "menu.toggleRightPanel", kbd: "⌥⌘J" },
   { id: "view.wordWrap", labelKey: "menu.wordWrap", kbd: "⌥Z" },
   { id: "view.minimap", labelKey: "menu.minimap" },
+  { id: "view.cursorClassic", labelKey: "menu.cursorClassic" },
+  { id: "view.cursorFun", labelKey: "menu.cursorFun" },
   { id: "view.zoomIn", labelKey: "menu.zoomIn", kbd: "⌘=" },
   { id: "view.zoomOut", labelKey: "menu.zoomOut", kbd: "⌘-" },
   { id: "view.zoomReset", labelKey: "menu.zoomReset", kbd: "⌘0" },
@@ -271,6 +309,14 @@ export const commandList: CommandDef[] = [
   { id: "ai.experts", labelKey: "rightPanel.experts" },
   { id: "ai.unreal", labelKey: "menu.unreal" },
   { id: "ai.blender", labelKey: "menu.blender" },
+  { id: "video.panel", labelKey: "menu.videoPanel" },
+  { id: "video.director", labelKey: "menu.videoDirector" },
+  { id: "video.scan", labelKey: "menu.videoScan" },
+  { id: "video.auto", labelKey: "menu.videoAuto" },
+  { id: "video.preview", labelKey: "menu.videoPreview" },
+  { id: "video.render", labelKey: "menu.videoRender" },
+  { id: "video.export", labelKey: "menu.videoExport" },
+  { id: "video.kdenlive", labelKey: "menu.videoKdenlive" },
   { id: "account.open", labelKey: "account.title" },
   { id: "view.themeDark", labelKey: "settings.themeDark" },
   { id: "view.themeLight", labelKey: "settings.themeLight" },

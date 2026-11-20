@@ -23,7 +23,7 @@ import { useUIStore } from "../../stores/uiStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { useAIStore } from "../../stores/aiStore";
 import { useProviderStore, type ProviderInput } from "../../stores/providerStore";
-import { PRESETS } from "../AI/ProviderManager";
+import { PRESETS, presetModelsFor } from "../AI/ProviderManager";
 import {
   WP_THEME_CORE,
   WP_THEME_FILE_SYSTEM,
@@ -557,11 +557,19 @@ export default function WordPressThemeModal() {
                   <div className="wp-2">
                     <div className="field">
                       <label>{t("wpTheme.apiModel")}</label>
+                      {/* Suggimits segons el servei triat: els noms que Claude i
+                          DeepSeek reconeixen avui (escrits a mà també valen). */}
                       <input
+                        list="wp-api-model-options"
                         value={apiForm.model}
                         onChange={(e) => setApiForm((f) => ({ ...f, model: e.target.value }))}
-                        placeholder="gpt-4o-mini"
+                        placeholder="claude-sonnet-5-5"
                       />
+                      <datalist id="wp-api-model-options">
+                        {presetModelsFor(apiForm.baseUrl, apiForm.model).map((m) => (
+                          <option key={m} value={m} />
+                        ))}
+                      </datalist>
                     </div>
                     <div className="field">
                       <label>{t("wpTheme.apiToken")}</label>

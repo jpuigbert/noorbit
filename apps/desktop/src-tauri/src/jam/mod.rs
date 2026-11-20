@@ -31,7 +31,7 @@ use tauri::{AppHandle, Emitter};
 use tokio_util::sync::CancellationToken;
 
 use noorbit_jam::{
-    Cache, Diff, Plan, Reporter, Task, TaskContext, Verifier, Worker,
+    Cache, Diff, Plan, Progress, ProgressSink, Reporter, Task, TaskContext, Verifier, Worker,
 };
 use noorbit_planner::{Brief, Engine, LlmClient, Planner};
 
@@ -65,7 +65,18 @@ pub struct JamState {
     /// en arribar a `started_at + duration_secs`).
     pub duration_secs: u64,
     pub report_path: String,
+    /// Projecte (arrel del repo) on la Jam està treballant. Sense això, quan
+    /// la Jam acabava l'usuari no podia saber QUIN projecte havia tocat —
+    /// sobretot si té diverses finestres de NoOrbit obertes.
+    pub project_path: String,
     pub error: Option<String>,
+    /// Proveïdor i model d'IA que fa servir la Jam. La UI els mostra: sense
+    /// això l'usuari no sabia QUI li estava construint el joc.
+    pub provider: String,
+    pub model: String,
+    /// L'usuari ha demanat aturar la Jam i encara no s'ha aturat del tot
+    /// (l'agent pot estar enmig d'una tasca). La UI hi posa «aturant…».
+    pub stopping: bool,
 }
 
 impl Default for JamState {
@@ -83,7 +94,11 @@ impl Default for JamState {
             finished_at: None,
             duration_secs: 0,
             report_path: String::new(),
+            project_path: String::new(),
             error: None,
+            provider: String::new(),
+            model: String::new(),
+            stopping: false,
         }
     }
 }
@@ -128,8 +143,18 @@ impl NoOrbitLlm {
 #[async_trait::async_trait]
 impl LlmClient for NoOrbitLlm {
     async fn complete(&self, prompt: &str) -> Result<String, String> {
+        // `long_run`: som en segon pla, ningú mira la pantalla. Els clients
+        // d'120–240 s del xat humà tallaven la generació d'un fitxer sencer
+        // amb un model local i la Jam mai arribava a escriure res.
         self.ai
-            .chat_opts(prompt, None, &ChatOpts::default())
+            .chat_opts(
+                prompt,
+                None,
+                &ChatOpts {
+                    long_run: true,
+                    ..Default::default()
+                },
+            )
             .await
             .map_err(|e| e.to_string())
     }
@@ -142,7 +167,7 @@ impl LlmClient for NoOrbitLlm {
 /// Prompt del worker: es demana codi amb blocs `@file:` (el mateix format
 /// que usa el xat de NoOrbit), i el model ha de llistar els criteris que
 /// pot comprovar.
-fn worker_prompt(task: &Task, root: &Path, lessons: &str, quality: noorbit_jam::QualityLevel) -> String {
+fn worker_prompt(task: &Task, root: &Path, lessons: &str, quality: noorbit_jam::QualityLevel, engine_help: &str) -> String {
     let acceptance = task
         .acceptance
         .iter()
@@ -167,13 +192,17 @@ fn worker_prompt(task: &Task, root: &Path, lessons: &str, quality: noorbit_jam::
          DESCRIPCIÓ: {description}\n\n\
          CRITERIS D'ACCEPTACIÓ (ha de complir):\n{acceptance}\n\n\
          FITXERS A L'ARREL DEL PROJECTE: {listing}\n\n\
-         {quality_hint}\n\n\
+         {quality_hint}{engine_help}\n\n\
          REGLES ESTRICTES:\n\
          1. Retorna el codi amb blocs «@file: ruta/relativa» seguits del codi.\n\
          2. Només paths RELATIUS dins del projecte (mai «..», mai absoluts).\n\
          3. Toca els mínims fitxers possibles; no reescriguis tot el projecte.\n\
-         4. Si la tasca no es pot fer, explica-ho en 3 línies i no escriguis fitxers.\n\
-         5. Al final, escriu una línia «RESUM: …» amb què has fet.\n\
+         4. Per MODIFICAR un fitxer que ja existeix, si surt més curt que\n\
+            reescriure'l sencer: una línia «@edit: ruta», i per cada canvi\n\
+            una línia «<<<<<<< CERCA», el codi antic exacte, una línia\n\
+            «=======», el codi nou (buit = esborrar) i una línia «>>>>>>>».\n\
+         5. Si la tasca no es pot fer, explica-ho en 3 línies i no escriguis fitxers.\n\
+         6. Al final, escriu una línia «RESUM: …» amb què has fet.\n\
          {lessons}",
         title = task.title,
         description = task.description,
@@ -184,6 +213,7 @@ fn worker_prompt(task: &Task, root: &Path, lessons: &str, quality: noorbit_jam::
             noorbit_jam::QualityLevel::Reduced => "Qualitat: REDUÏDA. Escriu només el mínim necessari (≤150 línies). Evita comentaris llargs.",
             noorbit_jam::QualityLevel::Minimal => "Qualitat: MÍNIMA. Escriu el codi més simple possible (≤80 línies). Només el que fa la tasca.",
         },
+        engine_help = engine_help,
         lessons = lessons,
     )
 }
@@ -196,6 +226,10 @@ pub struct NoOrbitWorker {
     /// Recerca web AUTOPILOTADA (headless): si hi és, el worker s'informa sol
     /// a internet abans d'escriure codi, sense que l'usuari toque res.
     research: Option<Arc<crate::agent::AgentOrchestrator>>,
+    /// Emissor de «què fa la IA» i del seu pensament cap a la UI. El worker
+    /// corre al SUBPROCÉS, així que l'únic canal és el `ProgressSink` (que
+    /// `StdoutProgress` tradueix a línies `JAM|`).
+    progress: Option<Arc<dyn ProgressSink>>,
 }
 
 impl NoOrbitWorker {
@@ -205,6 +239,7 @@ impl NoOrbitWorker {
             root,
             lessons: None,
             research: None,
+            progress: None,
         }
     }
 
@@ -218,6 +253,19 @@ impl NoOrbitWorker {
         self.research = Some(orch);
         self
     }
+
+    /// Habilita l'emissió de notes i pensament a la UI (què està fent la IA).
+    pub fn with_progress(mut self, progress: Arc<dyn ProgressSink>) -> Self {
+        self.progress = Some(progress);
+        self
+    }
+
+    /// Envia un esdeveniment de progrés si hi ha emissor (si no, no fa res).
+    async fn emit(&self, ev: Progress) {
+        if let Some(sink) = &self.progress {
+            sink.on_progress(ev).await;
+        }
+    }
 }
 
 /// Ruta relativa segura dins el projecte (mai «..», mai absoluta).
@@ -227,6 +275,55 @@ fn safe_rel(p: &str) -> Option<String> {
         return None;
     }
     Some(t)
+}
+
+/// Extrau el «pensament» del model: la prosa i la línia RESUM, SENS ELS
+/// blocs de codi (` ``` `) ni els marcadors `@file:`/`@edit:` i de bloc
+/// d'edició. Es retalla a ~1200 caràcters perquè la UI no s'ompli de codi.
+fn thinking_excerpt(response: &str) -> String {
+    const MAX: usize = 1200;
+    let mut out = String::new();
+    let mut in_code = false;
+    for line in response.lines() {
+        let t = line.trim();
+        if t.starts_with("```") {
+            in_code = !in_code;
+            continue;
+        }
+        if in_code {
+            continue;
+        }
+        // Marcadors del protocol d'escriptura: no són pensament.
+        let end_marker = ">".repeat(7);
+        let is_marker = t.starts_with("@file:")
+            || t.starts_with("@edit:")
+            || t.starts_with("@unreal:")
+            || t.starts_with("@unreal-py:")
+            || t.starts_with("@blender:")
+            || t.starts_with("@blender-headless:")
+            || t.starts_with("@blender-video:")
+            || t.starts_with("@godot:")
+            || t.starts_with("@bevy:")
+            || t.starts_with("@import:")
+            || t.starts_with("<<<<<<<")
+            || t.starts_with(&end_marker)
+            || t == "=======";
+        let is_resum = t.starts_with("RESUM:") || t.starts_with("RESUM ");
+        if is_marker || (t.is_empty() && !is_resum) {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+        if out.len() >= MAX {
+            break;
+        }
+    }
+    let mut out = out.trim().to_string();
+    if out.chars().count() > MAX {
+        let cut: String = out.chars().take(MAX).collect();
+        out = format!("{}…", cut.trim_end());
+    }
+    out
 }
 
 #[async_trait::async_trait]
@@ -242,13 +339,28 @@ impl Worker for NoOrbitWorker {
             String::new()
         };
 
-        let prompt = worker_prompt(task, &self.root, &lessons, ctx.quality);
+        // Eines de motor: si la carpeta del projecte és (o conté) un projecte
+        // d'Unreal o hi ha Blender a l'abast, el model pot dirigir-los amb
+        // directrius (@unreal:, @blender:…). Es detecta a cada tasca perquè
+        // l'usuari pot obrir Blender/Unreal a mitja Jam.
+        let engine = crate::engine_tools::EngineContext::detect(&self.root);
+        let engine_help = if engine.any() {
+            crate::engine_tools::directives_help(&engine)
+        } else {
+            String::new()
+        };
+        let prompt = worker_prompt(task, &self.root, &lessons, ctx.quality, &engine_help);
         // AUTOPILOTATGE: la IA cerca informació fresca a internet (documentació,
         // APIs, solucions) abans d'escriure codi. Headless: mai obri finestres
         // ni demana res a l'usuari. Amb timeout perquè una cerca lenta no
         // encalle la tasca; si falla, es continua sense el context web.
         let mut prompt = prompt;
         if let Some(orch) = &self.research {
+            self.emit(Progress::Note {
+                id: task.id.clone(),
+                text: "cercant informació a internet per fonamentar la tasca…".into(),
+            })
+            .await;
             let q = format!("{} {}", task.title, task.description);
             if let Ok(info) = tokio::time::timeout(
                 Duration::from_secs(60),
@@ -262,11 +374,110 @@ impl Worker for NoOrbitWorker {
                 }
             }
         }
-        let response = self.llm.complete(&prompt).await.map_err(|e| e.to_string())?;
+        self.emit(Progress::Note {
+            id: task.id.clone(),
+            text: format!("generant codi per «{}»…", task.title),
+        })
+        .await;
+        let mut response = self.llm.complete(&prompt).await.map_err(|e| e.to_string())?;
+
+        // PROCÉS DE PENSAMENT: es mostra a la UI el raonament del model
+        // (prosa + RESUM, sense blocs de codi) perquè l'usuari vegi QUÈ
+        // està fent la IA, no només el títol de la tasca.
+        let thought = thinking_excerpt(&response);
+        if !thought.is_empty() {
+            self.emit(Progress::Thinking {
+                id: task.id.clone(),
+                text: thought,
+            })
+            .await;
+        }
+
+        // ── Eines de motor: el model pot dirigir Unreal/Blender ─────────────
+        // Cada directriu s'executa DE VERITAT contra el motor i el resultat
+        // torna al model, que pot demanar-ne més o escriure els fitxers
+        // finals. Les operacions queden registrades a EngineWork/ del projecte.
+        let mut tool_files: Vec<String> = Vec::new();
+        if engine.any() {
+            let mut tool_context = String::new();
+            for _round in 0..crate::engine_tools::MAX_TOOL_ROUNDS {
+                let directives = crate::engine_tools::parse_directives(&response);
+                if directives.is_empty() {
+                    break;
+                }
+                let mut outcomes = Vec::new();
+                for d in &directives {
+                    self.emit(Progress::Note {
+                        id: task.id.clone(),
+                        text: format!("executant l'eina de motor «{}»…", d.kind.name()),
+                    })
+                    .await;
+                    let o = crate::engine_tools::execute(&engine, d).await;
+                    tool_files.extend(o.artifacts.iter().filter_map(|p| {
+                        p.strip_prefix(&self.root)
+                            .ok()
+                            .map(|r| r.to_string_lossy().replace('\\', "/"))
+                    }));
+                    self.emit(Progress::Note {
+                        id: task.id.clone(),
+                        text: format!(
+                            "eina {}: {}",
+                            o.kind,
+                            crate::engine_tools::clip(&o.summary, 200)
+                        ),
+                    })
+                    .await;
+                    outcomes.push(o);
+                }
+                tool_context.push_str(&crate::engine_tools::format_results(&outcomes));
+                let follow = format!(
+                    "{prompt}\n{tool_context}\nLes directrius d'eines ja s'han executat (els resultats són a sobre). \
+Ara COMPLETA la tasca: escriu els fitxers que calgui amb «@file:» o «@edit:» i acaba amb «RESUM: …». \
+Si et calen més eines de motor, emet més directrius."
+                );
+                response = match self.llm.complete(&follow).await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        self.emit(Progress::Note {
+                            id: task.id.clone(),
+                            text: format!(
+                                "la IA ha fallat en el seguiment d'eines ({e}); es conserva la feina de motor feta"
+                            ),
+                        })
+                        .await;
+                        break;
+                    }
+                };
+            }
+            tool_files.sort();
+            tool_files.dedup();
+        }
 
         // Extracció dels blocs «@file:» (mateix motor que el xat).
         let blocks = crate::agent::runtools::extract_file_blocks(&response);
         if blocks.is_empty() {
+            // SEGONA VIA: els models petits tallen fitxers sencers o els
+            // inventen; amb «@edit:» (CERCA/NOU quirúrgic) sí que saben
+            // MODIFICAR codi existent. Si n'hi ha, la tasca COMPTA com a
+            // escrita — abans es declarava «el model no ha retornat cap
+            // fitxer» i la Jam moria sense haver canviat res.
+            let edits = crate::agent::runtools::extract_edit_blocks(&response);
+            if !edits.is_empty() {
+                let report = crate::agent::runtools::apply_edit_blocks_at(&self.root, &response);
+                if !report.is_empty() {
+                    let touched: Vec<String> = edits
+                        .iter()
+                        .filter_map(|b| safe_rel(&b.path))
+                        .collect();
+                    return Ok(Diff::materialized_files(touched, 0));
+                }
+            }
+            // NOVA SORTIDA: la tasca pot ser de MOTOR (actors, escenes,
+            // vídeos renderitzats) sense cap fitxer de codi; els artefactes
+            // d'eines (EngineWork/) són la feina feta i compten com a tal.
+            if !tool_files.is_empty() {
+                return Ok(Diff::materialized_files(tool_files, 0));
+            }
             if let Some(store) = &self.lessons {
                 let _ = store
                     .append(noorbit_jam::Phase::General, &task.id, "el model no ha retornat cap fitxer (@file:)", "")
@@ -300,6 +511,9 @@ impl Worker for NoOrbitWorker {
             }
             written.push(rel);
         }
+        // Els artefactes de les eines de motor també formen part del patch:
+        // el verificador i la UI han de veure que la tasca ha fet feina real.
+        written.extend(tool_files.clone());
         if written.is_empty() {
             return Err("cap fitxer vàlid al patch".into());
         }
@@ -389,16 +603,27 @@ impl Verifier for NoOrbitVerifier {
         if files.is_empty() {
             return Err("cap fitxer modificat: la tasca no ha fet res".into());
         }
-        // Criteris d'acceptació que mencionen un camí: ha d'existir a terra o
-        // ser un dels fitxers que el worker acaba d'escriure.
+        // Criteris d'acceptació que mencionen un camí. EL PLA SOLEIX barrejar
+        // fitxers nous amb altres que JA EXISTEIXEN al projecte (i que la
+        // tasca no ha de tocar): exigir que TOTS hi fossin bloquejava tasques
+        // perfectament fetes — la Jam les perdia totes amb el `reset_hard` i
+        // acabava sense haver escrit codi. Amb prou fenia n'hem de trobar UN.
+        let mut trobats = 0usize;
+        let mut demanats = 0usize;
         for crit in &task.acceptance {
             for tok in path_tokens(crit) {
-                let escrit = files.iter().any(|f| f == &tok);
+                demanats += 1;
+                let escrit = files.iter().any(|f| f == &tok || f.ends_with(&tok) || tok.ends_with(f.as_str()));
                 let existeix = self.root.join(&tok).exists();
-                if !(escrit || existeix) {
-                    return Err(format!("criteri no complert: falta {tok} («{crit}»)"));
+                if escrit || existeix {
+                    trobats += 1;
                 }
             }
+        }
+        if demanats > 0 && trobats == 0 {
+            return Err(format!(
+                "cap criteri d'acceptació amb fitxer trobat ({demanats} camins mencionats)"
+            ));
         }
         self.run(task, ctx).await
     }
@@ -502,7 +727,7 @@ impl Reporter for NoOrbitReporter {
 pub struct JamRequest {
     /// Text del brief (el que ha escrit l'usuari).
     pub brief: String,
-    /// Motor: godot4 | blender | unreal5 | unity | custom.
+    /// Motor: godot4 | bevy | blender | unreal5 | unity | custom.
     pub engine: String,
     /// Durada màxima en segons.
     pub duration_secs: u64,

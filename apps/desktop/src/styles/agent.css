@@ -1185,6 +1185,43 @@
   gap: 6px;
   min-width: 0;
 }
+
+/* DICTAT PER VEU: botó de micròfon i cronòmetre mentres es grava. El roig
+   només apareix en gravar (és l'únic moment en què el micròfon està obert). */
+.ap-voice {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ap-voice-timer {
+  font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--error);
+  padding: 4px 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--error) 55%, transparent);
+  background: var(--bg-2);
+}
+.ap-voice-btn.recording {
+  color: #fff;
+  background: var(--error);
+  border-color: var(--error);
+  animation: ap-voice-pulse 1.4s ease-in-out infinite;
+}
+.ap-voice-btn.recording:hover {
+  background: var(--error);
+  color: #fff;
+}
+@keyframes ap-voice-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--error) 55%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
 /* Insígnia del context: el codi del projecte va SEMPRE inclòs. El detall
    complet (quants fitxers, quants caràcters…) viu al tooltip. */
 .ap-ctx-badge {

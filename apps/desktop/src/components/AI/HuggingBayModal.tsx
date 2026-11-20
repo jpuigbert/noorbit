@@ -18,7 +18,7 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import { useAIStore } from "../../stores/aiStore";
+import { useAIStore, type FitInfo } from "../../stores/aiStore";
 import { useUIStore } from "../../stores/uiStore";
 import { useT } from "../../i18n";
 import "./HuggingBayModal.css";
@@ -96,6 +96,10 @@ interface QueueItem {
   size: number | null;
   status: "pending" | "active" | "done" | "error" | "cancelled";
   message?: string;
+  /// SEGON CLIC conscient: l'usuari vol un GGUF que NO cabrà a la RAM. El
+  /// backend refusaria la descàrrega sense aquest `true` (qui decideix és
+  /// `ai::fit`, aquí només es transmet la intenció).
+  force?: boolean;
 }
 
 /// Claus i18n de l'estat de cada element de la cua.
@@ -143,8 +147,12 @@ export default function HuggingBayModal() {
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [quant, setQuant] = useState<string>("Q4_K_M");
   const [msg, setMsg] = useState<string | null>(null);
+  /// Encaix de RAM del fitxer recomanat (calculat pel backend amb la RAM real
+  /// d'aquest equip). `null` = encara no ho sabem: no es pinta cap verd fals.
+  const [fit, setFit] = useState<FitInfo | null>(null);
   const pulling = useAIStore((s) => s.pulling);
   const loadModels = useAIStore((s) => s.loadModels);
+  const fitCheck = useAIStore((s) => s.fitCheck);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // On es desen els models GGUF (pot ser un disc extern triat pel usuari).
   const [ggufDir, setGgufDir] = useState("");
@@ -262,6 +270,24 @@ export default function HuggingBayModal() {
       });
   }, [sel, quant]);
 
+  // ENCAIX ABANS DE GASTAR LA DESCÀRREGA (idea del `soup doctor` de Soup,
+  // Apache-2.0). La mida real és la del GGUF recomanat; el veredicte el dona
+  // el backend amb la RAM d'aquest equip, no una xifra inventada aquí.
+  useEffect(() => {
+    if (!details) {
+      setFit(null);
+      return;
+    }
+    const mida = details.recommended?.size ?? details.model.size ?? null;
+    let viu = true;
+    void fitCheck(null, mida).then((f) => {
+      if (viu) setFit(f);
+    });
+    return () => {
+      viu = false;
+    };
+  }, [details, fitCheck]);
+
   // Espai lliure al disc destí: es refresca en obrir, en canviar de carpeta
   // i en acabar cada descàrrega (el disc es va omplint).
   const refreshSpace = useCallback(() => {
@@ -303,7 +329,12 @@ export default function HuggingBayModal() {
             ok: boolean;
             model: string | null;
             message: string;
-          }>(cmd, { id: next.id, quant: next.quant });
+          }>(cmd, {
+            id: next.id,
+            quant: next.quant,
+            // Sense aquest `true` el backend REFUSA el que no hi cap.
+            force: next.force ? true : null,
+          });
           mutateQueue((q) =>
             q.map((it) =>
               it.key === next.key
@@ -358,6 +389,17 @@ export default function HuggingBayModal() {
           (it.status === "pending" || it.status === "active")
       );
       if (dup) return;
+      // Si l'encaix diu que NO hi cap, cal un segon clic CONSCIENT: és un
+      // GGUF que ocuparà el disc i no es podrà carregar (o anirà a trashes).
+      // Qui ho decideix és el backend; aquí només preguntem i transmetem.
+      const noCap = fit?.verdicte === "nocap";
+      if (noCap) {
+        const motiu = [fit?.motiu, fit?.sortida].filter(Boolean).join(" ");
+        const vol = window.confirm(
+          [t("ai.fitNoFit"), motiu, t("ai.fitAnywayQ")].filter(Boolean).join("\n\n")
+        );
+        if (!vol) return;
+      }
       const key = `${sel}:${mode}:${quant}:${++queueSeq.current}`;
       mutateQueue((q) => [
         ...q,
@@ -369,11 +411,12 @@ export default function HuggingBayModal() {
           mode,
           size: details.recommended?.size ?? null,
           status: "pending",
+          force: noCap,
         },
       ]);
       void pump();
     },
-    [sel, details, quant, mutateQueue, pump]
+    [sel, details, quant, mutateQueue, pump, fit, t]
   );
 
   /// Cancel·la un element: si és en curs, demana al backend que l'aturi (esborra
@@ -591,6 +634,31 @@ export default function HuggingBayModal() {
                     <div>
                       <span>{t("hfBay.ram")}</span>
                       <b>{details.ram_gb ? `${details.ram_gb} GB` : "—"}</b>
+                    </div>
+                    {/* ENCAIX en aquest equip (mateix xip i mateix text que al
+                        catàleg d'Ollama): es veu ABANS de prémer «Baixa», i el
+                        títol explica els números i què fer. */}
+                    <div>
+                      <span>{t("hfBay.fit")}</span>
+                      <b>
+                        {fit ? (
+                          <span
+                            className={
+                              "mm-fit " +
+                              (fit.verdicte === "nocap"
+                                ? "nocap"
+                                : fit.verdicte === "desconegut"
+                                  ? "unknown"
+                                  : "cap")
+                            }
+                            title={[fit.motiu, fit.sortida].filter(Boolean).join(" ")}
+                          >
+                            {fit.etiqueta ?? "—"}
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </b>
                     </div>
                     <div>
                       <span>{t("hfBay.status")}</span>

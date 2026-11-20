@@ -22,6 +22,10 @@ pub const UNREAL_RC_PORT: u16 = 30010;
 /// Port del servidor WebSocket de Remote Control d'Unreal.
 pub const UNREAL_RC_WS_PORT: u16 = 30020;
 
+/// Port del servidor MCP del plugin oficial d'Unreal (ModelContextProtocol,
+/// UE 5.8+): escolta a 127.0.0.1:8000/mcp quan «Auto Start Server» és actiu.
+pub const UNREAL_MCP_PORT: u16 = 8000;
+
 /// Variable d'entorn per indicar el port del pont a l'script de Blender.
 pub const ENV_BLENDER_PORT: &str = "NOORBIT_BRIDGE_PORT";
 

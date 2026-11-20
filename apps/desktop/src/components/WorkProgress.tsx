@@ -74,12 +74,19 @@ export default function WorkProgress({
     pct = progressPct(doneUnits, totalUnits);
     remainingMs = etaByProgress(startedAtMs, endMs, doneUnits, totalUnits);
     finishMs = remainingMs != null ? endMs + remainingMs : null;
-    // Sostre de durada: la Jam no pot acabar més tard del temps triat.
+    // Sostre de durada: la Jam no pot acabar més tard del temps triat. I
+    // mentre no hi ha ritme (cap tasca acabada), el sostre dona un compte
+    // regressiu REAL des del primer segon: sense això el xip deia «calculant…
+    //» minuts sencers i la feina llarga semblava penjada.
     if (deadlineMs != null && deadlineMs > 0) {
-      if (finishMs != null && finishMs > deadlineMs) finishMs = deadlineMs;
+      if (remainingMs == null && running) {
+        remainingMs = Math.max(0, deadlineMs - endMs);
+        finishMs = deadlineMs;
+      }
       if (remainingMs != null) {
         remainingMs = Math.max(0, Math.min(remainingMs, deadlineMs - endMs));
       }
+      if (finishMs != null && finishMs > deadlineMs) finishMs = deadlineMs;
     }
   }
 

@@ -60,7 +60,9 @@ impl OnlineAdapter {
         let sys = system.unwrap_or("Respon en català, de forma concisa i directa.");
         let mut last_err = String::new();
         for id in ids {
-            let prepared = self.remote.lock().unwrap().prepare(&id);
+            // `true`: aquest adaptador delega generacions LLARGUES (fitxers
+            // sencers); amb el client de 120 s la resposta moria a mitja.
+            let prepared = self.remote.lock().unwrap().prepare(&id, true);
             let (provider, client) = match prepared {
                 Ok(v) => v,
                 Err(e) => {

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { RefreshCw } from "lucide-react";
 import { useT } from "../../i18n";
+import AutonomousLearning from "../AI/AutonomousLearning";
 import { useBlenderLiveStore } from "../../stores/blenderLiveStore";
 
 /// Forma mínima del config que necessitem tocar. Conservem la resta de camps
@@ -90,6 +91,9 @@ export default function IntegrationsPanel() {
 
   return (
     <div className="settings-general">
+      {/* ── IA nativa: aprenentatge autònom en repòs (vagueig pel web) ── */}
+      <AutonomousLearning />
+
       {/* ── Blender (Objectiu 1) ── */}
       <div className="setting-row setting-row-col">
         <span className="settings-section-title">{t("settings.blenderSection")}</span>

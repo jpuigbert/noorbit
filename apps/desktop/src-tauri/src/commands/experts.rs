@@ -97,6 +97,9 @@ explicació. No diguis que ho has fet si no has emès cap «@file:».";
 /// Executa una tasca concreta amb un especialista (el seu rol, instruccions i
 /// model). `session`/`history` fan que la resposta pertanya al xat que l'ha
 /// cridat — i que l'especialista conega el fil del treball (o d'un «fork»).
+/// `system_extra` és text que la IA principal injecta al final del system
+/// prompt (p. ex. la llista dels altres especialistes): així un especialista
+/// que parla pel xat també pot delegar subtasques amb «@use:».
 #[command]
 pub async fn expert_run(
     app: AppHandle,
@@ -105,6 +108,7 @@ pub async fn expert_run(
     prompt: String,
     session: Option<String>,
     history: Option<Vec<crate::ai::HistoryTurn>>,
+    system_extra: Option<String>,
 ) -> Result<String, String> {
     let ai: Arc<AiManager> = state.ai_manager.clone();
     let expert = state
@@ -116,9 +120,14 @@ pub async fn expert_run(
         model: expert.model.clone(),
         history: history.unwrap_or_default(),
         images: Vec::new(),
+        long_run: false,
     };
     let sid = session.unwrap_or_else(|| crate::ai::DEFAULT_SESSION.to_string());
-    let system = format!("{}{}", expert.system_prompt, FILE_PROTOCOL);
+    let mut system = format!("{}{}", expert.system_prompt, FILE_PROTOCOL);
+    if let Some(extra) = system_extra.filter(|e| !e.trim().is_empty()) {
+        system.push_str("\n\n");
+        system.push_str(&extra);
+    }
     let out = crate::ai::in_session(
         &sid,
         ai.chat_opts(&prompt, Some(&system), &opts),

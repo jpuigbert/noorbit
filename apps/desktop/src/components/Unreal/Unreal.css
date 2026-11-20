@@ -44,6 +44,22 @@
 .ue-status.err {
   color: var(--error);
 }
+.ue-status.warn {
+  color: var(--warning);
+}
+/* Llista de rutes (instal·lacions detectades, motors a mitges): pot ser
+   llarga i ha de poder trencar la línia en qualsevol punt. */
+.ue-paths {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.ue-paths li {
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono, monospace);
+}
 
 .ue-tabs {
   display: flex;
@@ -152,11 +168,11 @@
   margin-bottom: 6px;
 }
 .ue-build-result.ok {
-  background: rgba(74, 222, 128, 0.12);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
   color: var(--success);
 }
 .ue-build-result.fail {
-  background: rgba(248, 113, 113, 0.12);
+  background: color-mix(in srgb, var(--error) 14%, transparent);
   color: var(--error);
 }
 .ue-build-log {
@@ -171,4 +187,430 @@
   color: var(--text-2);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* ── Pestanya Agent MCP (Unreal 5.8+): tres fases ── */
+.ue-agent {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.ue-agent-desc {
+  font-size: 12px;
+  color: var(--text-1);
+  line-height: 1.5;
+  margin: 0;
+}
+.ue-agent__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+}
+.ue-agent__section-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.ue-agent-task {
+  min-height: 72px;
+  background: var(--bg-0);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 8px;
+  resize: vertical;
+}
+.ue-agent-task::placeholder {
+  color: var(--text-3);
+}
+.ue-agent-answer {
+  background: var(--bg-0);
+  border: 1px solid var(--border-2);
+  border-left: 3px solid var(--success);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  font-size: 12px;
+  color: var(--text-0);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+}
+.ue-agent-answer.warn {
+  border-left-color: var(--warning);
+}
+
+/* ── FASE 1 · Setup d'un clic ── */
+.ue-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ue-setup__bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ue-setup__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+}
+.ue-setup__icon:hover:not(:disabled) {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+.ue-setup__launch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.ue-setup__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-0);
+}
+.ue-setup__progress {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bg-3);
+  overflow: hidden;
+}
+.ue-setup__progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width var(--speed) var(--ease-out);
+}
+.ue-setup__project {
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+.ue-setup__project code {
+  font-family: var(--font-mono);
+  color: var(--text-1);
+}
+.ue-setup__step {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 11.5px;
+  color: var(--text-1);
+}
+.ue-setup__step.is-ok > svg {
+  color: var(--success);
+  flex: none;
+  margin-top: 1px;
+}
+.ue-setup__step.is-err > svg {
+  color: var(--error);
+  flex: none;
+  margin-top: 1px;
+}
+.ue-setup__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ue-setup__text strong {
+  color: var(--text-0);
+  font-weight: 600;
+}
+.ue-setup__text span {
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ue-setup__waiting {
+  color: var(--warning);
+  font-style: normal;
+  font-size: 11px;
+}
+.ue-setup__summary {
+  font-size: 11.5px;
+  color: var(--text-1);
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+.ue-setup__summary.is-ok strong {
+  color: var(--success);
+}
+.ue-setup__summary.is-err strong {
+  color: var(--error);
+}
+.ue-setup__meta {
+  color: var(--text-3);
+}
+
+/* ── FASE 2 · Catàleg d'eines ── */
+.ue-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ue-tools__bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ue-tools__search {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg-0);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+}
+.ue-tools__search input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-0);
+  font-size: 12px;
+}
+.ue-tools__search input:focus {
+  outline: none;
+}
+.ue-tools__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 8px;
+  color: var(--text-2);
+  font-size: 11.5px;
+  text-align: center;
+}
+.ue-tools__empty p {
+  margin: 0;
+}
+.ue-tools__empty.is-error {
+  color: var(--error);
+}
+.ue-tools__group {
+  display: flex;
+  flex-direction: column;
+}
+.ue-tools__group-title {
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 6px 2px 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ue-tools__item {
+  /* Rendiment: el navegador no calcula el layout de les eines fora de
+     pantalla (el catàleg pot tenir centenars d'entrades). */
+  content-visibility: auto;
+  contain-intrinsic-size: 0 28px;
+}
+.ue-tools__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 2px;
+  color: var(--text-1);
+  font-size: 11.5px;
+}
+.ue-tools__row:hover {
+  color: var(--text-0);
+}
+.ue-tools__row code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.ue-tools__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 10px;
+  padding: 1px 6px;
+  color: var(--warning);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-sm);
+  opacity: 0.85;
+}
+.ue-tools__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-0);
+}
+.ue-tools__detail p {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-1);
+  line-height: 1.5;
+}
+.ue-tools__detail summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+.ue-tools__detail pre {
+  max-height: 180px;
+  overflow: auto;
+  background: var(--bg-2);
+  border-radius: var(--radius-sm);
+  padding: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-1);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ue-tools__meta {
+  color: var(--text-3) !important;
+}
+.ue-tools__arg-label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: 12px;
+  color: var(--text-1);
+}
+.ue-tools__arg-label textarea {
+  padding: var(--space-2);
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  resize: vertical;
+  min-height: 60px;
+}
+.ue-tools__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.ue-tools__error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--error);
+}
+.ue-tools__result {
+  font-size: 11.5px;
+  color: var(--text-1);
+}
+.ue-tools__result pre {
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--bg-2);
+  border-radius: var(--radius-sm);
+  padding: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-1);
+}
+
+/* ── FASE 3 · Xat amb l'agent ── */
+.ue-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ue-chat__composer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ue-chat__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ue-chat__log {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-0);
+}
+.ue-chat__event {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-1);
+}
+.ue-chat__event > svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--text-3);
+}
+.ue-chat__event.is-tool > svg {
+  color: var(--accent-2);
+}
+.ue-chat__event.is-ok > svg {
+  color: var(--success);
+}
+.ue-chat__event.is-error > svg {
+  color: var(--error);
+}
+.ue-chat__event.is-answer > svg {
+  color: var(--accent);
+}
+.ue-chat__event-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ue-chat__tool {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-2);
+}
+.ue-chat__time {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+.ue-chat__error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--error);
 }

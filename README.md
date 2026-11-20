@@ -1,255 +1,195 @@
-# NoOrbit
-
-IDE nativa per a escriptori amb **agent IA local**, integracions reals amb **Blender** i **Unreal Engine 5**, suport per a **Android/iOS natius** (Kotlin+Compose, Swift+SwiftUI) amb emuladors, i un sistema obert d'**extensions**, **skills** i **MCP**.
-
-Construïda amb [Tauri 2](https://tauri.app) + [React](https://react.dev) + [TypeScript](https://www.typescriptlang.org) + [Monaco Editor](https://microsoft.github.io/monaco-editor/). Lleugera, sense Electron.
-
 <p align="center">
-  <img src="apps/desktop/src-tauri/icons/128x128@2x.png" alt="NoOrbit" width="128" />
+  <img src="docs/hero.svg" alt="NoOrbit — IDE nativa amb agent IA local i motors de joc" width="100%" />
 </p>
 
----
-
-## Contents
-
-- [Què és NoOrbit](#què-és-noorbit)
-- [Novetats de la 0.71.9](#novetats-de-la-0719)
-- [Novetats de la 0.71.7](#novetats-de-la-0717)
-- [Novetats de la 0.71.6](#novetats-de-la-0716)
-- [Novetats de la 0.71.5](#novetats-de-la-0715)
-- [Novetats de la 0.71.4](#novetats-de-la-0714)
-- [Novetats de la 0.71.3](#novetats-de-la-0713)
-- [Versions anteriors](#versions-anteriors)
-- [Seguretat i claus API (important)](#seguretat-i-claus-api-important)
-- [Novetats de la 0.6.0 (historial)](#novetats-de-la-060-historial)
-- [Instal·lació (usuari final)](#instal·lació-usuari-final)
-- [Compilar des del codi font](#compilar-des-del-codi-font)
-- [On són els instal·ladors un cop compilats](#on-són-els-instal·ladors-un-cop-compilats)
-- [Wiki](#wiki)
-- [Game Studios (site)](#game-studios-site)
-- [Arquitectura](#arquitectura)
-- [Llicència](#llicència)
+<p align="center">
+  <a href="https://github.com/jpuigbert/noorbit/releases/latest"><img alt="Última versió" src="https://img.shields.io/github/v/release/jpuigbert/noorbit?label=release&color=2f7ad6&style=flat-square"></a>
+  <a href="https://github.com/jpuigbert/noorbit/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/jpuigbert/noorbit/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/jpuigbert/noorbit/actions/workflows/release.yml"><img alt="Build macOS · Windows · Linux" src="https://img.shields.io/badge/build-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-2f7ad6?style=flat-square"></a>
+  <a href="LICENSE"><img alt="Llicència MIT" src="https://img.shields.io/badge/license-MIT-3fae8a?style=flat-square"></a>
+  <img alt="Tauri 2" src="https://img.shields.io/badge/Tauri-2.12-blue?style=flat-square&logo=tauri&logoColor=white">
+  <img alt="React 19" src="https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react&logoColor=20232a">
+</p>
 
 ---
 
 ## Què és NoOrbit
 
+**NoOrbit és una IDE d'escriptori que treballa sola.** No és un editor de codi amb un xat
+d'IA afegit al costat: és un entorn on un **agent autònom** rep un encàrrec, fa un pla,
+escriu el codi **fitxer a fitxer**, ho executa, ho verifica, ho commiteja i torna a
+fer-ho tot sol durant les hores que tu li deixis — fins a set dies seguits.
+
+Al mateix temps, NoOrbit és una **IDE de veritat**: editor Monaco, terminal PTY real,
+git, depuració, emuladors mòbils natius, extensions, skills i servidors MCP. I connecta
+amb les eines que de debò es fan servir per produir contingut: **Blender**, **Unreal
+Engine 5**, **Godot 4** i **Bevy**.
+
+Tres idees sostenen el projecte:
+
+1. **La IA ha de poder treballar, no només parlar.** Materialitza fitxers reals al
+   projecte *mentre encara està escrivint*, executa ordres reals (Blender, Unreal,
+   Godot, Bevy, `cargo`, `ffmpeg`) i torna els errors de veritat al model perquè els
+   corregeixi.
+2. **Ha de funcionar al teu ordinador, no al de ningú altre.** L'IA nativa va **dins el
+   binari**: en instal·lar NoOrbit ja tens una IA que calcula, coneix i conversa, sense
+   baixar cap model ni fer servir la GPU. Si vols més, hi connectes Ollama, llama.cpp,
+   Claude o DeepSeek.
+3. **Ninguna dada surt de la màquina.** Les claus API viuen a la carpeta de dades del
+   sistema, mai al repositori. L'aprenentatge, el dataset i els models són locals.
+
+<p align="center">
+  <img src="docs/architecture.svg" alt="Arquitectura de NoOrbit: frontend React, IPC de Tauri, backend Rust, crates compartits i motors" width="100%" />
+</p>
+
+### Què hi ha dins
+
 | Àmbit | Què inclou |
 |---|---|
-| **Editor** | Monaco amb multi-cursor, Quick Open, Cerca global, Command Palette, pestanes, git diff integrat. |
+| **Agent autònom** | Planificador, codegen, verificador i *checkpoint* en crates propis. Executa en un procés fill: si es penja, l'app no. |
+| **Jam multi-dia** | Fins a **7 dies** de treball continuat, amb barra de progrés, **ETA**, temps personalitzable i aturada real (no decorativa). |
+| **Treball autopilotat** | Menú «IA ▸ Treball autopilotat»: la IA millora sola **qualsevol** projecte (WordPress, jocs, codi) durant el temps triat, sense tocar l'ordinador. |
+| **Editor** | Monaco amb multi-cursor, Quick Open, cerca global, Command Palette, pestanes i git diff integrat. |
 | **Terminal** | PTY real multi-sessió connectat al backend Rust. |
-| **IA** | Xat multi-sessió amb streaming en viu, **materialització automàtica** de fitxers mentre la IA encara està escrivint, i **reintents automàtics** si l'equip es queda sense memòria/context. |
-| **Mòbil natiu** | Selector de plataforma per xat (escriptori / Android / iOS). Android: Kotlin + Jetpack Compose + Material 3. iOS: Swift + SwiftUI. Gestió d'AVDs i simuladors, *live view* amb captures periòdiques. |
-| **Blender** | Add-on Python (`blender-scripts/noorbit_bridge.py`) + client socket. Executa scripts (inclòs de varies línies) dins la sessió de Blender, llegeix l'escena i genera figures/escenes complexes (nan de jardí, materials, animació, vídeo) amb l'agent 3D. |
-| **Imatges / Vídeo** | Generació via ComfyUI (local), rodet de CPU (stable-diffusion.cpp), proveïdors en línia (OpenAI, Venice…) **i Muapi.ai / Open Higgsfield / Open Generative AI** (200+ models: Flux, SDXL, Midjourney, Kling…). Configurable amb `MUAPI_API_KEY` / `HIGGSFIELD_API_KEY` / `HF_API_BASE_URL`. Usable per totes les IAs amb `IMG|descripció|ruta.png`. |
-| **Unreal** | Remote Control API + bootstrap Python (`unreal-scripts/bootstrap.py`). Build, launcher i execució de scripts. |
-| **Extensions** | Skills (carpetes amb `SKILL.md`), plugins natius i servidors **MCP**. |
-| **Especialistes** | Rols amb model, temperatura i prompt propis per tasques concretes. |
-| **Aprenentatge local** | La IA **aprèn de les altres IAs**: registra les teues converses (pregunta + resposta, amb l'origen), en destil·la **lliçons** amb el model local i les torna al context dels xats futures. Tot a la teva màquina; el dataset es pot exportar en JSONL per entrenar un model local (LoRA). |
-| **i18n** | **Català com a idioma base**. Extensible amb fitxers JSON a `apps/desktop/src/i18n/locales/`. |
-
-Tota la documentació ampliada és a la **wiki**: <https://github.com/jpuigbert/noorbit/wiki>
-
----
-
-## Novetats de la 0.71.10
-
-- **Blender: ordres complexes (figures, nans, escenes) ja no fallen** amb «NO és codi Python». Fins ara la directriu `RUN|BLENDER|` només capturava la **primera línia** del codi — una figura complexa no hi cabia en una línia, i el model es veia obligat a escriure una descripció en català que Blender rebutjava. Ara `parse()` recull el **codi sencer** a sota de la directriu o dins d'un bloc ` ```python ` (fins a la següent directriu o a la prosa), i l'executa de veritat.
-- **Descripció → codi automàtic**: si el model envia una **DESCRIPCIÓ** en lloc de codi a `RUN|BLENDER|`, NoOrbit la passa a l'**agent 3D** (receptes bpy: nan de jardí, materials, càmera, animació, vídeo, text, random) i executa el script multi-línia generat, en lloc de deixar-te amb un error tècnic.
-- **Guàrdia de codi millorada**: `looks_like_python` i `looks_like_code_line` distingeixen una frase en català d'un script («crea un nomo de jardi» ja no es confon amb codi; `bpy.ops`, assignacions i crides sí). El missatge d'error explica que el codi pot ser de **varies línies**.
-- **`extract_code` (agent 3D)** ara recull **TOTS els blocs** fenced en ordre de document i els concatena (un script llarg pot venir en varies peces), eliminant `import` duplicats.
-- **Prompt més clar**: `RUN_PROMPT` diu que `RUN|BLENDER|` pot ocupar varies línies i inclou un exemple; `expects_execution` també reconeix peticions de figura/escena 3D («crea un nan de jardí», «fes un model 3D d'una casa») encara que no diguin «Blender».
-- **Recepta «ESCENA COMPLEXA»** al prompt de l'agent 3D: mostra com compondre jardí + casa + nan + arbres + follets + gos + animals a l'atzar + text «NoOrbit» + animació + vídeo, amb prefixes de nom per grup i `import random`.
-- **Regles de multi-parte**: si la descripció demana MOLTS elements, fes-los TOTS en un sol script, no només el primer.
-- **12 tests nous** (8 a `runtools`, 3 a `blender`, 1 a `commands/ai`).
-
-## Novetats de la 0.71.9
-
-- **Hugging Bay, on vulguis**: el destí dels GGUF es tria **directament des del modal** («Tria carpeta / disc extern…»): baixa els models a un disc extern (USB/HDD) sense passar per IA ▸ Models, amb botó per tornar al destí per defecte.
-- **Descàrregues a prova de talls**: els GGUF es baixen a un fitxer «.part» i es verifiquen amb el **SHA-256** del mirror abans de renombrar-los al nom final — una descàrrega interrompuda ja no deixa mai un model parcial que es donava per bo (corrupte i impossible de rebaixar).
-- **Importar codi del web, fiable**: l'extracció ja no depèn del títol de la pàgina (el valor torna DIRECTAMENT a Rust amb `eval_with_callback`), funciona amb xats web que no usen `<pre><code>`, té reintents per a pàgines lentes i, quan no hi ha cap bloc, un missatge útil que diu què fer.
-- **Si un panell peta, la resta continua**: editor, panell lateral, IA de web, activitat IA, Git, problemes i consola, cadascun amb la seva pròpia `PanelErrorBoundary` — un crash ja no esborra tota la finestra.
-- **2a auditoria de codi**: el panell d'Especialistes ja no es penja (React #185), els esdeveniments no es dupliquen amb StrictMode, el preview no fa panic amb URLs estranyes i els zips de skills tenen límit de mida (20/50 MB) i només HTTPS fora de localhost.
-- **CI a cada push/PR**: typecheck + `cargo check`/`cargo test` + detector de selectors zustand inestables — cap commit que no compila o que trenca els tests pot arribar a un release.
-- **Correccions de la 1a auditoria**: cursa a `loadFile` (l'editor podia mostrar i desar el fitxer equivocat), preview tallat fora del workspace (token + CSRF/DNS-rebinding), terminal aturable amb temps límit, autocompletat de Monaco sense duplicats i amb cancel·lació real, ports en font única, `callId` del terminal (ja executa les comandes), i més.
-
-## Novetats de la 0.71.7
-
-- **IA local SENSE Ollama (llama.cpp)**: secció nova al gestor de models per fer córrer els **models GGUF** que has baixat amb el motor **llama.cpp**: s'instal·la amb un clic (els **binaris oficials** de GitHub: funciona fins i tot on Homebrew no en té, com els macOS vells), s'engega `llama-server` en segon pla i el servei es registra **automàticament com a proveïdor local** (sense clau) per xatejar-hi com una IA qualsevol. Multiplataforma: macOS, Windows i Linux.
-- **Hugging Bay**: cerca i descàrrega de models GGUF al **mirror verificat** de Hugging Face (amb SHA-256 i enllaços signats), amb progrés en viu i registre automàtic a Ollama. La teva línia de comandes pot ser: *buscar → baixar → executar*.
-- **Context COMPACTAT, no reduït**: quan la memòria no dona, NoOrbit **atura, allibera RAM** i **condensa** el context en un resum dens que conserva l'objectiu, el pla i **l'esquelet del codi** — i la IA **continua programant a trossos** en lloc de començar de zero.
-- **La IA crea CODI, no documentació**: el generador de projecte va **fitxer a fitxer** (a trossos) i recorda a la IA que escrigui codi real quan respon amb només `.md`; els fitxers a crear queden a la llista de tasques i es marquen a mesura.
-- **Blender que t'escolta**: si la IA respon amb prosa en lloc de codi `bpy`, NoOrbit li recorda què vols i ho torna a demanar; i el motor de figures es pot construir **sense dir «Blender»**.
-- **El xat mostra què està fent la IA** en viu (el pas real del motor), el **raonament es pot amagar** (🧠) i el text es pot **copiar mentre es genera**.
-
-## Novetats de la 0.71.6
-
-- **Motor local SENSE Ollama (llama.cpp)**: al gestor de models hi ha una secció que fa córrer els **models GGUF** que has baixat (Hugging Bay o Hugging Face) amb el motor **llama.cpp**: s'instal·la amb un clic (`brew install llama.cpp`), s'engega `llama-server` en segon pla i el servei es registra **automàticament com a proveïdor local** (sense cap clau) per xatejar-hi com una IA qualsevol. Tot local: el model no surt de l'ordinador.
-- **Sense Ollama? funciona igual**: Ollama és **opcional**. Si no el tens instal·lat, NoOrbit continua sent un IDE complet (editor, terminal, fitxers, Blender, Unreal, imatges, extensions, skills, MCP) i el **xat cau automàticament a la IA en línia** que hagis connectat (amb token). El modal d'entorn no s'obre sol per «avisar» de res, la barra d'estat mostra «IA al núvol» i no hi ha cap instal·lació forçada: si vols IA local, la pots instal·lar quan vulguis (o baixar models del mirror **Hugging Bay** des del gestor).
-- **Aprenentatge local (en segon pla)**: una pestanya nova a l'Agent («Aprenentatge») on NoOrbit observa les converses amb **totes** les IAs — la local d'Ollama, les remotes amb token, els especialistes i les IAs web — i en treu **lliçons** (preferències, decisions, fets del projecte) que s'injecten al context dels xats futures: la IA local ja sap el que li has ensenyat i no torna a preguntar-ho. La destil·lació la fa **el model local** (Ollama) i, si no n'hi ha cap, una heurística que detecta les preferències del text. Tot és local: res surt de l'ordinador tret que ho exportis.
-- **Dataset per entrenar el teu model**: «Exporta el dataset» genera un **JSONL** amb totes les converses en format de xat (el material per a un LoRA amb LLaMA-Factory, Unsloth o Axolotl) — el pas següent perquè la IA local sigui «teva» de debò.
-- **En segon pla de veritat**: la IA aprén sola en una tasca de fons (sessió aïllada: ni la cancel·lació ni el raonament del xat es barrejen) i el xat **no espera**; si treballes amb un proveïdor en línia, la destil·lació automàtica espera (no carrega un model local a la RAM de cop).
-- **Checklist amagable**, `@doing:` (el que la IA té entre mans, en directe), errors d'escriptura explicats (permís, disc ple, volum de només lectura) i descàrrega automàtica del model que faltava (el 404 ja no és un cul-de-sac).
-
-## Novetats de la 0.71.5
-
-- **Permisos fs binaris** (`fs:allow-read-file/write-file`): la captura del viewport d'Unreal ja no falla a l'app empaquetada.
-- **Tancament net**: l'ordre `exit_app` mata el procés del tot (no deixa l'app penjada al Dock).
-- **Edicions quirúrgiques `@edit:`** (CERCA/NOU) aplicades també abans de `RUN|` — el script executa el codi ja modificat.
-- **Adjunt automàtic de fitxers al xat**: un model LOCAL pot editar codi real sense «Inclou el codi».
-
-## Novetats de la 0.71.4
-
-- **Entorn auto-instal·lable**: finestra de comprovació de l'entorn a l'obrir (Ollama/Blender/ComfyUI) que instal·la SOLA el que falta (zip oficial d'ollama.com a macOS, `install.sh` a Linux, `OllamaSetup.exe` silenciós a Windows) i després engega el servidor — i amb la ruta REAL del binari ollama (el CLI viu dins el bundle de la app).
-- **Unreal Engine sempre connectable**: el `.uproject` es parcheja sol amb els plugins `PythonScriptPlugin`+`RemoteControl` (còpia `.bak`), arrencada fiable del bootstrap (`-ExecutePythonScript`, admet rutes amb espais), watchdog de connexió cada 5 s que detecta l'editor sol, cerca automàtica del `.uproject` al projecte obert, captura del viewport robusta i bug de qualitat d'il·luminació corregit.
-- **Usuari nou sense 404**: si Ollama no té cap model baixat, NoOrbit baixa'n un d'inicial (mida segons la RAM) amb progrés al gestor de models — al camí amb streaming i al que no, i fins i tot si Ollama ja estava en marxa.
-- **Blender amb so**: música generada amb numpy a l'editor de seqüències, veu amb TTS del sistema (say/espeak-ng/SAPI), boca animada amb keyframes i àudio AAC al render MP4.
-- **Remats**: el `.uproject` mai no queda tocat sense còpia de seguretat; `cargo clippy` passa amb 0 errors.
-
-## Novetats de la 0.71.3
-
-- **Especialistes en directe**: mentre l'equip treballa, cada expert té la seva mini-card amb el que escriu EN TEMPS REAL (mateix format del xat) i botó «Obre al xat» per continuar-hi.
-- **Execució per torns + estalvi de RAM**: amb model local, l'equip treballa d'un en un («Torn N/M») i allibera el model després de cada torn; amb proveïdor al núvol, fins a 3 en paral·lel.
-- **Rodet d'imatges en CPU** (stable-diffusion.cpp) per a Mac Intel, on ComfyUI no existeix: txt2img i img2img locals amb models `.gguf`/`.safetensors`.
-- **CivitAI** com a font de models (sense token) i IAs locals instal·lables amb un clic (LM Studio, Jan, GPT4All, llama.cpp); editors de vídeo (Kdenlive, OpenShot, DaVinci Resolve, Shotcut).
-- **Nudge d'imatges**: si demanes una imatge i el model respon prosa, NoOrbit li torna l'ordre una vegada amb la regla «IMG|» al manual.
-- Confirmació de tancament, botons **Desfés/Refés** a la barra, checklist de tasques fixat, **GLM-5.3-Flash i GLM-OCR** al catàleg.
-
-## Versions anteriors
-
-- **0.71.2 — Núvol d'equip**: projecte connectat a Git (connecta 1 clic, ↑↓ pendents, Sincronitza + Auto cada 90 s) per editar-lo des de diversos dispositius.
-- **0.71.0**: les integracions DINS de l'Agent (sub-pestanyes Xat/Equip/Ordinador/Unreal/Blender/Mòbil), franja viva «equip treballant», raonament de la IA en català automàtic.
-- **0.70.0**: Monaco a demanda (arrencada sense 4 MB+8 MB de workers), −40% tokens, tema «Verd i daurat», servidor d'IA remot amb tutorial pas a pas.
-- **0.62 → 0.68**: servidor d'IA remot (SFTP + API OpenAI-compatible), DeepInfer, diagnòstic pas a pas de serveis, gestió de RAM dels models, arrencada robusta amb `crash.log`.
-- **0.6.0**: navegador intern controlat per les IAs (`NB|…`), imatges al xat, catàleg d'IAs amb mides, orquestrador d'IA externes.
-- L'historial COMPLET, versió per versió, és a [`CHANGELOG.md`](CHANGELOG.md) — i cada release a GitHub porta les seves pròpies notes a <https://github.com/jpuigbert/noorbit/releases>.
+| **IA** | Xat multi-sessió amb streaming en viu, **materialització automàtica** de fitxers, reintents automàtics si l'equip es queda sense memòria i **IA nativa de 3 nivells** (determinista → LLM local → fallback simbòlic). |
+| **Veu** | **Dictat al xat**: un botó de micròfon al composer. Tres motors: macOS Speech, whisper.cpp local o qualsevol proveïdor compatible OpenAI. |
+| **Motors** | **Blender** (add-on Python), **Unreal Engine 5** (Remote Control API + agent MCP), **Godot 4** (headless) i **Bevy** (Rust + `cargo`): la IA hi treballa i hi construeix, no només hi parla. |
+| **Pont d'actius** | El que la IA crea a Blender **arriba al joc**: exporta a `EngineWork/Exports/` i, quan la IA ho decideix, s'importa a Godot, Bevy o Unreal. |
+| **Vídeo** | Menú «Vídeo» propi: la IA **munta, es critica i renderitza** (fins a 24 h de pressupost) amb `ffmpeg` i Kdenlive. |
+| **Mòbil natiu** | Android (Kotlin + Compose + Material 3) i iOS (Swift + SwiftUI), gestió d'AVDs i simuladors, *live view* amb captures periòdiques. |
+| **Imatges** | ComfyUI local, rodet de CPU (stable-diffusion.cpp), proveïdors en línia (OpenAI, Venice, **Muapi.ai / Open Higgsfield / Open Generative AI** — 200+ models). |
+| **Extensions** | Skills (carpetes amb `SKILL.md`), plugins natius, servidors **MCP** i **328 skills + 72 especialistes ECC** de sèrie dins l'instal·lador. |
+| **Especialistes** | Rols amb model, temperatura i prompt propis, que es poden **delegar** entre ells (`@use:`) i veure l'equip que tenen al costat. |
+| **Aprenentatge local** | La IA **aprèn de les altres IAs**: registra les converses, en destil·la **lliçons** i les torna als xats futurs. Dataset exportable en JSONL per entrenar un model (LoRA). |
+| **i18n** | **Català com a idioma base**, extensible amb fitxers JSON. |
 
 ---
 
-## Seguretat i claus API (important)
+## Novetats de la 0.71.13
 
-**Aquest repositori NO conté cap clau API, token ni credencial personal — i no n'hi ha hagut mai cap fuita**: la comanda d'auditoria de sota és una comprovació PREVENTIVA que qualsevol pot executar per verificar-ho, no un indicador d'accidents anteriors.
+### 🎮🦀 Godot 4 i Bevy: motors de primera classe
 
-- Els tokens dels proveïdors que enganxes a l'app es desen a la **carpeta de dades del sistema** (`~/Library/Application Support/no-orbit/…`, o `NoOrbitData/` en mode portàtil/USB) — **mai dins el codi del projecte**, i aquesta carpeta no forma part del repo mai.
-- No hi ha fitxers `.env` reals (gitignored) ni claus escrites al codi font. NoOrbit no apuja mai res del disc de l'usuari a cap servidor sense la teva acció explícita.
-- Si algú clona aquest repo en una altra màquina (o un altre Mac), l'app **funciona igual sense cap clau**: models locals amb Ollama i tota la resta. Les claus API es queden només a la màquina on es van guardar i no se sincronitzen mai amb el repo ni amb cap servei remot.
-- Auditoria preventiva ràpida:
-  ```bash
-  git grep -lI -E "sk-[a-zA-Z0-9]{20,}|gho_[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{20,}|AKIA[A-Z0-9]{16}"
-  ```
-  (ha de no tornar RES; si en tornés, seria un accident — obre un *issue*, si us plau).
+Godot i Bevy ja no són «modes»: **es detecten, s'instal·len, s'editen i la IA els pilota
+igual que Blender i Unreal**.
 
----
+- **Directrius reals**: `@godot: import | run [escena] | script res://fitxer.gd | version`
+  executa el motor **de veritat** en headless (importa els assets, arrenca l'escena i
+  torna els errors de GDScript); `@bevy: check | build | run | test | clippy` compila i
+  executa amb `cargo`. El resultat torna al model, que hi pot corregir.
+- **Detecció de projecte**: un `project.godot` (a l'arrel o un nivell) i un `Cargo.toml`
+  amb la dependència `bevy` es detecten sols; el binari de Godot es busca a
+  `/Applications`, Homebrew i al PATH, i el `cargo` a `~/.cargo/bin` (les apps llançades
+  des del Finder no tenen el PATH de la shell).
+- **Obrir el projecte al motor**: el botó «Obre al motor» del panell Jam obre l'editor de
+  Godot, el Terminal amb `cargo run` de Bevy o l'editor d'Unreal (amb els plugins del
+  pont activats abans de l'arrencada).
+- **Instal·lació opcional per plataforma**: Godot 4 i Rust són passos **opcionals** de
+  l'assistent, com Unreal: un clic obre la descàrrega oficial ja filtrada pel sistema
+  operatiu, i NoOrbit els detecta sol quan l'usuari els instal·la.
+- **Bevy a la Jam**: «🦀 Bevy (Rust)» és un motor triable, i el planner el coneix com a
+  «Rust + ECS» perquè el model escrigui codi compatible.
 
-## Novetats de la 0.6.0 (historial)
+### 📦 Pont d'actius: de Blender al joc, sense tocar res
 
-- **Navegador intern controlat per totes les IAs, sense botons**: qualsevol IA del xat (local, remota o experta) pot obrir pàgines, llegir-ne el contingut i consultar IAs web (DeepSeek, ChatGPT, Claude, Gemini, Perplexity, Grok…) escrivint directrius de text `NB|OBRIR|`, `NB|LLEGIR|`, `NB|PREGUNTA_IA|` que NoOrbit executa. Abans de preguntar a una IA web es demana **permís a l'usuari** i la finestra sempre és visible (el login el fa sempre la persona).
-- **El codi dels xats web s'aprofita**: quan una IA web o una pàgina retorna codi, NoOrbit l'extreu en blocs estructurats (amb el llenguatge) i la IA local l'adapta i l'escriu al projecte com a fitxers reals (format `@file:` + automaterialització).
-- **Imatges al xat**: es mostren en línia, es poden copiar al porta-retalls i adjuntar/enganxar (⌘V) com a entrada dels models amb visió.
-- **Catàleg d'IAs** (menú IA): abans de descarregar veus la mida aproximada de cada model, si és sense censura, si té visió i si pot generar imatges o vídeo.
-- **Generació i manipulació d'imatges**: amb ComfyUI local (si la RAM ho permet) o via API en línia amb la teua clau.
-- **Orquestrador d'IAs externes legit**: descobriment d'instal·lacions locals (Ollama, LM Studio, llama.cpp…) i fallback en línia **només** amb tokens propis de l'usuari, etiquetant sempre l'origen de cada resposta.
-- **Proveïdors d'API robustos**: claus normalitzades (espais, barras, URLs amb `/v1`…), Venice amb el model correcte (`venice-uncensored`) i migració automàtica de la configuració vella, errors 401/404/429 explicats en català.
+<p align="center">
+  <img src="docs/asset-bridge.svg" alt="Pont d'actius: Blender exporta, la IA decideix quan importar a Godot, Bevy o Unreal" width="100%" />
+</p>
 
-- **Navegador intern controlat per totes les IAs, sense botons**: qualsevol IA del xat (local, remota o experta) pot obrir pàgines, llegir-ne el contingut i consultar IAs web (DeepSeek, ChatGPT, Claude, Gemini, Perplexity, Grok…) escrivint directrius de text `NB|OBRIR|`, `NB|LLEGIR|`, `NB|PREGUNTA_IA|` que NoOrbit executa. Abans de preguntar a una IA web es demana **permís a l'usuari** i la finestra sempre és visible (el login el fa sempre la persona).
-- **El codi dels xats web s'aprofita**: quan una IA web o una pàgina retorna codi, NoOrbit l'extreu en blocs estructurats (amb el llenguatge) i la IA local l'adapta i l'escriu al projecte com a fitxers reals (format `@file:` + automaterialització).
-- **Imatges al xat**: es mostren en línia, es poden copiar al porta-retalls i adjuntar/enganxar (⌘V) com a entrada dels models amb visió.
-- **Catàleg d'IAs** (menú IA): abans de descarregar veus la mida aproximada de cada model, si és sense censura, si té visió i si pot generar imatges o vídeo.
-- **Generació i manipulació d'imatges**: amb ComfyUI local (si la RAM ho permet) o via API en línia amb la teua clau.
-- **Orquestrador d'IAs externes legit**: descobriment d'instal·lacions locals (Ollama, LM Studio, llama.cpp…) i fallback en línia **només** amb tokens propis de l'usuari, etiquetant sempre l'origen de cada resposta.
-- **Proveïdors d'API robustos**: claus normalitzades (espais, barras, URLs amb `/v1`…), Venice amb el model correcte (`venice-uncensored`) i migració automàtica de la configuració vella, errors 401/404/429 explicats en català.
+Si la IA necessita **generar alguna cosa en Blender**, pot fer-ho i deixar-la dins el joc:
+exporta a `EngineWork/Exports/` i emet `@import: model.glb` (o `@import: godot model.glb`
+per forçar el destí).
+
+- **Godot**: l'asset es copia a `assets/`, es crea l'escena `scenes/<nom>.tscn` que
+  l'instancia i es reimporta en headless.
+- **Bevy**: es copia a `assets/`, on el codi Rust el llegeix amb `asset_server.load`.
+- **Unreal**: s'importa **de debò** via la Remote Control API (que verifica que l'asset
+  s'ha creat de veritat).
+
+**No s'importa res automàticament: el moment d'importar el decideix la IA.** La ruta pot
+ser absoluta, relativa al projecte, dins de `EngineWork/Exports/` o només el nom del
+fitxer; sense motor detectat o sense asset, el missatge diu exactament què fer.
+
+### Altres novetats
+
+- **La Jam diu quina IA hi treballa** (proveïdor + model reals, els mateixos que rep el
+  procés fill) i **«Atura» atura de debò**: la fase de pla és cancel·lable, el botó
+  reflecteix l'estat i el procés fill ni tan sols arrenca si l'aturada ja s'ha demanat.
+  A més, **només hi pot haver una Jam** a la vegada (reserva amb compare-and-swap).
+- **Unreal Engine en un disc extern**: la cerca del motor arriba a **totes** les unitats
+  montades (discs externs, NAS, xarxa), reconeix contenidors renomenats i filtrats
+  falsos, i permet **triar la carpeta a mà**.
+- **Menú «Vídeo» nou**: la IA munta, es critica, renderitza i **verifica** el resultat
+  (durada, LUFS, plans morts, trams congelats) dins del mateix pressupost de temps.
+- **Dictat al xat** amb tres motors (macOS Speech, whisper.cpp local, API OpenAI-compatible).
+- **ECC de sèrie**: 328 skills, 72 especialistes i regles dins l'instal·lador, consultables
+  per la IA nativa.
+- **La IA crea codi, no documentació**: plantilles compilades al binari per a escenes
+  Blender, animació, materials, exportació glTF per a motors i projectes Unreal lleugers.
+
+L'historial **complet**, versió per versió, és a [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
 ## Instal·lació (usuari final)
 
-### Descàrrega de binaris
-
-Els instal·ladors publicats es troben a la secció **Releases** del repositori:
-
 **👉 <https://github.com/jpuigbert/noorbit/releases>**
 
-Cada release inclou, per a cada sistema, l'arxiu corresponent (substitueix la versió per l'última publicada; els noms d'exemple són els de la **0.71.9-alpha**):
+Cada release publiqua els tres sistemes operatius:
 
-| Sistema | Fitxer que has de descarregar |
-|---|---|
-| **macOS** (universal, Intel + Apple Silicon) | `NoOrbit_0.71.9-alpha_universal.dmg` |
-| **Windows** (10 / 11) | `NoOrbit_0.71.9-alpha_x64-setup.exe` |
-| **Linux** (Debian / Ubuntu) | `NoOrbit_0.71.9-alpha_amd64.deb` |
-| **Linux** (Fedora / RHEL) | `NoOrbit-0.71.9-alpha-1.x86_64.rpm` |
-| **Linux** (universal) | `NoOrbit_0.71.9-alpha_amd64.AppImage` |
+| Sistema | Fitxer | Notes |
+|---|---|---|
+| **macOS** (universal, Intel + Apple Silicon) | `NoOrbit_0.71.13-alpha_universal.dmg` | Signatura ad-hoc; arrossega l'app a **Aplicacions** |
+| **Windows** (10 / 11) | `NoOrbit_0.71.13-alpha_x64-setup.exe` | Instal·lació per a l'usuari actual, sense drets d'administrador |
+| **Linux** (Debian / Ubuntu) | `NoOrbit_0.71.13-alpha_amd64.deb` | `sudo apt install ./…deb` |
+| **Linux** (Fedora / RHEL) | `NoOrbit-0.71.13-alpha-1.x86_64.rpm` | `sudo dnf install ./…rpm` |
+| **Linux** (universal) | `NoOrbit_0.71.13-alpha_amd64.AppImage` | `chmod +x` i executa |
 
-L'índex automàtic de totes les versions i els seus enllaços de descàrrega directa és l'asset **`versions.json`** de l'últim release.
+L'índex automàtic de **totes** les versions i els seus enllaços és l'asset `versions.json`
+de l'últim release. Les versions velles **mai no s'esborren**.
 
-> **Versions anteriors**: cada tag és un release independent a GitHub i **no esborra mai** els de versions velles (p. ex. la 0.5.0 completa és a <https://github.com/jpuigbert/noorbit/releases/tag/v0.5.0>). L'índex automàtic de totes les versions i els seus enllaços és l'asset `versions.json` de l'últim release.
+### macOS — primera arrencada (app no signada)
 
-### Instruccions per sistema
+NoOrbit **no està signada amb Developer ID ni notaritzada** (ho requereix un compte
+d'Apple de pagament). macOS aplica *Gatekeeper* i bloqueja l'arrencada el primer cop.
+**No és un error de l'app**: és el comportament de qualsevol app descarregada sense
+signar.
 
-**macOS — primera arrencada (app no signada)**
-
-NoOrbit **no està signada amb Developer ID ni notaritzada** per Apple (això requereix un compte de desenvolupador de 99 $/any). macOS aplica *Gatekeeper* i bloqueja l'arrencada el primer cop. **No és un error de la app**: és el comportament esperat de qualsevol app descarregada d'Internet sense signar. Tens 3 manes d'activar-la, de més suau a més directa:
-
-**Mètode 1 — Clic dret → Obre (el més recomanable)**
 1. Obre el `.dmg` i arrossega **NoOrbit** a la carpeta **Aplicacions**.
-2. Al **Finder**, ves a **Aplicacions**, fes **clic dret** (o `Control`+clic) sobre **NoOrbit.app** → **Obre**.
-3. Apareixerà el diàleg *«No es pot verificar el desenvolupador»* — prem **Obre**.
-4. **Només cal fer-ho un cop.** A partir d'ara, l'obriràs amb doble clic normal.
+2. Al **Finder**, fes **clic dret** sobre **NoOrbit.app** → **Obre** → **Obre** al diàleg.
+3. **Només cal fer-ho un cop.** Després s'obre amb doble clic normal.
 
-**Mètode 2 — Configuració del Sistema (si el clic dret no mostra el botó Obre)**
-1. Fes doble clic a NoOrbit (refusarà obrir-la; és normal).
-2. Obre **Configuració del Sistema → Privadesa i seguretat**.
-3. Baixa fins a l'apartat **Seguretat**; hi apareixerà:
-   *«S'ha bloquejat NoOrbit.app perquè prové d'un desenvolupador no identificat»* → prem **Obre de totes maneres**.
-4. Escriu la contrasenya del Mac i confirma. Torna a obrir la app.
+Alternatives: *Configuració del Sistema → Privadesa i seguretat → Seguretat → «Obre de
+totes maneres»*, o des del Terminal:
 
-**Mètode 3 — Terminal (elimina l'atribut de quarantena)**
-Si els dos mètodes anteriors no funcionen o vols automatitzar-ho:
 ```bash
 xattr -dr com.apple.quarantine /Applications/NoOrbit.app
 ```
-(No cal `sudo` si la app és a Aplicacions i la vas moure tu. Després obre NoOrbit normalment amb doble clic.)
 
-> ⚠️ **Missatge «NoOrbit està malmès i no es pot obrir»**? Sembla alarmant però gairebé sempre significa una d'aquestes dues coses:
-> - La descàrrega s'ha tallat a mitges → torna-la a descarregar i compara el SHA-256 amb l'asset del Release.
-> - El `.dmg` s'ha obert des de la còpia temporal de Safari/Chrome sense moure la app a Aplicacions → mou **NoOrbit.app** a **Aplicacions** primer, i després aplica el Mètode 1 o el 3.
+### Windows
 
-**Nota per a Apple Silicon (M1–M4)**: no cal cap pas addicional. El bloqueig és el mateix Gatekeeper que a Intel; l'arquitectura universal ja inclou el codi natiu arm64.
+Doble clic a `NoOrbit_0.71.13-alpha_x64-setup.exe` → s'instal·la per a l'usuari actual
+i l'executable apareix al menú Inici.
 
-**Per què no es firma?** La signatura i notarització exigeixen un compte de desenvolupador d'Apple de pagament. Si vols una versió signada (sense bloquejos ni passos manuals), col·labora amb el projecte o crea un issue per prioritzar-ho: el workflow de CI ja prepara els binaris i només caldria afegir-hi els secrets `APPLE_SIGNING_IDENTITY`, `APPLE_ID` i `APPLE_APP_SPECIFIC_PASSWORD`.
+### Linux
 
-**Windows**
-1. Doble clic a `NoOrbit_0.71.9-alpha_x64-setup.exe`.
-2. S'instal·la **per a l'usuari actual**, sense necessitat de drets d'administrador.
-3. L'executable apareix al menú Inici.
-
-**Linux (Debian/Ubuntu)**
 ```bash
-sudo apt install ./NoOrbit_0.71.9-alpha_amd64.deb
-# si el paquet ja està descarregat i vols instal·lar-lo "a la vella":
-sudo dpkg -i NoOrbit_0.71.9-alpha_amd64.deb && sudo apt -f install
-```
-Executa'l amb `no-orbit` o des del menú d'aplicacions.
-
-**Linux (Fedora/RHEL)**
-```bash
-sudo dnf install ./NoOrbit-0.71.9-alpha-1.x86_64.rpm
-```
-
-**Linux (AppImage)**
-```bash
-chmod +x NoOrbit_0.71.9-alpha_amd64.AppImage
-./NoOrbit_0.71.9-alpha_amd64.AppImage
+# Debian / Ubuntu
+sudo apt install ./NoOrbit_0.71.13-alpha_amd64.deb
+# Fedora / RHEL
+sudo dnf install ./NoOrbit-0.71.13-alpha-1.x86_64.rpm
+# AppImage
+chmod +x NoOrbit_0.71.13-alpha_amd64.AppImage && ./NoOrbit_0.71.13-alpha_amd64.AppImage
 ```
 
 ---
 
 ## Compilar des del codi font
 
-### Requisits comuns (a totes les plataformes)
+### Requisits
 
 | Eina | Versió mínima | Com install·lar |
 |------|----------------|-----------------|
-| Node.js | 20 | <https://nodejs.org> |
+| Node.js | 20 (el CI usa 24) | <https://nodejs.org> |
 | pnpm | 9 | `corepack enable` |
 | Rust | 1.77 | <https://rustup.rs> |
 
@@ -262,7 +202,9 @@ chmod +x NoOrbit_0.71.9-alpha_amd64.AppImage
     libwebkit2gtk-4.1-dev build-essential curl wget file \
     libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
   ```
-- **Windows**: Microsoft **C++ Build Tools** (workload *Desktop development with C++*) + **WebView2 Runtime** (a Windows 11 ja ve inclòs; a Windows 10 es baixa sol gràcies a `webviewInstallMode: downloadBootstrapper`).
+- **Windows**: Microsoft **C++ Build Tools** (workload *Desktop development with C++*) +
+  **WebView2 Runtime** (a Windows 11 ja ve inclòs; a Windows 10 es baixa sol gràcies a
+  `webviewInstallMode: downloadBootstrapper`).
 
 ### Passos
 
@@ -280,113 +222,88 @@ pnpm app:build:mac:intel       # macOS: només Intel
 pnpm app:build:mac:arm         # macOS: només Apple Silicon
 pnpm app:build:deb             # Linux: .deb
 pnpm app:build:linux           # Linux: .deb + .rpm + AppImage
-pnpm app:build:win             # Windows: .exe (NSIS) + .msi
+pnpm app:build:win             # Windows: .exe (NSIS)
 pnpm app:build                 # El paquet natiu del SO on s'està executant
 ```
 
-> ⚠️ Cada instal·lador s'ha de **construir des del seu sistema operatiu** (o en CI). Des de macOS no es poden crear `.deb` de Linux ni `.exe` de Windows de forma fiable perquè enllacen biblioteques pròpies d'aquelles plataformes. El que sí es pot fer des d'un sol Mac és produir un **DMG universal** (Intel + Apple Silicon).
+> ⚠️ Cada instal·lador s'ha de **construir des del seu sistema operatiu** (o en CI).
+> Des de macOS no es poden crear `.deb` de Linux ni `.exe` de Windows de forma fiable perquè
+> enllacen biblioteques pròpies d'aquelles plataformes. El que sí es pot fer des d'un sol Mac
+> és produir un **DMG universal** (Intel + Apple Silicon).
 
----
-
-## On són els instal·ladors un cop compilats
-
-Tots els paquets es generen a:
+### On són els instal·ladors un cop compilats
 
 ```
 apps/desktop/src-tauri/target/[<triple>]/release/bundle/
 ```
 
-Rutes completes segons sistema:
-
-### macOS (des de macOS)
-
-```
-apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/
-├── dmg/NoOrbit_0.71.9-alpha_universal.dmg      ← compartiu això
-└── macos/NoOrbit.app                     ← app "nua" (provable directament)
-```
-
-Per a només Intel (`--target x86_64-apple-darwin`) o només Apple Silicon (`--target aarch64-apple-darwin`), substitueix `universal-apple-darwin` per l'altre triple.
-
-### Windows (des de Windows)
-
-```
-apps\desktop\src-tauri\target\release\bundle\
-├── nsis\NoOrbit_0.71.9-alpha_x64-setup.exe      ← instal·lador clàssic (recomanat)
-└── msi\NoOrbit_0.71.9-alpha_x64_en-US.msi        ← paquet per a desplegaments empresarials (GPO/SCCM)
-```
-
-### Linux (des de Linux)
-
-```
-apps/desktop/src-tauri/target/release/bundle/
-├── deb/NoOrbit_0.71.9-alpha_amd64.deb            ← Debian / Ubuntu
-├── rpm/NoOrbit-0.71.9-alpha-1.x86_64.rpm         ← Fedora / RHEL
-└── appimage/NoOrbit_0.71.9-alpha_amd64.AppImage  ← universal (tots els distros)
-```
-
-En una ARM Linux (p. ex. Raspberry Pi) afegeix `--target aarch64-unknown-linux-gnu` i ajusta el nom del paquet.
+| Sistema | Rutes |
+|---|---|
+| macOS | `universal-apple-darwin/…/dmg/NoOrbit_<ver>_universal.dmg` i `…/macos/NoOrbit.app` |
+| Windows | `release/bundle/nsis/NoOrbit_<ver>_x64-setup.exe` i `…/msi/NoOrbit_<ver>_x64_en-US.msi` |
+| Linux | `release/bundle/deb/…deb`, `…/rpm/…rpm`, `…/appimage/…AppImage` |
 
 ---
 
-## Wiki
-
-La documentació detallada (arquitectura, integracions, extensions, dreceres, guia de contribució) és a:
-
-**📚 <https://github.com/jpuigbert/noorbit/wiki>**
-
-Pàgines disponibles:
-
-- [[Instalació]]
-- [[Funcionalitats]]
-- [[IA-en-NoOrbit]]
-- [[Desenvolupament-mòbil-natiu]]
-- [[Integració-Blender]]
-- [[Integració-Unreal]]
-- [[Extensions]]
-- [[Dreceres-de-teclat]]
-- [[Arquitectura]]
-- [[Contribució]]
-
----
-
-## Arquitectura
+## Com funciona per dins
 
 ```
 noorbit/
 ├── apps/desktop/                 ← única app (Tauri)
 │   ├── src/                      ← frontend React/TypeScript (components/, stores/, i18n/, editor/, core/, help/)
-│   ├── src-tauri/                ← backend Rust (commands/, ai/, agent/, mobile/, blender/, unreal/, experts/, plugins/, skills/, lsp/, computer/, autonomous/, api/)
+│   ├── src-tauri/                ← backend Rust (commands/, ai/, agent/, mobile/, blender/, unreal/, godot/, bevy/, video/, voice/, engine_tools/, engine_bridge/, engine_open/, …)
 │   └── package.json
+├── crates/                       ← biblioteques Rust compartides (jam, planner, git, guardian, persistence, reporter, lessons, memguard, blender-import…)
 ├── blender-scripts/              ← add-on Python per connectar amb Blender
 ├── unreal-scripts/              ← bootstrap Python per Unreal
-├── scripts/                      ← instal·ladors (install-unreal.sh)
-└── tools/                        ← eines de build (make-icons.mjs)
+├── docs/                         ← imatges SVG de la documentació (hero, arquitectura, pont d'actius)
+├── scripts/                      ← instal·ladors i eines de build
+└── site/                         ← Game Studios (site estàtic)
 ```
 
 Fluxos clau:
 
-- **Streaming IA**: el backend emet l'event `ai://chunk` etiquetat per `sessionId`; el frontend (`agentStore.appendStream`) acumula el text i **crida `scheduleLiveMaterialize`** per escriure fitxers reals a disk **en viu**, mentre el model encara està generant.
-- **Reintents automàtics**: si Ollama/LM Studio fallan per `out of memory` o el stream es talla, NoOrbit torna a intentar-ho automat­icament amb context **reduït → sense codi → sense historial**, sense intervenció humana.
-- **Invoke**: comandaments Rust cridats des de TS via `invoke("name", { args })` de `@tauri-apps/api/core`.
+- **Streaming IA**: el backend emet l'event `ai://chunk` etiquetat per `sessionId`; el
+  frontend (`agentStore.appendStream`) acumula el text i **crida `scheduleLiveMaterialize`**
+  per escriure fitxers reals a disco **en viu**, mentre el model encara està generant.
+- **Reintents automàtics**: si el model local falla per `out of memory` o el stream es
+  talla, NoOrbit torna a intentar-ho amb context **reduït → sense codi → sense historial**.
+- **La Jam viu en un procés fill**: l'únic canal cap a la UI són línies `JAM|<json>`; si
+  l'agent es penja, l'app continua i el guardian el reinicia.
+- **Invoke**: comandaments Rust cridats des de TS via `invoke("name", { args })`.
 
 ---
 
 ## Jam autònom (l'agent treballa sol)
 
-El panell **Agent ▸ Jam** deixa la IA desenvolupar el projecte durant hores:
+El panell **Agent ▸ Jam** deixa la IA desenvolupar el projecte durant hores o dies:
 brief → pla → codi → verificació → commit, tasca a tasca.
 
-- Usa **la IA que l'usuari tingui connectada** (local o núvol): la mateixa que
-  fa servir el xat, sense cap configuració extra.
-- **Protecció de memòria**: si una tasca consumeix massa, l'agent s'atura i
-  es reintenta amb menys qualitat. El Mac no es congela.
-- Cada pas es materialitza al projecte (blocs `@file:`), es verifica amb l'ordre
-  que vulguis (`npm run build`, `godot --headless`, …) i es commiteja.
+- Usa **la IA que l'usuari tingui connectada** (local o núvol): la mateixa que fa servir
+  el xat, sense cap configuració extra.
+- **Protecció de memòria**: si una tasca consumeix massa, l'agent s'atura i es reintenta
+  amb menys qualitat. L'equip no es congela.
+- Cada pas es materialitza al projecte (blocs `@file:`), es verifica amb l'ordre que
+  vulguis (`npm run build`, `godot --headless`, `cargo test`…) i es commiteja.
 - Al final es genera `REPORT.md` amb el pla, els resultats i els commits.
+- Motor triable: **Godot 4**, **Bevy (Rust)**, **Unreal 5**, **Unity**, **Web/HTML** o
+  **mobil**.
 
-La lògica viu als crates de [`crates/`](crates/) (`noorbit-guardian`,
-`noorbit-jam`, `noorbit-planner`, `noorbit-git`, `noorbit-reporter`, …).
+La lògica viu als crates de [`crates/`](crates/) (`noorbit-guardian`, `noorbit-jam`,
+`noorbit-planner`, `noorbit-git`, `noorbit-reporter`, …).
+
+---
+
+## Wiki
+
+La documentació detallada (arquitectura, integracions, extensions, dreceres, guia de
+contribució) és a:
+
+**📚 <https://github.com/jpuigbert/noorbit/wiki>**
+
+- [[Instalació]] · [[Funcionalitats]] · [[IA-en-NoOrbit]] · [[Treball-autopilotat]]
+- [[Desenvolupament-mòbil-natiu]] · [[Integració-Blender]] · [[Integració-Unreal]]
+- [[Integració-Godot-i-Bevy]] · [[Extensions]] · [[Dreceres-de-teclat]] · [[Arquitectura]] · [[Contribució]]
 
 ---
 
@@ -402,14 +319,41 @@ estan integrats a NoOrbit i documentats al lloc estàtic [`site/index.html`](sit
 
 ---
 
+## Seguretat i claus API (important)
+
+**Aquest repositori NO conté cap clau API, token ni credencial personal — i no n'hi ha hagut
+mai cap fuita**: la comanda d'auditoria de sota és una comprovació **preventiva** que
+qualsevol pot executar per verificar-ho, no un indicador d'accidents anteriors.
+
+- Els tokens dels proveïdors que enganxes a l'app es desen a la **carpeta de dades del
+  sistema** (`~/Library/Application Support/no-orbit/…`, o `NoOrbitData/` en mode
+  portàtil/USB) — **mai dins el codi del projecte**, i aquesta carpeta no forma part del
+  repo mai.
+- No hi ha fitxers `.env` reals (gitignored) ni claus escrites al codi font. NoOrbit no
+  apuja mai res del disc de l'usuari a cap servidor sense la teva acció explícita.
+- Si algú clona aquest repo en una altra màquina, l'app **funciona igual sense cap clau**:
+  model locals i tota la resta. Les claus API es queden només a la màquina on es van
+  guardar i no se sincronitzen mai amb el repo ni amb cap servei remot.
+- Auditoria preventiva ràpida:
+  ```bash
+  git grep -lI -E "sk-[a-zA-Z0-9]{20,}|gho_[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{20,}|AKIA[A-Z0-9]{16}"
+  ```
+  (ha de no tornar RES; si en tornés, seria un accident — obre un *issue*, si us plau).
+
+---
+
 ## Llicència
 
 Distribuïda sota **MIT** — veure [`LICENSE`](LICENSE) i [`NOTICE`](NOTICE).
 
-Part del disseny i alguns fragments deriven o estan inspirats en **Visual Studio Code**, i utilitzen el **Monaco Editor**, ambdós llicenciats sota MIT per Microsoft Corporation. L'atribució completa és a `NOTICE`.
+Part del disseny i alguns fragments deriven o estan inspirats en **Visual Studio Code**, i
+utilitzen el **Monaco Editor**, ambdós llicenciats sota MIT per Microsoft Corporation.
+L'atribució completa és a `NOTICE`.
 
 ---
 
 ## Estat del projecte
 
-Versió actual: **0.71.9-alpha** (vegeu [`CHANGELOG.md`](CHANGELOG.md)). El projecte està en desenvolupament actiu. Si trobes un bug o vols una funcionalitat, obre un [issue](https://github.com/jpuigbert/noorbit/issues).
+Versió actual: **0.71.13-alpha** (vegeu [`CHANGELOG.md`](CHANGELOG.md)). El projecte està
+en desenvolupament actiu. Si trobes un bug o vols una funcionalitat, obre un
+[issue](https://github.com/jpuigbert/noorbit/issues).
