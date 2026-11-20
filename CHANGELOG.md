@@ -3,7 +3,7 @@
 Totes les releases amb els seus binaris: <https://github.com/jpuigbert/noorbit/releases>.
 Les notes completes de cada release són a la pàgina del release corresponent.
 
-## 0.71.13-alpha (en desenvolupament)
+## 0.71.13-alpha (2026-11-20)
 
 **Portada, wiki i release multiplaforma: tot al dia**
 
@@ -161,7 +161,7 @@ Posar la clau de Claude no bastava: NoOrbit li enviava `Authorization: Bearer` (
 - *cap número inventat*: el que no s'ha mesurat és `null`, no un zero; el que no es pot comprovar es DIU que no s'ha pogut comprovar; i els fitxers de registre mai es reescriuen. És el criteri de Soup aplicat a l'aprenentatge local.
 - *proves*: 20 tests nous — 8 de l'encaix (`ai/fit.rs`), 6 de la porta (`ai/brain_gate.rs`) i 6 del paquet de dades i els vots (`learning/mod.rs`) — tots en verd a `cargo test --lib` (190 tests en verd, cap warning); `pnpm typecheck`, `vite build`, ESLint i Vitest (90) nets.
 
-## 0.71.12-alpha (2026-11-16)
+*Aquest bloc es va preparar per a una 0.71.12 que mai es va publicar com a release: el primer binari que el conté és el de la 0.71.13.*
 
 **La Jam i el treball autopilotat ara dirigeixen Unreal i Blender: la IA decideix sola quin motor fa servir**
 
