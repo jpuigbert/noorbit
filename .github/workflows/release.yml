@@ -265,7 +265,7 @@ jobs:
       # novetats del commit, i la nota d'instal·lació/versions velles.
       - name: Build release notes (from tag commit)
         env:
-          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          TAG: ${{ env.RELEASE_TAG }}
         run: |
           VER=$(node -p "JSON.parse(require('fs').readFileSync('apps/desktop/src-tauri/tauri.conf.json','utf8')).version")
           # Missatge del commit apuntat pel tag, sense el prefix «vX.Y: ».
@@ -288,7 +288,7 @@ jobs:
         with:
           # En un «Run workflow» manual el tag no ve del `github.ref`: sense
           # aixo, el release es crearia sobre la branca i no sobre el tag.
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          tag_name: ${{ env.RELEASE_TAG }}
           files: |
             artifacts/**/*.dmg
             artifacts/**/*.app.zip
@@ -320,7 +320,7 @@ jobs:
       - name: Refresh versions.json (now including this release)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ env.RELEASE_TAG }}
         run: |
           gh api "repos/${{ github.repository }}/releases/tags/$TAG" \
             --jq '.assets[] | select(.name=="versions.json") | .id' \
