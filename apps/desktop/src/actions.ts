@@ -221,6 +221,8 @@ const rawActions = {
 
   // Ajuda
   "help.manual": () => useUIStore.getState().setShowHelp(true),
+  // Informe de fallida: què ha anat malament i com enviar-lo a l'autor.
+  "help.crashReport": () => useUIStore.getState().setShowCrashReport(true),
 };
 
 /// Totes les accions passen per aquest embolcall: cap error pot quedar sense
@@ -325,4 +327,5 @@ export const commandList: CommandDef[] = [
   { id: "view.themeGold", labelKey: "settings.themeGold" },
   { id: "view.themeYellow", labelKey: "settings.themeYellow" },
   { id: "help.manual", labelKey: "menu.manual" },
+{ id: "help.crashReport", labelKey: "menu.crashReport" },
 ];

@@ -274,6 +274,40 @@ struct LogBlock {
     backtrace: Option<String>,
 }
 
+/// Una fallida, ja provingui del registre en disc o de la memòria.
+#[derive(Debug, Clone)]
+struct Failure {
+    at: String,
+    epoch_ms: Option<i64>,
+    message: String,
+    location: Option<String>,
+    backtrace: Option<String>,
+}
+
+impl From<&LogBlock> for Failure {
+    fn from(b: &LogBlock) -> Self {
+        Failure {
+            at: b.at.clone(),
+            epoch_ms: b.epoch_ms,
+            message: b.message.clone(),
+            location: b.location.clone(),
+            backtrace: b.backtrace.clone(),
+        }
+    }
+}
+
+impl From<&CrashEntry> for Failure {
+    fn from(e: &CrashEntry) -> Self {
+        Failure {
+            at: e.at.clone(),
+            epoch_ms: Some(e.epoch_ms),
+            message: e.message.clone(),
+            location: e.location.clone(),
+            backtrace: e.backtrace.clone(),
+        }
+    }
+}
+
 /// Divideix el registre en blocs de fallida i diu a quina sessió pertanyen.
 fn parse_blocks(content: &str) -> Vec<LogBlock> {
     let mut out: Vec<LogBlock> = Vec::new();
@@ -372,18 +406,31 @@ pub fn build_report(data_dir: Option<&Path>) -> CrashReport {
         Some(markers - 1)
     };
 
-    let session_blocks: Vec<&LogBlock> = blocks
+    let session: Vec<Failure> = blocks
         .iter()
         .filter(|b| current_session == Some(b.session))
+        .map(Failure::from)
         .collect();
-    let previous_blocks: Vec<&LogBlock> = blocks
+    let previous: Vec<Failure> = blocks
         .iter()
         .filter(|b| current_session.map_or(true, |c| b.session < c))
+        .map(Failure::from)
         .collect();
 
-    let last = blocks.last();
+    // Si el registre en disc no s'ha pogut escriure (carpeta no escribible),
+    // les fallides d'aquesta sessió igual són a memòria: no es perden.
+    let session = if session.is_empty() {
+        session_entries().iter().map(Failure::from).collect()
+    } else {
+        session
+    };
+
+    let last = previous
+        .iter()
+        .chain(session.iter())
+        .max_by_key(|f| f.epoch_ms.unwrap_or(0));
     let last_crash_age_minutes = last
-        .and_then(|b| b.epoch_ms)
+        .and_then(|f| f.epoch_ms)
         .map(|ms| ((now_ms() - ms) / 60_000).max(0));
 
     let app_version = env!("CARGO_PKG_VERSION").to_string();
@@ -400,8 +447,8 @@ pub fn build_report(data_dir: Option<&Path>) -> CrashReport {
         &started_at,
         data_dir_s.as_deref(),
         log_path_s.as_deref(),
-        &session_blocks,
-        &previous_blocks,
+        &session,
+        &previous,
         last,
         &tail(&content, LOG_TAIL_LINES),
     );
@@ -413,9 +460,9 @@ pub fn build_report(data_dir: Option<&Path>) -> CrashReport {
         started_at,
         data_dir: data_dir_s,
         log_path: log_path_s,
-        session_panics: session_blocks.len(),
-        previous_panics: previous_blocks.len(),
-        last_crash_at: last.map(|b| b.at.clone()),
+        session_panics: session.len(),
+        previous_panics: previous.len(),
+        last_crash_at: last.map(|f| f.at.clone()),
         last_crash_age_minutes,
         markdown,
     }
@@ -437,9 +484,9 @@ fn render_markdown(
     started_at: &str,
     data_dir: Option<&str>,
     log_path: Option<&str>,
-    session_blocks: &[&LogBlock],
-    previous_blocks: &[&LogBlock],
-    last: Option<&LogBlock>,
+    session_blocks: &[Failure],
+    previous_blocks: &[Failure],
+    last: Option<&Failure>,
     log_tail: &str,
 ) -> String {
     let mut md = String::new();
@@ -495,13 +542,13 @@ fn render_markdown(
 }
 
 /// Escriu un bloc de fallida en Markdown.
-fn push_block(md: &mut String, b: &LogBlock) {
-    md.push_str(&format!("### {}\n\n", b.at));
-    md.push_str(&format!("```\n{}\n```\n\n", b.message));
-    if let Some(loc) = &b.location {
+fn push_block(md: &mut String, f: &Failure) {
+    md.push_str(&format!("### {}\n\n", f.at));
+    md.push_str(&format!("```\n{}\n```\n\n", f.message));
+    if let Some(loc) = &f.location {
         md.push_str(&format!("**Ubicació:** `{loc}`\n\n"));
     }
-    if let Some(bt) = &b.backtrace {
+    if let Some(bt) = &f.backtrace {
         md.push_str("```\n");
         md.push_str(bt.trim_end());
         md.push_str("\n```\n\n");

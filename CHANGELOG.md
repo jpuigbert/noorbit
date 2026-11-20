@@ -27,6 +27,15 @@ Godot i Bevy ja no són «modes»: es detecten, s'instal·len, s'editen i la IA 
 - *`target/` protegit* (`jam/commands.rs`): el directori de compilació de Rust s'exclou a `.git/info/exclude`; sense això el `git add -A` de la Jam el commitejava (centenes de MB) i el `git clean -fd` esborraria la compilació sencera entre tasques.
 - *proves*: 12 tests nous (importació `.glb` → `assets/` + escena `.tscn`, asset pla sense escena, còpia a `assets/` de Bevy, error d'asset inexistent, directriu `@import:` en una línia / amb motor / tancant un bloc de codi, error clar sense motor, detecció de motor a `engine_open`); `cargo test --lib` (248), `pnpm typecheck`, Vitest (106) i ESLint nets.
 
+**Si el programa peta, hi ha un INFORME per enviar — i es copia d'un clic**
+
+Abans, una caiguda de NoOrbit era un tancament sense cap rastre útil: el procés moria i l'usuari es quedava sense saber què havia passat ni on buscar-ho. Ara cada caiguda deixa paper i hi ha un informe llest per copiar i enviar.
+
+- *registre de caigudes* (`src/crash.rs`): el hook de panic escriu a `crash.log` (dins de la carpeta de dades de NoOrbit) amb l'hora, el missatge, el lloc exacte (`fitxer:línia:columna`) i la pila de la crida. Cada arrencada deixa una marca de sessió, de manera que es distingeix el que ha passat ara del que va passar en sessions anteriors; el registre es retalla sol quan creix massa.
+- *informe de fallida* (`Ajuda ▸ Informe de fallida…`): un diàleg amb la versió, el sistema, quantes caigudes hi ha hagut (aquesta sessió i les anteriors) i el text complet per copiar, desar com a fitxer o obrir el registre al Finder. El botó «Obre GitHub» COPIA l'informe i obre la pàgina d'incidents del projecte (només cal prémer ⌘V). Si l'última sessió va acabar amb una caiguda recent, el diàleg **s'obre sol** en arrencar.
+- *copiar des de la caiguda* (`main.tsx`, `PanelErrorBoundary.tsx`, `DebugConsole.tsx`): quan la interfície peta, el botó «Copiar informe de fallida» deixa al porta-retalls l'informe sencer (backend + interfície + darrers errors de la consola) perquè l'enviï a l'autor sense buscar res pel sistema. El botó nou de la consola de depuració fa el mateix amb els errors que s'hi acumulen.
+- *proves*: 6 tests nous a `crash.rs` (el registre es talla en blocs amb sessió, el backtrace es llegeix del fitxer, l'informe explica la caiguda i on és el registre, un registre buit igual genera informe, un registre sense marca de sessió compta com a caiguda anterior i el registre es retalla quan creix massa); `cargo test --lib` (254), `pnpm typecheck`, Vitest (106), ESLint i `vite build` nets.
+
 **La Jam diu QUINA IA hi treballa — i «Atura» ATURA de debò**
 
 El panell Jam de l'agent autònom no deia amb quina IA treballava, i prémer «Atura» durant la fase de pla no feia res: la Jam es quedava a «preparant el pla…» (amb un model local, fins a una hora) i el botó semblava mort.

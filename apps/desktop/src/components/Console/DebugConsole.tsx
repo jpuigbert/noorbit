@@ -3,9 +3,10 @@
 /// nivell, hora i botons per buidar/pausar. A l'estil de la consola del
 /// desenvolupador, però dins de NoOrbit.
 import { useEffect, useRef, useState } from "react";
-import { Ban, Check, Eraser, Terminal } from "lucide-react";
+import { Ban, Check, Copy, Eraser, Terminal } from "lucide-react";
 import { useConsoleStore, type LogLevel } from "../../stores/consoleStore";
 import { useT } from "../../i18n";
+import { copyCrashReport } from "../../crashReport";
 
 const LEVEL_CLASS: Record<LogLevel, string> = {
   log: "c-log",
@@ -24,6 +25,7 @@ export default function DebugConsole() {
   const clear = useConsoleStore((s) => s.clear);
   const setPaused = useConsoleStore((s) => s.setPaused);
   const [filter, setFilter] = useState<Filter>("all");
+  const [copied, setCopied] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -34,6 +36,16 @@ export default function DebugConsole() {
   const shown = filter === "all" ? entries : entries.filter((e) => e.level === filter);
   const hhmmss = (ms: number) =>
     new Date(ms).toLocaleTimeString("ca", { hour12: false });
+
+  // Còpia l'informe de fallida (amb els errors d'aquesta consola) perquè
+  // l'usauri pugui enviar-lo a l'autor sense haver de triar i copiar a mà.
+  const doCopyReport = async () => {
+    const ok = await copyCrashReport({ source: t("crash.consoleSource") });
+    if (ok) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   return (
     <div className="debug-console">
@@ -61,6 +73,13 @@ export default function DebugConsole() {
         </button>
         <button className="icon-btn" onClick={() => clear()} title={t("console.clear")}>
           <Eraser size={13} />
+        </button>
+        <button
+          className="btn sm ghost"
+          onClick={() => void doCopyReport()}
+          title={t("crash.copyHint")}
+        >
+          {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? t("crash.copied") : t("crash.copyShort")}
         </button>
       </div>
       <div className="dc-body" ref={bodyRef}>

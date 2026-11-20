@@ -54,6 +54,8 @@ interface UIState {
   showRemoteServer: boolean;
   showSettings: boolean;
   showHelp: boolean;
+  /** Informe de fallida («crash»): què ha anat malament i com enviar-ho. */
+  showCrashReport: boolean;
   showPlugins: boolean;
   showCommandPalette: boolean;
   showQuickOpen: boolean;
@@ -113,6 +115,7 @@ interface UIState {
   setShowSettings: (v: boolean) => void;
   setShowPlugins: (v: boolean) => void;
   setShowHelp: (v: boolean) => void;
+  setShowCrashReport: (v: boolean) => void;
   setShowCommandPalette: (v: boolean) => void;
   setShowQuickOpen: (v: boolean) => void;
   setShowSearch: (v: boolean) => void;
@@ -185,6 +188,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   showSettings: false,
   showPlugins: false,
   showHelp: false,
+  showCrashReport: false,
   showCommandPalette: false,
   showQuickOpen: false,
   showSearch: false,
@@ -228,6 +232,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setShowSettings: (v) => set({ showSettings: v }),
   setShowPlugins: (v) => set({ showPlugins: v }),
   setShowHelp: (v) => set({ showHelp: v }),
+  setShowCrashReport: (v) => set({ showCrashReport: v }),
   setShowCommandPalette: (v) => set({ showCommandPalette: v }),
   setShowQuickOpen: (v) => set({ showQuickOpen: v }),
   setShowSearch: (v) => set({ showSearch: v }),

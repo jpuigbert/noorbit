@@ -1,5 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { t } from "../i18n";
+import { copyCrashReport } from "../crashReport";
+import { useUIStore } from "../stores/uiStore";
 
 /**
  * Xarxa de seguretat del RENDERITZAT d'un panell: si un component peta
@@ -11,9 +13,9 @@ import { t } from "../i18n";
  */
 export default class PanelErrorBoundary extends Component<
   { children: ReactNode; label?: string },
-  { error: Error | null; stack: string }
+  { error: Error | null; stack: string; copied: boolean }
 > {
-  state: { error: Error | null; stack: string } = { error: null, stack: "" };
+  state: { error: Error | null; stack: string; copied: boolean } = { error: null, stack: "", copied: false };
 
   static getDerivedStateFromError(error: Error) {
     return { error, stack: error.stack ?? "" };
@@ -25,9 +27,21 @@ export default class PanelErrorBoundary extends Component<
   }
 
   render() {
-    const { error, stack } = this.state;
+    const { error, stack, copied } = this.state;
     if (!error) return this.props.children;
     const label = this.props.label ?? t("app.crashTitle");
+
+    // Còpia l'informe de fallida al porta-retalls (per enviar-lo a l'autor)
+    // i obre el diàleg complet amb el registre del backend.
+    const copyReport = async () => {
+      const ok = await copyCrashReport({
+        source: t("app.crashSource"),
+        message: error.message,
+        stack,
+      });
+      if (ok) this.setState({ copied: true });
+    };
+    const openReport = () => useUIStore.getState().setShowCrashReport(true);
     return (
       <div
         style={{
@@ -62,13 +76,31 @@ export default class PanelErrorBoundary extends Component<
           {"\n\n"}
           {stack}
         </pre>
-        <button
-          className="btn primary sm"
-          onClick={() => window.location.reload()}
-          style={{ alignSelf: "flex-start" }}
-        >
-          {t("app.crashReload")}
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            className="btn primary sm"
+            onClick={() => window.location.reload()}
+            style={{ alignSelf: "flex-start" }}
+          >
+            {t("app.crashReload")}
+          </button>
+          <button
+            className="btn sm"
+            onClick={() => void copyReport()}
+            style={{ alignSelf: "flex-start" }}
+            title={t("crash.copyHint")}
+          >
+            {copied ? t("crash.copied") : t("app.crashCopy")}
+          </button>
+          <button
+            className="btn sm ghost"
+            onClick={openReport}
+            style={{ alignSelf: "flex-start" }}
+            title={t("crash.openFull")}
+          >
+            {t("crash.openFull")}
+          </button>
+        </div>
       </div>
     );
   }

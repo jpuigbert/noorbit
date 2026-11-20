@@ -178,6 +178,10 @@ export default function MenuBar() {
     help: [
       { label: t("menu.manual"), action: act("help.manual") },
       { sep: true, label: "" },
+      // INFORME DE FALLIDA: mostra què ha anat malament i deixa copiar-lo
+      // sencer per enviar-lo a l'autor.
+      { label: t("menu.crashReport"), action: act("help.crashReport") },
+      { sep: true, label: "" },
       { label: t("menu.replayOnboarding"), action: act("view.onboarding") },
       { sep: true, label: "" },
       { label: t("menu.about"), action: act("view.settings") },

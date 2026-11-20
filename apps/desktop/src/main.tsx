@@ -8,14 +8,18 @@ import ReactDOM from "react-dom/client";
 // un panell separat (l'agentStore tria el calaix de xats segons el projecte
 // que haguem posat al workspaceStore). No ho tornis a fer estàtic.
 import { t } from "./i18n";
+import { copyCrashReport } from "./crashReport";
 import "./theme.css";
 
 /// Xarxa de seguretat del renderitzat: sense ella, qualsevol error dins d'un
 /// component desmuntava tot l'arbre i la finestra quedava en blanc (un pantalla
 /// buida no diu res de què ha fallat). Ara es mostra un avís llegible amb el
 /// motiu i una opció per tornar-ho a provar.
-class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null; stack: string }> {
-  state: { error: Error | null; stack: string } = { error: null, stack: "" };
+class ErrorBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null; stack: string; copied: boolean }
+> {
+  state: { error: Error | null; stack: string; copied: boolean } = { error: null, stack: "", copied: false };
 
   static getDerivedStateFromError(error: Error) {
     return { error, stack: error.stack ?? "" };
@@ -27,8 +31,19 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   }
 
   render() {
-    const { error, stack } = this.state;
+    const { error, stack, copied } = this.state;
     if (!error) return this.props.children;
+
+    // Còpia l'informe de fallida (backend + interfície) al porta-retalls per
+    //què l'usuari pugui enviar-lo a l'autor sense buscar res pel sistema.
+    const copyReport = async () => {
+      const ok = await copyCrashReport({
+        source: t("app.crashSource"),
+        message: error.message,
+        stack,
+      });
+      if (ok) this.setState({ copied: true });
+    };
 
     return (
       <div
@@ -71,13 +86,23 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
           {"\n\n"}
           {stack}
         </pre>
-        <button
-          className="btn primary"
-          onClick={() => window.location.reload()}
-          style={{ fontSize: 13, padding: "6px 14px" }}
-        >
-          {t("app.crashReload")}
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            className="btn primary"
+            onClick={() => window.location.reload()}
+            style={{ fontSize: 13, padding: "6px 14px" }}
+          >
+            {t("app.crashReload")}
+          </button>
+          <button
+            className="btn"
+            onClick={() => void copyReport()}
+            style={{ fontSize: 13, padding: "6px 14px" }}
+            title={t("crash.copyHint")}
+          >
+            {copied ? t("crash.copied") : t("app.crashCopy")}
+          </button>
+        </div>
       </div>
     );
   }

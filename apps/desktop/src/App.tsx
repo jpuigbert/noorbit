@@ -46,6 +46,8 @@ const ProjectWorkModal = lazy(() => import("./components/ProjectWork/ProjectWork
 const VideoStudioModal = lazy(() => import("./components/VideoStudio/VideoStudioModal"));
 const VsCodeExtensionsModal = lazy(() => import("./components/Extensions/VsCodeExtensionsModal"));
 const GameStudiosModal = lazy(() => import("./components/GameStudios/GameStudiosModal"));
+// Informe de fallida («crash»): només es carrega quan l'usuari el demana.
+const CrashReportModal = lazy(() => import("./components/CrashReportModal"));
 import ComputerConfirmModal from "./components/Computer/ComputerConfirmModal";
 import CommandPalette from "./components/CommandPalette";
 import QuickOpen from "./components/QuickOpen";
@@ -58,6 +60,7 @@ import { useActivityPulse } from "./utils/useActivityPulse";
 import { initFunFx } from "./utils/funFx";
 import StartupScreen from "./components/StartupScreen";
 import Toaster from "./components/Toaster";
+import { fetchCrashReport } from "./crashReport";
 /// Autodesat (com l'«Auto Save» de VS Code): desa el fitxer obert poc
 /// després de l'últim canvi i també quan la finestra perd el focus.
 function useAutosave() {
@@ -254,6 +257,31 @@ export default function App() {
   useEffect(() => {
     document.documentElement.style.setProperty("zoom", String(zoom));
   }, [zoom]);
+
+  // Si l'última sessió va acabar amb una caiguda, l'INFORME DE FALLIDA s'obre
+  // sol: l'usuari veu què va passar i el pot copiar per enviar-lo, sense haver
+  // de buscar cap fitxer pel sistema.
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const r = await fetchCrashReport();
+      if (!alive || !r) return;
+      if (r.previousPanics <= 0) return;
+      // Només si la caiguda és recent (menys d'un dia): una fallida de fa
+      // setmanes no ha d'interrompre l'arrencada de cada dia.
+      if (r.lastCrashAgeMinutes != null && r.lastCrashAgeMinutes > 24 * 60) return;
+      // No xoquem amb l'assistent de primera arrencada.
+      try {
+        if (localStorage.getItem("noorbit.onboardingDone") !== "1") return;
+      } catch {
+        /* sense persistència: continueu */
+      }
+      useUIStore.getState().setShowCrashReport(true);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // Tema de colors: s'aplica a l'arrel del document i se'n dona avís
   // perquè l'editor (Monaco) canviï el seu tema en conseqüència.
@@ -460,6 +488,7 @@ export default function App() {
         {useUIStore((s) => s.showPlugins) && <PluginManager />}
         {useUIStore((s) => s.showSettings) && <SettingsModal />}
         {useUIStore((s) => s.showHelp) && <HelpModal />}
+                {useUIStore((s) => s.showCrashReport) && <CrashReportModal />}
         {useUIStore((s) => s.showAccount) && <AccountModal />}
         {useUIStore((s) => s.showNewProject) && <NewProjectModal />}
         {useUIStore((s) => s.showRemoteServer) && <RemoteServerModal />}
