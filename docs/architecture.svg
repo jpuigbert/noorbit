@@ -50,11 +50,11 @@
     <text x="616" y="156">🎬 engine_tools/ · directrius de motor</text>
     <text x="616" y="182">🎥 video/ · muntatge i render amb ffmpeg</text>
     <text x="616" y="208">📱 mobile/ · Android/iOS natius + emuladors</text>
-    <text x="950" y="104">🔌 commands/ · API Tauri (IPC)</text>
-    <text x="950" y="130">🛡 guardian/ · watchdog de processos</text>
-    <text x="950" y="156">📦 persistence/ · dades i lliçons</text>
-    <text x="950" y="182">🧬 native_llm/ · llama.cpp + GGUF</text>
-    <text x="950" y="208">🔊 voice/ · dictat al xat</text>
+    <text x="938" y="104" font-size="14">🔌 commands/ · API Tauri (IPC)</text>
+    <text x="938" y="130" font-size="14">🛡 guardian/ · watchdog de processos</text>
+    <text x="938" y="156" font-size="14">📦 persistence/ · dades i lliçons</text>
+    <text x="938" y="182" font-size="14">🧬 native_llm/ · llama.cpp + GGUF</text>
+    <text x="938" y="208" font-size="14">🔊 voice/ · dictat al xat</text>
   </g>
 
   <!-- CRATES -->
@@ -68,7 +68,7 @@
     <text x="600" y="362">noorbit-persistence</text>
     <text x="790" y="362">noorbit-reporter</text>
     <text x="940" y="362">noorbit-lessons</text>
-    <text x="1070" y="362">noorbit-memguard</text>
+    <text x="1052" y="362">noorbit-memguard</text>
     <text x="56" y="392">noorbit-blender-import</text>
     <text x="270" y="392">noorbit-signal</text>
     <text x="420" y="392">noorbit-worktree</text>
