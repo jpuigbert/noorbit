@@ -247,15 +247,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # L'API de releases NO porta cap camp «latest»: el calculem preguntant
+          # pel release que GitHub marca com a més recent.
+          LATEST=$(gh api repos/${{ github.repository }}/releases/latest --jq .tag_name)
+          export LATEST
           gh api repos/${{ github.repository }}/releases \
             --paginate \
             --jq 'map(select(.draft==false) | {
               tag: .tag_name,
               name: .name,
               date: .published_at,
-              latest: .latest,
+              latest: (.tag_name == env.LATEST),
               assets: [.assets[] | {name: .name, url: .browser_download_url, size: .size}]
-            }) | sort_by(.tag) | {updated: now|todate, versions: .}' > artifacts/versions.json
+            }) | sort_by(.date) | {updated: now|todate, versions: .}' > artifacts/versions.json
           cat artifacts/versions.json | head -c 600; echo
 
       # ── Notes de la release: GENERADES del commit que apunta el tag ──────
@@ -325,13 +329,15 @@ jobs:
           gh api "repos/${{ github.repository }}/releases/tags/$TAG" \
             --jq '.assets[] | select(.name=="versions.json") | .id' \
             | xargs -r -I{} gh api -X DELETE "repos/${{ github.repository }}/releases/assets/{}" || true
+          LATEST=$(gh api repos/${{ github.repository }}/releases/latest --jq .tag_name)
+          export LATEST
           gh api repos/${{ github.repository }}/releases \
             --paginate \
             --jq 'map(select(.draft==false) | {
               tag: .tag_name,
               name: .name,
               date: .published_at,
-              latest: .latest,
+              latest: (.tag_name == env.LATEST),
               assets: [.assets[] | {name: .name, url: .browser_download_url, size: .size}]
-            }) | sort_by(.tag) | {updated: now|todate, versions: .}' > versions.json
+            }) | sort_by(.date) | {updated: now|todate, versions: .}' > versions.json
           gh release upload "$TAG" versions.json --clobber -R "${{ github.repository }}"
