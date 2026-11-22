@@ -19,6 +19,7 @@ pub mod preview;
 pub mod skills;
 pub mod vscode_extensions;
 pub mod skills_store;
+pub mod snapshot;
 pub mod system;
 pub mod term;
 pub mod themes;

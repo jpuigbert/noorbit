@@ -56,7 +56,9 @@ const IDLE_AFTER_MS = 60_000; // 1 min sense tocar res → mode disfressa
 const ROTATE_MS = 300_000; // canvi de disfressa cada 5 minuts
 
 export function useFunCursor() {
-  const enabled = useUIStore((s) => s.funCursor);
+  // Mode professional: el cursor disfressat queda silenciat encara que
+  // l'usuari el tinguera activat (el flag lúdic es conserva intacte).
+  const enabled = useUIStore((s) => s.funCursor && !s.professionalMode);
 
   useEffect(() => {
     const root = document.documentElement;

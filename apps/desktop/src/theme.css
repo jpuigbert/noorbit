@@ -51,6 +51,10 @@
   --error: #f87171;
   --warning: #fbbf24;
 
+  /* Fons de la vista prèvia (iframe de web externa): blanc a TOTS els
+     temes — les webs sense fons propi es llegirien malament sobre fosc. */
+  --preview-bg: #fff;
+
   --radius-sm: 4px;
   --radius: 6px;
   --radius-md: 8px;
@@ -265,8 +269,8 @@ select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border-radius: var(--radius-sm);
   color: var(--text-2);
   transition:

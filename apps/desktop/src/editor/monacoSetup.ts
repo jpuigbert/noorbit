@@ -61,6 +61,98 @@ function workerFor(
 // Força @monaco-editor/react a usar la instància local en lloc del CDN.
 loader.config({ monaco });
 
+// ---- GDScript (Godot): Monaco no el porta de sèrie -------------------------
+// Tokenizer monarch propi i senzill: paraules clau de GDScript 2.x (Godot 4),
+// anotacions (@export, @onready…), referències de node ($Node, %Unique),
+// cadenes, números i comentaris «#». La resta de llenguatges «barats»
+// (php, yaml, ini/toml…) ja venen amb els basic-languages del paquet local.
+if (!monaco.languages.getLanguages().some((l) => l.id === "gdscript")) {
+  monaco.languages.register({ id: "gdscript", extensions: [".gd"], aliases: ["GDScript", "gdscript"] });
+  monaco.languages.setLanguageConfiguration("gdscript", {
+    comments: { lineComment: "#" },
+    brackets: [
+      ["(", ")"],
+      ["[", "]"],
+      ["{", "}"],
+    ],
+    autoClosingPairs: [
+      { open: "(", close: ")" },
+      { open: "[", close: "]" },
+      { open: "{", close: "}" },
+      { open: '"', close: '"', notIn: ["string"] },
+      { open: "'", close: "'", notIn: ["string"] },
+    ],
+    indentationRules: {
+      increaseIndentPattern: /^\s*(func|if|elif|else|for|while|match|class|static\s+func)\b.*:\s*(#.*)?$/,
+      decreaseIndentPattern: /^\s*(elif|else)\b.*:\s*(#.*)?$/,
+    },
+  });
+  monaco.languages.setMonarchTokensProvider("gdscript", {
+    defaultToken: "",
+    ignoreCase: false,
+    keywords: [
+      "if", "elif", "else", "for", "while", "match", "break", "continue", "pass",
+      "return", "and", "or", "not", "in", "is", "as", "self", "super", "true",
+      "false", "null", "func", "var", "const", "enum", "class", "class_name",
+      "extends", "signal", "static", "void", "await", "yield", "breakpoint",
+      "assert", "preload", "tool", "export", "onready", "setget", "when",
+    ],
+    typeKeywords: [
+      "int", "float", "bool", "String", "StringName", "Vector2", "Vector2i",
+      "Vector3", "Vector3i", "Vector4", "Vector4i", "Rect2", "Rect2i", "Color",
+      "NodePath", "Array", "Dictionary", "Basis", "Quaternion", "Transform2D",
+      "Transform3D", "Plane", "AABB", "Projection", "RID", "Callable", "Signal",
+      "PackedByteArray", "PackedInt32Array", "PackedInt64Array", "PackedFloat32Array",
+      "PackedFloat64Array", "PackedStringArray", "PackedVector2Array",
+      "PackedVector3Array", "PackedColorArray", "Object", "Variant",
+    ],
+    tokenizer: {
+      root: [
+        [/@[a-zA-Z_]\w*/, "annotation"],
+        [/[a-zA-Z_]\w*(?=\s*\()/, { cases: { "@keywords": "keyword", "@default": "entity.name.function" } }],
+        [/[a-zA-Z_]\w*/, { cases: { "@keywords": "keyword", "@typeKeywords": "type", "@default": "identifier" } }],
+        [/[$%][A-Za-z_][\w/]*/, "variable.predefined"],
+        { include: "@whitespace" },
+        [/\d+\.\d+([eE][-+]?\d+)?/, "number.float"],
+        [/0[xX][0-9a-fA-F_]+|0[bB][01_]+|\d[\d_]*/, "number"],
+        [/"""/, "string", "@tripleDouble"],
+        [/'''/, "string", "@tripleSingle"],
+        [/"/, "string", "@doubleString"],
+        [/'/, "string", "@singleString"],
+        [/[()\[\]{}]/, "delimiter.bracket"],
+        [/[,:;.]/, "delimiter"],
+        [/[=<>!+\-*/%&|^~]+/, "operator"],
+      ],
+      whitespace: [
+        [/[ \t\r\n]+/, ""],
+        [/#.*$/, "comment"],
+      ],
+      doubleString: [
+        [/\\./, "string.escape"],
+        [/"/, "string", "@pop"],
+        [/[^\\"]+/, "string"],
+      ],
+      singleString: [
+        [/\\./, "string.escape"],
+        [/'/, "string", "@pop"],
+        [/[^\\']+/, "string"],
+      ],
+      tripleDouble: [
+        [/"""/, "string", "@pop"],
+        [/\\./, "string.escape"],
+        [/[^\\"]+/, "string"],
+        [/"/, "string"],
+      ],
+      tripleSingle: [
+        [/'''/, "string", "@pop"],
+        [/\\./, "string.escape"],
+        [/[^\\']+/, "string"],
+        [/'/, "string"],
+      ],
+    },
+  });
+}
+
 /// Pegat per un error conegut de @monaco-editor/react 4.7 amb Monaco ≥ 0.52:
 /// en desmuntar un DiffEditor (la revisió verd/roig dels canvis de la IA o el
 /// diff del Git), la llibreria allibera els models de text ABANS de tancar el

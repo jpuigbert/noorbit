@@ -37,12 +37,24 @@ pot confirmar-la) i et torna el resultat en un missatge nou.\n\
   IMG|descripció|ruta/caixa.png    (genera una imatge i la desa al projecte)\n\
   @delete: ruta/relativa       (esborra el fitxer o carpeta del projecte)\n\
   @edit: ruta + «<<<<<<< CERCA» + text antic + «=======» + text nou + «>>>>>>>»\n\
-              (modifica NOMÉS aquest tros del fitxer real; text nou buit = esborra'l)\n\
+              (modifica NOMÉS aquest tros del fitxer real; text nou buit = esborra'l;\n\
+              el text nou ha de SER DIFERENT del de CERCA — mai edicions buides)\n\
 REGLES:\n\
 - ABANS d'empaquetar o llançar, verifica amb «RUN|ls -la» que el projecte està \
 COMPLET; si falta un fitxer emet-lo SENCER amb «@file:» (mai a mitges, «…» o buits).\n\
 - «@file: ruta» ha d'anar SEGUIT del contingut COMPLET del fitxer (codi real): \
 un @file: sense codi crea un fitxer buit.\n\
+- Les rutes de «@file:», «@edit:» i «@delete:» són SEMPRE RELATIVES a l'arrel \
+del projecte, que és el «Projecte (cwd)» indicat al mateix system prompt: mai \
+absolutes («/Volumes/…», «/Users/…», «/home/…»), mai «..», mai reproduir \
+l'arrel dins la ruta. Si el fitxer que vols tocar és realment FORA del \
+projecte obert, digues-ho en prosa: NoOrbit no hi pot escriure.\n\
+- Dins «RUN|», tota ruta amb ESPAIS va ENTRECOMILLADA: \
+«RUN|python3 'forestin the sky/main.py'»; si no, el shell la parteix i la \
+comanda falla. CADA directriu a la seva PRÒPIA línia: mai dos «RUN|» \
+enganxats a la mateixa línia.\n\
+- Si una acció NO ha canviat res, NO la reemetis IDÈNTICA: canvia la comanda \
+o fes que el text NOU sigui DISTINT del CERCA (una edició buida no fa res).\n\
 - Si l'usuari demana «fes…», «implementa…», «crea els tests» o semblant, la \
 resposta HA de portar els fitxers amb «@file:» i codi COMPLET; les PROVES són \
 fitxers de prova reals (no una explicació) i, si cal, s'executen amb «RUN|». \
@@ -256,8 +268,11 @@ pub fn parse(text: &str) -> Vec<RunAction> {
                 i += 1;
                 continue;
             }
-            let cmd = rest.trim().to_string();
-            if !cmd.is_empty() {
+            // Dues directives ENGANXADES sense salt de línia (model menut:
+            // «RUN|pip install -r r.txtRUN|python3 main.py») eren UNA sola
+            // comanda innombrable: el «pip install» no s'executava mai i la
+            // prosa del model s'empassava la comanda. Ara es separen.
+            for cmd in split_glued(&rest) {
                 out.push(RunAction::Foreground(cmd));
             }
             i += 1;
@@ -275,6 +290,98 @@ pub fn parse(text: &str) -> Vec<RunAction> {
         }
     }
     out
+}
+
+/// Separa les «RUN|» que el model ha enganxat a la MATEIXA línia: les
+/// talla en tantes comandes directives. Només es talla davant d'un «RUN|»
+/// encolat al text anterior (un de precedit per espai o inici de línia ja
+/// l'agafa el bucle de `parse`) i MAI dins d'una part entrecomillada, perquè
+/// «echo "a RUN|b"» no es talli.
+fn split_glued(cmd: &str) -> Vec<String> {
+    let chars: Vec<char> = cmd.chars().collect();
+    let low: Vec<char> = cmd.to_ascii_lowercase().chars().collect();
+    let mut out: Vec<String> = Vec::new();
+    let mut start = 0usize;
+    let mut quote: Option<char> = None;
+    let mut i = 0usize;
+    while i < chars.len() {
+        if let Some(q) = quote {
+            if chars[i] == q {
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        if chars[i] == '\'' || chars[i] == '"' {
+            quote = Some(chars[i]);
+            i += 1;
+            continue;
+        }
+        let glued = i > start
+            && i + 4 <= low.len()
+            && low[i] == 'r'
+            && low[i + 1] == 'u'
+            && low[i + 2] == 'n'
+            && low[i + 3] == '|'
+            && !chars[i - 1].is_whitespace();
+        if glued {
+            let piece: String = chars[start..i].iter().collect();
+            if !piece.trim().is_empty() {
+                out.push(piece.trim().to_string());
+            }
+            start = i + 4;
+            i = start;
+            continue;
+        }
+        i += 1;
+    }
+    let tail: String = chars[start..].iter().collect();
+    if !tail.trim().is_empty() {
+        out.push(tail.trim().to_string());
+    }
+    out
+}
+
+/// Segell de les ACCIONS d'una resposta del model —només el que NoOrbit
+/// executaria o aplicaria, mai la prosa— per detectar reemissions. Dues
+/// respostes amb paraules diferents i el MESMEIX pla d'accions donen el
+/// mateix segell: si això passa dos torns seguits, repetir l'acció ja no pot
+/// donar un resultat nou. Sense això, un model encallat emetia 15 blocs
+/// idèntics («@edit:» amb CERCA == NOU i la mateixa «RUN|») fins a esgotar
+/// `MAX_ROUNDS` mentre el xat s'omplia de repetició.
+///
+/// Retorna `""` quan no hi ha cap acció (llavors el guard no s'aplica: una
+/// resposta en prosa no pot quedar en bucle d'eines).
+pub fn action_fingerprint(text: &str) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for a in parse(text) {
+        parts.push(format!("run {a:?}"));
+    }
+    for b in extract_edit_blocks(text) {
+        parts.push(format!("edit {}", b.path));
+        for (find, replace) in &b.edits {
+            parts.push(format!("  {}→{}", hash_short(find), hash_short(replace)));
+        }
+    }
+    for (p, c) in extract_file_blocks(text) {
+        parts.push(format!("file {p} {}", hash_short(&c)));
+    }
+    for nb in crate::browser::tools::parse(text) {
+        parts.push(format!("nb {nb:?}"));
+    }
+    parts.join("\n")
+}
+
+/// Hash curt i estable (FNV-1a) per al segell d'accions: no cal criptografia,
+/// només comparar dos torns consecutius del mateix model sense emportar-se
+/// tot el codi a la memòria.
+fn hash_short(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
 }
 
 /// Neteja el nom que ve darrere de «@file:»: cometes, barres inverses,
@@ -515,8 +622,29 @@ pub fn apply_edit_blocks(app: &AppHandle, text: &str) -> Vec<String> {
 /// poden dependre de `workspace::current_root()`.
 pub fn apply_edit_blocks_at(root: &std::path::Path, text: &str) -> Vec<String> {
     let mut report: Vec<String> = Vec::new();
-    for block in extract_edit_blocks(text) {
-        let Some(rel) = safe_rel(&block.path) else { continue };
+    // Rutes REALMENT editades (escrites al disc): es registren al snapshot
+    // perquè «Desfés el pas» només esborre fitxers de l'agent, no de l'usuari.
+    let mut edited: Vec<String> = Vec::new();
+    let blocks = extract_edit_blocks(text);
+    // SNAPSHOT abans del lot d'escriptures (git shadow): si git no hi és,
+    // es degrada amb nota i les edicions es fan igualment.
+    if !blocks.is_empty() {
+        if let Err(e) = crate::agent::snapshot::take(root) {
+            eprintln!("NoOrbit/snapshot: sense snapshot del lot d'edicions ({e})");
+        }
+    }
+    for block in blocks {
+        let Some(rel) = write_rel(root, &block.path) else {
+            // Abans aquest cas feia `continue` MUT: el model rebia un informe
+            // BUÍT, no sabia que la seva ruta era invàlida i la reemetia
+            // EXACTAMENT igual torn rere torn.
+            report.push(format!(
+                "{}: ERROR la ruta és FORA del projecte obert (l'arrel és «{}»). Les «@edit:» només accepten rutes RELATIVES a l'arrel: reemet-les amb la ruta relativa (p. ex. «main.py» o «src/main.py»). Si el fitxer és de fora del projecte, NoOrbit no pot tocar-lo: digues-ho en prosa.",
+                block.path,
+                root.display()
+            ));
+            continue;
+        };
         let path = root.join(&rel);
         let Ok(old) = std::fs::read_to_string(&path) else {
             report.push(format!("{}: ERROR no existeix (no es pot editar)", rel));
@@ -525,7 +653,19 @@ pub fn apply_edit_blocks_at(root: &std::path::Path, text: &str) -> Vec<String> {
         let mut new_content = old.clone();
         let mut ok = 0usize;
         let mut fail = 0usize;
+        let mut noop = 0usize;
+        // Fragments REALS més semblants als CERCA que no han coincidit: es
+        // tornen al model perquè corregeixi en UN sol reintent (abans només
+        // rebia «cal el text EXACTE» i tornava a fallar a cegues).
+        let mut miss_snippets: Vec<String> = Vec::new();
         for (find, replace) in &block.edits {
+            // Secció NO-OP: el model copia el MATEIX text a CERCA i a NOU —
+            // no canvia res. Comptar-la com a «aplicada» mentia a la UI i
+            // distreia el bucle (el model no rebia cap avís).
+            if find.trim_end() == replace.trim_end() {
+                noop += 1;
+                continue;
+            }
             if old.contains(find.as_str()) {
                 new_content = new_content.replacen(find.as_str(), replace, 1);
                 ok += 1;
@@ -561,17 +701,44 @@ pub fn apply_edit_blocks_at(root: &std::path::Path, text: &str) -> Vec<String> {
                 ok += 1;
             } else {
                 fail += 1;
+                if miss_snippets.len() < 2 {
+                    if let Some(snip) = closest_snippet(&new_content, find) {
+                        miss_snippets.push(snip);
+                    }
+                }
             }
         }
+        let miss_help = if miss_snippets.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\n{}\nCorregeix el CERCA copiant el text EXACTE d'aquest fragment real (mateixa indentació) i reemet l'edició en UN sol reintent.",
+                miss_snippets.join("\n")
+            )
+        };
         if ok > 0 && std::fs::write(&path, &new_content).is_ok() {
-            report.push(format!("{}: {} edició/ons aplicades{}", rel, ok,
-                if fail > 0 { format!(" ({} no trobades)", fail) } else { String::new() }));
+            edited.push(rel.clone());
+            report.push(format!("{}: {} edició/ons aplicades{}{}{}", rel, ok,
+                if fail > 0 { format!(" ({} no trobades)", fail) } else { String::new() },
+                if noop > 0 { format!(" ({} seccions no-op ignorades)", noop) } else { String::new() },
+                miss_help));
+        } else if ok == 0 && noop > 0 {
+            // Tot el bloc era CERCA == NOU: no hi ha cap canvi què escriure.
+            report.push(format!(
+                "{}: les {} seccions CERCA/NOU són IDÈNTIQUES (no canvien res) — edició inútil, no aplicada. Si el fitxer ja és correcte, NO emetis res; si has de canviar alguna cosa, emet el text NOU DISTINT.",
+                rel, noop
+            ));
         } else if fail > 0 {
             report.push(format!(
-                "{}: ERROR el text CERCA no coincideix amb el fitxer real ({} seccions). Reemet amb el text EXACTE.",
-                rel, fail
+                "{}: ERROR el text CERCA no coincideix amb el fitxer real ({} seccions).{}{}",
+                rel, fail,
+                if miss_snippets.is_empty() { " Reemet amb el text EXACTE.".to_string() } else { String::new() },
+                miss_help
             ));
         }
+    }
+    if !edited.is_empty() {
+        crate::agent::snapshot::record_written(root, &edited);
     }
     report
 }
@@ -587,9 +754,35 @@ pub fn write_announced_files(app: &AppHandle, text: &str) -> Vec<String> {
     let Some(root) = crate::commands::workspace::current_root() else {
         return Vec::new();
     };
+    // SNAPSHOT abans del lot d'escriptures (git shadow), amb degradació.
+    if !extract_file_blocks(text).is_empty() {
+        if let Err(e) = crate::agent::snapshot::take(&root) {
+            eprintln!("NoOrbit/snapshot: sense snapshot del lot de fitxers ({e})");
+        }
+    }
+    let written = write_announced_files_at(&root, text);
+    if !written.is_empty() {
+        // Registra les rutes escrites al snapshot del pas (undo selectiu).
+        crate::agent::snapshot::record_written(&root, &written);
+        progress(
+            app,
+            &format!("💾 Fitxers escrits abans d'executar: {}", clip(&written.join(", "), 140)),
+            true,
+        );
+    }
+    written
+}
+
+/// Bucle REAL d'escriptura dels «@file:» sobre una arrel donada (sense
+/// AppHandle ni snapshot): el compartixen `write_announced_files` i els tests
+/// d'integració «frase → fitxers → verificació». Mateixa contenció que les
+/// edicions: `write_rel` relativitza les rutes que reprodueixen l'arrel i
+/// rebutja les absolutes de fora (abans `safe_rel` les callava i el frontend
+/// les escrivia dins d'una carpeta fantasma «Volumes/…»).
+pub fn write_announced_files_at(root: &std::path::Path, text: &str) -> Vec<String> {
     let mut written: Vec<String> = Vec::new();
     for (rel, content) in extract_file_blocks(text) {
-        let Some(rel) = safe_rel(&rel) else { continue };
+        let Some(rel) = write_rel(root, &rel) else { continue };
         let path = root.join(&rel);
         if let Some(par) = path.parent() {
             let _ = std::fs::create_dir_all(par);
@@ -598,14 +791,23 @@ pub fn write_announced_files(app: &AppHandle, text: &str) -> Vec<String> {
             written.push(rel);
         }
     }
-    if !written.is_empty() {
-        progress(
-            app,
-            &format!("💾 Fitxers escrits abans d'executar: {}", clip(&written.join(", "), 140)),
-            true,
-        );
-    }
     written
+}
+
+/// Rutes «@file:» que `write_rel` REBUTJA (absolutes de FORA de l'arrel o amb
+/// «..»), tal com el model les va escriure: només se les ha de poder
+/// reconèixer a l'informe. Les edicions ja ho fan (`apply_edit_blocks_at`),
+/// però els fitxers anunciats es descartaven amb un `continue` MUT i el
+/// model tornava a emetre la mateixa ruta invàlida torn rere torn.
+pub fn rejected_write_paths(root: &std::path::Path, text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (raw, _) in extract_file_blocks(text) {
+        let t = raw.trim().to_string();
+        if write_rel(root, &t).is_none() && !out.contains(&t) {
+            out.push(t);
+        }
+    }
+    out
 }
 
 /// Avança el pas de progrés al xat (mateix event que la resta de l'agent).
@@ -647,6 +849,393 @@ fn safe_rel(p: &str) -> Option<String> {
         return None;
     }
     Some(t)
+}
+
+/// Ruta relativa de la IA per a UNA escriptura (o un lint) dins del projecte.
+///
+/// Els models copien el «Projecte (cwd): /Volumes/…» que `sysprompt::env_layer`
+/// els injecta i posen aquesta ruta ABSOLUTA dins «@file:»/«@edit:». Abans
+/// això fallava pels dos camins, i de manera contradictòria:
+///  - el backend (`safe_rel`) rebutjava l'absoluta i el bloc es descartava
+///    SENSE dir-ho al model (reemissió infinita);
+///  - el frontend (`autoMaterialize`) arrossegava la barra inicial i
+///    rebasteixia la ruta literalment DINS de l'arrel: naixia una carpeta
+///    fantasma «<arrel>/Volumes/Toshi/programes/…» que `guard_in_root` no
+///    veia —perquè sí que era sota l'arrel— i el projecte quedava brut.
+///
+/// Ara la ruta que REPRODUEIX l'arrel (amb o sense barra inicial) es
+/// relativitza i apunta al fitxer que el model volia dir; les absolutes de
+/// FORA de l'arrel i les que porten «..» continuen sent `None` (mai
+/// s'escriuen), però ja amb un missatge explícit al report.
+pub fn write_rel(root: &std::path::Path, raw: &str) -> Option<String> {
+    let t = raw.trim().replace('\\', "/");
+    if t.is_empty() || t.split('/').any(|s| s == "..") {
+        return None;
+    }
+    if t.starts_with('/') {
+        return under_root(root, &t).or_else(|| under_root_ic(root, &t));
+    }
+    // Ruta RELATIVA: és la forma correcta del protocol i es respecta TAL QUAL.
+    // (Relativitzar-ne una de relativa podria menjar-se'n el primer segment
+    // quan coincideix amb el nom de l'arrel.)
+    if t.contains('/') {
+        // Excepció: el cwd que el model torna a escriure SENSE barra inicial
+        // («Volumes/Toshi/programes/forestin the sky/main.py») és EXACTAMENT
+        // la ruta de l'arrel; tractar-la com a relativa creava la carpeta falsa.
+        if let Some(rel) = under_root(root, &format!("/{t}")) {
+            return Some(rel);
+        }
+    }
+    safe_rel(&t)
+}
+
+/// Part relativa d'una ruta ABSOLUTA si cau sota l'arrel (prefix exacte) o si
+/// en REPRODUEIX el començament (arrel montada en un altre punt de muntatge o
+/// amb majúscules diferents: `/Volumes/Toshi` vs `/Volumes/toshi`). Dona `None`
+/// si n'és fora o si és l'arrel mateixa (que no és cap fitxer).
+fn under_root(root: &std::path::Path, abs: &str) -> Option<String> {
+    abs_rel_under_root(root, abs, false)
+}
+
+/// Segon intent, sense distingir majúscules: macOS munta els volums amb el nom
+/// que va escriure l'usuari i el model el copia a mitges.
+fn under_root_ic(root: &std::path::Path, abs: &str) -> Option<String> {
+    abs_rel_under_root(root, abs, true)
+}
+
+fn abs_rel_under_root(root: &std::path::Path, abs: &str, ignore_case: bool) -> Option<String> {
+    if !std::path::Path::new(abs).is_absolute() || !root.is_absolute() {
+        return None;
+    }
+    let eq = |a: &str, b: &str| {
+        if ignore_case {
+            a.eq_ignore_ascii_case(b)
+        } else {
+            a == b
+        }
+    };
+    let seg = |p: &std::path::Path| -> Vec<String> {
+        p.components()
+            .map(|c| c.as_os_str().to_string_lossy().to_string())
+            .collect()
+    };
+    // Variant canònica de l'arrel: amb `/Volumes/…`, symlink o `../` resolts,
+    // el prefix escrit pel model només coincideix amb la forma real del disc.
+    let root_canon = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let roots: [Vec<String>; 2] = [seg(root), seg(&root_canon)];
+    let p_canon = std::path::Path::new(abs)
+        .canonicalize()
+        .unwrap_or_else(|_| std::path::PathBuf::from(abs));
+    let mut ps = seg(std::path::Path::new(abs));
+    let pscan = seg(&p_canon);
+    if pscan.len() > ps.len() {
+        ps = pscan;
+    }
+    if ps.first().map(|s| s.as_str()) != Some("/") {
+        return None;
+    }
+    // La ruta pot REPRODUIR l'arrel diverses vegades (la forma real del
+    // transcript: «/arrel/arrel/main.py»); es retalla tantes com apareixi al
+    // capdamunt, mai a l'inrevés: una ruta que no és del projecte no s'hi cola.
+    let mut i = 1usize;
+    loop {
+        let mut cops = 0usize;
+        for r in &roots {
+            if r.len() < 2 || r[0] != "/" {
+                continue;
+            }
+            let depth = r.len() - 1;
+            // L'arrel ha de ser prefix REAL i n'ha de quedar res darrere (si no,
+            // la ruta és l'arrel mateixa o més curta: no és cap fitxer del projecte).
+            if ps.len() - i < depth || ps.len() - (i + depth) < 1 {
+                continue;
+            }
+            if ps[i..].starts_with(&r[1..]) {
+                cops = depth;
+                break;
+            }
+            if ignore_case
+                && ps[i..]
+                    .iter()
+                    .zip(r[1..].iter())
+                    .all(|(a, b)| eq(a, b))
+            {
+                cops = depth;
+                break;
+            }
+        }
+        if cops == 0 {
+            break;
+        }
+        i += cops;
+    }
+    if i == 1 {
+        return None; // la ruta no comença per l'arrel: és fora del projecte
+    }
+    safe_rel(&ps[i..].join("/"))
+}
+
+/// Ruta relativa per al LINT: mateixa regla que les escriptures (`write_rel`),
+/// perquè el frontend de vegades envia rutes ABSOLUTES de pestanya i, si no
+/// es relativitzen igual que les escriptures, el lint diria «ruta fora del
+/// projecte» sobre un fitxer que sí que és del projecte.
+pub fn lint_rel(root: &std::path::Path, raw: &str) -> Option<String> {
+    write_rel(root, raw)
+}
+
+/// Fragment REAL del fitxer més semblant al text CERCA que no ha coincidit:
+/// finestra de línies amb màxima coincidència de línies NORMALITZADES
+/// (espais col·lapsats). Inclou els números de línia perquè el model puga
+/// copiar el text exacte i corregir l'edició en un sol reintent.
+pub fn closest_snippet(content: &str, find: &str) -> Option<String> {
+    let norm = |l: &str| l.split_whitespace().collect::<Vec<_>>().join(" ");
+    let find_lines: Vec<String> = find.lines().map(norm).collect();
+    let n = find_lines.len();
+    if n == 0 {
+        return None;
+    }
+    let content_lines: Vec<&str> = content.lines().collect();
+    if content_lines.is_empty() {
+        return None;
+    }
+    let content_norm: Vec<String> = content_lines.iter().map(|l| norm(l)).collect();
+    let window = n.min(content_lines.len());
+    // Puntuació per finestra: BIGRAMES de tokens compartits amb el CERCA
+    // (capturen l'ORDRE real del codi, no sols quines línies hi ha) + pes
+    // fort per línies alineades en la mateixa posició + ancoratge de la
+    // primera línia (la signatura del bloc). Així, un bloc «resta» amb una
+    // línia errònia NO s'aparella amb el bloc «suma» veí.
+    let bigrams = |text: &str| -> Vec<(String, String)> {
+        let toks: Vec<&str> = text.split_whitespace().collect();
+        toks.windows(2)
+            .map(|w| (w[0].to_string(), w[1].to_string()))
+            .collect()
+    };
+    let find_bg: std::collections::HashSet<(String, String)> =
+        bigrams(&find_lines.join(" ")).into_iter().collect();
+    let mut best: Option<(usize, usize)> = None; // (puntuació, inici)
+    for i in 0..=(content_lines.len() - window) {
+        let win_bg = bigrams(&content_norm[i..i + window].join(" "));
+        let shared = win_bg.iter().filter(|b| find_bg.contains(*b)).count();
+        let aligned = (0..window)
+            .filter(|&k| content_norm[i + k] == find_lines[k])
+            .count();
+        let anchor = usize::from(content_norm[i] == find_lines[0]);
+        let score = shared + 3 * aligned + 2 * anchor;
+        if score > 0 && best.map(|(s, _)| score > s).unwrap_or(true) {
+            best = Some((score, i));
+        }
+    }
+    let (_, start) = best?;
+    let end = (start + window).min(content_lines.len()).min(start + 40);
+    let mut s = format!("Fragment real més semblant (línies {}-{}):\n", start + 1, end);
+    for (idx, l) in content_lines[start..end].iter().enumerate() {
+        s.push_str(&format!("{} | {}\n", start + 1 + idx, l));
+    }
+    Some(s)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  VERIFICACIÓ OBLIGATÒRIA del codi escrit (lint barat amb eines reals)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Límit de reintents de verificació PER TORN de xat: després de 3 rondes
+/// d'errors realimentades, el bucle no torna a comprovar (el model ja ho sap).
+pub const MAX_VERIFY_RETRIES: usize = 3;
+
+/// Resultat de verificar UN fitxer. Contracte exacte per al frontend:
+/// `{ path, ok, output }` (el camp intern `checked` NO se serialitza).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LintResult {
+    pub path: String,
+    pub ok: bool,
+    pub output: String,
+    /// Intern: si realment s'ha executat una eina de lint sobre el fitxer.
+    #[serde(skip)]
+    pub checked: bool,
+}
+
+/// Binari de PHP: el del PATH amb fallback a la ruta d'instal·lació local
+/// (les apps llançades des del Finder tenen un PATH mínim).
+pub fn php_binary() -> Option<std::path::PathBuf> {
+    if let Ok(p) = which::which("php") {
+        return Some(p);
+    }
+    let fallback = std::path::Path::new("/usr/local/bin/php");
+    if fallback.is_file() {
+        return Some(fallback.to_path_buf());
+    }
+    None
+}
+
+/// Binari de Node.js: el del PATH amb fallback a les rutes habituals.
+pub fn node_binary() -> Option<std::path::PathBuf> {
+    if let Ok(p) = which::which("node") {
+        return Some(p);
+    }
+    for p in ["/usr/local/bin/node", "/opt/homebrew/bin/node"] {
+        let pb = std::path::Path::new(p);
+        if pb.is_file() {
+            return Some(pb.to_path_buf());
+        }
+    }
+    None
+}
+
+/// Verifica UN fitxer (relatiu a `root`, amb contenció): `.php` → `php -l`,
+/// `.js/.mjs/.cjs` → `node --check`. Altres extensions → ok:true sense
+/// sortida. Si l'eina no existeix, s'OMET amb nota (no és un error del codi).
+/// Rutes fora del projecte es rebutgen. BLOQUEJANT: cridar-la en un fil a part.
+fn lint_one(root: &std::path::Path, raw: &str) -> LintResult {
+    let Some(rel) = lint_rel(root, raw) else {
+        return LintResult {
+            path: raw.to_string(),
+            ok: false,
+            output: "ruta fora del projecte o no segura: rebutjada".into(),
+            checked: false,
+        };
+    };
+    let path = root.join(&rel);
+    let ext = path.extension().and_then(|x| x.to_str()).unwrap_or("").to_ascii_lowercase();
+    let (bin, arg, tool): (Option<std::path::PathBuf>, &str, &str) = match ext.as_str() {
+        "php" => (php_binary(), "-l", "php"),
+        "js" | "mjs" | "cjs" => (node_binary(), "--check", "node"),
+        _ => {
+            return LintResult { path: rel, ok: true, output: String::new(), checked: false };
+        }
+    };
+    if !path.is_file() {
+        return LintResult { path: rel, ok: false, output: "el fitxer no existeix".into(), checked: false };
+    }
+    let Some(bin) = bin else {
+        return LintResult {
+            path: rel,
+            ok: true,
+            output: format!("verificació omesa: {tool} no instal·lat"),
+            checked: false,
+        };
+    };
+    match std::process::Command::new(&bin)
+        .arg(arg)
+        .arg(&path)
+        .current_dir(root)
+        .stdin(std::process::Stdio::null())
+        .output()
+    {
+        Ok(out) => {
+            let ok = out.status.success();
+            let mut text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            if !err.is_empty() {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                text.push_str(&err);
+            }
+            LintResult {
+                path: rel,
+                ok,
+                // Els errors solen ser a la CUA: es conserva principi i final.
+                output: if ok { String::new() } else { clip_head_tail(&text, 400, 800) },
+                checked: true,
+            }
+        }
+        Err(e) => LintResult {
+            path: rel,
+            ok: true,
+            output: format!("verificació omesa: no s'ha pogut executar {tool} ({e})"),
+            checked: false,
+        },
+    }
+}
+
+/// Verifica una llista de rutes relatives dins el projecte (mateix motor per
+/// al xat, l'autopilotatge, la Jam i el comandament `lint_paths` de la UI).
+pub fn lint_paths_blocking(root: &std::path::Path, paths: &[String]) -> Vec<LintResult> {
+    paths.iter().map(|p| lint_one(root, p)).collect()
+}
+
+/// Fase 3c: enriquix l'informe de verificació amb els diagnòstics d'ERROR del
+/// servidor LSP, però NOMÉS si ja hi ha una sessió ACTIVA per a eixe
+/// (llenguatge, arrel): consulta barata al gestor, MAI no spawna un servidor
+/// des del bucle de la IA. Temps límit curt (3 s): si el servidor va lent,
+/// l'informe es queda com estava (degradació honesta).
+pub fn augment_with_active_lsp(root: &std::path::Path, results: &mut [LintResult]) {
+    for r in results.iter_mut() {
+        let abs = root.join(&r.path);
+        let Some(sess) = crate::lsp::session::active_for(root, &abs) else {
+            continue;
+        };
+        let Ok(diags) = sess.diagnostics(&abs, std::time::Duration::from_secs(3)) else {
+            continue;
+        };
+        let errors: Vec<&crate::lsp::session::Diag> =
+            diags.iter().filter(|d| d.severity == "error").collect();
+        if errors.is_empty() {
+            continue;
+        }
+        let mut text = format!("Errors del servidor LSP ({}):\n", sess.server);
+        for d in errors.iter().take(8) {
+            text.push_str(&format!("línia {}, col {}: {}\n", d.line, d.col, d.message));
+        }
+        if !r.output.is_empty() {
+            r.output.push('\n');
+        }
+        r.output.push_str(&clip_head_tail(&text, 300, 500));
+        r.ok = false;
+        r.checked = true;
+    }
+}
+
+/// Construeix el text de VERIFICACIÓ que es realimenta al model. `retries_used`
+/// és el nombre de rondes amb errors JA realimentades aquest torn (inclosa
+/// l'actual): en arribar a `MAX_VERIFY_RETRIES` s'avisa del límit. MAI es
+/// pot donar per bo un codi amb lint fallant sense dir-ho al model.
+pub fn verification_report(results: &[LintResult], retries_used: usize) -> Option<String> {
+    let errors: Vec<&LintResult> = results.iter().filter(|r| !r.ok).collect();
+    let checked = results.iter().filter(|r| r.checked).count();
+    if errors.is_empty() {
+        if checked > 0 {
+            return Some(format!(
+                "Verificació: cap error de sintaxi ({checked} fitxer(s) comprovats amb eines reals). Pots continuar."
+            ));
+        }
+        let skips: Vec<&LintResult> = results.iter().filter(|r| !r.output.is_empty()).collect();
+        if skips.is_empty() {
+            return None;
+        }
+        return Some(format!("Verificació: {} ({} fitxer(s) sense comprovar).", skips[0].output, skips.len()));
+    }
+    let mut s = format!(
+        "Verificació: {} error(s) de sintaxi en {} fitxer(s) comprovats. NO donis la feina per acabada: corregeix-los ARA (reemet els fitxers amb «@file:» o «@edit:» amb el codi corregit):\n",
+        errors.len(),
+        checked.max(errors.len())
+    );
+    for e in errors.iter().take(6) {
+        s.push_str(&format!("— {}: {}\n", e.path, clip_head_tail(&e.output, 300, 500)));
+    }
+    if retries_used >= MAX_VERIFY_RETRIES {
+        s.push_str(
+            "S'ha assolit el límit de 3 reintents de verificació d'aquest torn: corregeix els errors al codi i explica-ho a la resposta final; no es faran més comprovades.\n",
+        );
+    }
+    Some(s)
+}
+
+/// Retalla conservant el PRINCIPI i la CUA (on són els errors de compilació
+/// i de lint): abans només es guardava el principi i el model no veia mai
+/// l'error real que hi ha al final de la sortida.
+pub fn clip_head_tail(s: &str, head: usize, tail: usize) -> String {
+    let v: Vec<char> = s.chars().collect();
+    if v.len() <= head + tail {
+        return s.to_string();
+    }
+    let omitted = v.len() - head - tail;
+    format!(
+        "{}\n…[retallat: {omitted} caràcters omitits; es conserven el principi i la CUA amb els errors]…\n{}",
+        v[..head].iter().collect::<String>(),
+        v[v.len() - tail..].iter().collect::<String>()
+    )
 }
 
 /// Cerca un fitxer «.uproject» dins la carpeta del projecte (només nivell
@@ -713,13 +1302,15 @@ pub async fn execute(
                             );
                             let out = rep.stdout.trim();
                             let err = rep.stderr.trim();
+                            // Truncament intel·ligent: capçalera (~1.000) I
+                            // CUA (~1.500) — els errors solen ser al final.
                             if !out.is_empty() {
                                 s.push_str("\nSORTIDA:\n");
-                                s.push_str(&clip(out, 2500));
+                                s.push_str(&clip_head_tail(out, 1000, 1500));
                             }
                             if !err.is_empty() {
                                 s.push_str("\nERRORS:\n");
-                                s.push_str(&clip(err, 1500));
+                                s.push_str(&clip_head_tail(err, 1000, 1500));
                             }
                             if out.is_empty() && err.is_empty() {
                                 s.push_str(" (cap sortida)");
@@ -1290,5 +1881,293 @@ del_me()\n\
         // NOU buit = esborrar: el replacement ha d'arribar buit.
         assert_eq!(blocks[0].edits[1].0, "del_me()");
         assert_eq!(blocks[0].edits[1].1, "");
+    }
+
+    #[test]
+    fn noop_editions_are_not_applied() {
+        // Error clàssic dels models: emetre CERCA i NOU IDÈNTICS (p. ex.
+        // «afegeix una dependència» i el NOU repeteix el CERCA sencer).
+        // No ha de comptar com a edició aplicada ni tocar el disc.
+        let dir = std::env::temp_dir().join(format!("noorbit-noop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("requirements.txt"), "flask==2.0.1\nrequests==2.25.1\n").unwrap();
+        let text = "@edit: requirements.txt\n\
+<<<<<<< CERCA\n\
+flask==2.0.1\n\
+requests==2.25.1\n\
+=======\n\
+flask==2.0.1\n\
+requests==2.25.1\n\
+>>>>>>>\n";
+        let report = apply_edit_blocks_at(&dir, text);
+        assert_eq!(report.len(), 1);
+        assert!(report[0].contains("IDÈNTIQUES"), "informe: {}", report[0]);
+        // El fitxer queda intacte.
+        assert_eq!(
+            std::fs::read_to_string(dir.join("requirements.txt")).unwrap(),
+            "flask==2.0.1\nrequests==2.25.1\n"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn cerca_fallida_retorna_el_fragment_real_mes_semblant() {
+        // El CERCA no coincideix (una línia canviada): l'error ha de portar
+        // el fragment REAL amb números de línia, no només «text EXACTE».
+        let dir = std::env::temp_dir().join(format!("noorbit-fuzzy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("fitxer.php"), "<?php\n$a = 1;\n$b = 2;\n").unwrap();
+        let text = "@edit: fitxer.php\n<<<<<<< CERCA\n$a = 1;\n$b = 3;\n=======\n$a = 9;\n$b = 3;\n>>>>>>>\n";
+        let report = apply_edit_blocks_at(&dir, text);
+        assert_eq!(report.len(), 1);
+        assert!(report[0].contains("Fragment real més semblant"), "informe: {}", report[0]);
+        assert!(report[0].contains("línies 2-3"), "informe: {}", report[0]);
+        assert!(report[0].contains("3 | $b = 2;"), "informe: {}", report[0]);
+        // El fitxer NO s'ha tocat (cap secció aplicada).
+        assert_eq!(
+            std::fs::read_to_string(dir.join("fitxer.php")).unwrap(),
+            "<?php\n$a = 1;\n$b = 2;\n"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod verify_tests {
+    use super::*;
+
+    #[test]
+    fn fuzzy_snippet_troba_la_finestra_correcta() {
+        let content = "<?php\nfunction suma($a, $b) {\n    return $a + $b;\n}\nfunction resta($a, $b) {\n    return $a - $b;\n}\n";
+        // CERCA gairebé idèntic al bloc de «resta» però amb una línia errònia.
+        let find = "function resta($a, $b) {\n    return $a + $b;\n}";
+        let snip = closest_snippet(content, find).expect("hi ha d'haver fragment");
+        assert!(snip.contains("línies 5-7"), "fragment: {}", snip);
+        assert!(snip.contains("5 | function resta($a, $b) {"), "fragment: {}", snip);
+        assert!(snip.contains("return $a - $b;"), "fragment: {}", snip);
+        assert!(!snip.contains("function suma"), "fragment: {}", snip);
+    }
+
+    #[test]
+    fn fuzzy_snippet_sense_cap_coincidencia() {
+        assert!(closest_snippet("alpha\nbeta\n", "gamma\ndelta").is_none());
+        assert!(closest_snippet("", "gamma").is_none());
+        assert!(closest_snippet("alpha\n", "").is_none());
+    }
+
+    #[test]
+    fn head_tail_conserva_principi_i_cua() {
+        let s = format!("INICI-{}-ERROR_FINAL", "x".repeat(5000));
+        let c = clip_head_tail(&s, 1000, 1500);
+        assert!(c.starts_with("INICI-"), "capçalera perduda");
+        assert!(c.ends_with("ERROR_FINAL"), "cua perduda");
+        assert!(c.contains("retallat"));
+        assert!(c.chars().count() < s.chars().count());
+        // Text curt: queda intacte.
+        assert_eq!(clip_head_tail("curt", 1000, 1500), "curt");
+    }
+
+    #[test]
+    fn lint_php_valid_invalid_i_contencio() {
+        if php_binary().is_none() {
+            eprintln!("php no disponible en aquesta màquina: test omès");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("noorbit-lint-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("bo.php"), "<?php echo 1;\n").unwrap();
+        std::fs::write(dir.join("dolent.php"), "<?php function( {\n").unwrap();
+        std::fs::write(dir.join("notes.txt"), "text pla").unwrap();
+        let paths: Vec<String> = vec![
+            "bo.php".into(),
+            "dolent.php".into(),
+            "notes.txt".into(),
+            "../fora.php".into(),
+        ];
+        let res = lint_paths_blocking(&dir, &paths);
+        assert_eq!(res.len(), 4);
+        assert!(res[0].ok && res[0].checked, "PHP vàlid ha de passar: {:?}", res[0]);
+        assert!(!res[1].ok && res[1].checked, "PHP invàlid ha de fallar: {:?}", res[1]);
+        assert!(res[1].output.to_lowercase().contains("error"), "sortida: {}", res[1].output);
+        // Altres extensions: ok:true i output buit (contracte lint_paths).
+        assert!(res[2].ok && res[2].output.is_empty() && !res[2].checked);
+        // Contenció: ruta fora del projecte rebutjada.
+        assert!(!res[3].ok && res[3].output.contains("rebutjada"), "{:?}", res[3]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn limit_de_reintents_de_verificacio() {
+        let errs = vec![LintResult {
+            path: "a.php".into(),
+            ok: false,
+            output: "PHP Parse error: syntax error".into(),
+            checked: true,
+        }];
+        let r1 = verification_report(&errs, 1).unwrap();
+        assert!(r1.contains("Verificació: 1"), "informe: {}", r1);
+        assert!(r1.contains("corregeix-los"), "informe: {}", r1);
+        assert!(!r1.contains("límit"), "informe: {}", r1);
+        // A la tercera ronda amb errors: s'avisa del límit de 3 reintents.
+        let r3 = verification_report(&errs, MAX_VERIFY_RETRIES).unwrap();
+        assert!(r3.contains("límit de 3 reintents"), "informe: {}", r3);
+        // Sense fitxers comprovats ni notes: no hi ha res a dir.
+        assert!(verification_report(&[], 0).is_none());
+        // Tot correcte: missatge positiu (mai «èxit» mut amb lint fallant).
+        let oks = vec![LintResult { path: "a.php".into(), ok: true, output: String::new(), checked: true }];
+        assert!(verification_report(&oks, 0).unwrap().contains("cap error"));
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    /// Arrel inventada en un volum extern: el cas real que reproduïa el
+    /// transcript degenerat (rutes absolutes reemetudes torn rere torn).
+    const CWD: &str = "/Volumes/Toshi/programes/forestin the sky";
+
+    fn tmp_arrel(nom: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("noorbit-reltests-{nom}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn write_rel_respecta_la_ruta_relativa() {
+        let root = std::path::Path::new(CWD);
+        // La forma correcta del protocol MAI s'ha de tocar.
+        assert_eq!(write_rel(root, "src/main.py").as_deref(), Some("src/main.py"));
+        assert_eq!(write_rel(root, "main.py").as_deref(), Some("main.py"));
+        assert_eq!(write_rel(root, "src\\app.py").as_deref(), Some("src/app.py"));
+        // Escapament i ruta bruta: rebutjades (no se'ls normalitza cap «..»).
+        assert_eq!(write_rel(root, "../etc/passwd"), None);
+        assert_eq!(write_rel(root, ""), None);
+    }
+
+    #[test]
+    fn write_rel_relativitza_l_absoluta_sota_l_arrel() {
+        let root = std::path::Path::new(CWD);
+        // L'absoluta que el model copia del seu system prompt («Projecte
+        // (cwd)») apunta a un fitxer del projecte: ha de quedar relativa.
+        assert_eq!(
+            write_rel(root, "/Volumes/Toshi/programes/forestin the sky/main.py").as_deref(),
+            Some("main.py")
+        );
+        assert_eq!(
+            write_rel(root, "/Volumes/Toshi/programes/forestin the sky/src/config.py").as_deref(),
+            Some("src/config.py")
+        );
+        // El mateix cwd escrit SENSE barra inicial: mateixa resolució (abans
+        // creava «forestin the sky/Volumes/Toshi/…» dins del projecte).
+        assert_eq!(
+            write_rel(root, "Volumes/Toshi/programes/forestin the sky/sky/main.py").as_deref(),
+            Some("sky/main.py")
+        );
+        // L'arrel repetida DINS de la ruta (la duplicació real del transcript).
+        assert_eq!(
+            write_rel(
+                root,
+                "/Volumes/Toshi/programes/forestin the sky/Volumes/Toshi/programes/forestin the sky/main.py"
+            )
+            .as_deref(),
+            Some("main.py")
+        );
+        // Tres vegades: es retalla tantes com aparega al capdamunt.
+        assert_eq!(
+            write_rel(root, &format!("{CWD}{CWD}{CWD}/sky/main.py")).as_deref(),
+            Some("sky/main.py")
+        );
+    }
+
+    #[test]
+    fn write_rel_rebutja_l_absoluta_fora_de_l_arrel() {
+        let root = std::path::Path::new(CWD);
+        assert_eq!(write_rel(root, "/Users/altra/cosa/main.py"), None);
+        assert_eq!(write_rel(root, "/etc/passwd"), None);
+        // Un prefix comú NO la fa del projecte: no se'n retalla res.
+        assert_eq!(write_rel(root, "/Volumes/Toshi/programes/altre joc/main.py"), None);
+        // L'arrel mateixa no és cap fitxer.
+        assert_eq!(write_rel(root, CWD), None);
+    }
+
+    #[test]
+    fn write_rel_funciona_amb_una_arrel_real() {
+        let root = tmp_arrel("real");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/a.py"), "print(1)\n").unwrap();
+        let abs = root.join("src/a.py").to_string_lossy().to_string();
+        assert_eq!(write_rel(&root, &abs).as_deref(), Some("src/a.py"));
+        assert_eq!(lint_rel(&root, &abs).as_deref(), Some("src/a.py"));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn fitxers_fora_del_projecte_es_deuen_poder_reportar() {
+        // Regressió paral·lela a la de les «@edit:»: un «@file:» amb ruta
+        // absoluta de fora NO s'escriu, però la ruta bruta ha de tornar al
+        // model com a informe (abans era un `continue` mut).
+        let root = tmp_arrel("filefora");
+        let text = "@file: /noorbit-fora/main.py\n```python\nprint(1)\n```\n@file: src/be.py\n```python\nprint(2)\n```";
+        let written = write_announced_files_at(&root, text);
+        assert_eq!(written, vec!["src/be.py".to_string()]);
+        assert_eq!(rejected_write_paths(&root, text), vec!["/noorbit-fora/main.py".to_string()]);
+        // La que reprodueix l'arrel NO és cap rebutja: s'escriu relativitzada.
+        let arrel = std::path::Path::new(CWD);
+        let text2 = "@file: /Volumes/Toshi/programes/forestin the sky/main.py\n```python\nprint(1)\n```";
+        assert!(rejected_write_paths(arrel, text2).is_empty());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn run_enganxats_se_separen_en_tantes_comandes() {
+        // El cas real: «pip install» no s'executava mai perquè les dues
+        // directrius enganxades eren UNA sola comanda innombrable.
+        let acts = parse("RUN|pip install -r requirements.txtRUN|python3 main.py");
+        assert_eq!(
+            acts,
+            vec![
+                RunAction::Foreground("pip install -r requirements.txt".into()),
+                RunAction::Foreground("python3 main.py".into()),
+            ],
+            "{:?}",
+            acts
+        );
+        // Dins d'una cometa, «run|» és text: NO es talla.
+        let acts = parse(r"RUN|grep -n 'pip install\|run|' fitxer.txt");
+        assert_eq!(acts.len(), 1, "{:?}", acts);
+        // Rutes amb espais dins d'una sola comanda: es conserven senceres.
+        let acts = parse("RUN|python3 'forestin the sky/main.py'");
+        assert_eq!(
+            acts,
+            vec![RunAction::Foreground("python3 'forestin the sky/main.py'".into())]
+        );
+    }
+
+    #[test]
+    fn segell_d_accions_detecta_la_reemissio() {
+        // Prosa pura: cap segell (el guard anti-bucle no s'ha d'aplicar mai).
+        assert_eq!(action_fingerprint("Et explico què faria, res més."), "");
+        // Dues respostes amb paraules DISTINTES i el MESMEIX pla: idèntic.
+        let a = action_fingerprint("Ho arreglo:\n@edit: a.py\n<<<<<<< CERCA\novell\n=======\novell\n>>>>>>>\nRUN|python3 a.py");
+        let b = action_fingerprint("Perdó, hi torno:\n@edit: a.py\n<<<<<<< CERCA\novell\n=======\novell\n>>>>>>>\nRUN|python3 a.py");
+        assert!(!a.is_empty());
+        assert_eq!(a, b);
+        // El pla canvia (NOU de debò): el segell també.
+        let c = action_fingerprint("Ara sí que ho he arreglat:\n@edit: a.py\n<<<<<<< CERCA\novell\n=======\nnou\n>>>>>>>\nRUN|python3 a.py");
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn editar_fora_del_projecte_es_reporta_i_no_de_mut() {
+        // Regressió del `continue` mut: sense informe, el model no sabia que la
+        // seva ruta era invàlida i la reemetia EXACTAMENT igual cada torn.
+        let root = tmp_arrel("editfora");
+        let text = "@edit: /noorbit-fora/main.py\n<<<<<<< CERCA\novell\n=======\nnou\n>>>>>>>";
+        let rep = apply_edit_blocks_at(&root, text);
+        assert_eq!(rep.len(), 1, "informe: {rep:?}");
+        assert!(rep[0].contains("/noorbit-fora/main.py"), "informe: {rep:?}");
+        assert!(rep[0].contains("FORA del projecte obert"), "informe: {rep:?}");
+        std::fs::remove_dir_all(&root).ok();
     }
 }

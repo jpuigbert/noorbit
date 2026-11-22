@@ -22,6 +22,12 @@ pub struct Expert {
     /// Model d'Ollama assignat; si és None, usa el model actiu.
     #[serde(default)]
     pub model: Option<String>,
+    /// Com pot treballar (patró OpenCode/Qoder):
+    ///  - «primary»: cap que dona ordres al xat; NO es delega ni fa d'obrers
+    ///  - «subagent»: obrer; només treballa delegat o en equip
+    ///  - «all» (o None): les dues coses — el comportament de sempre
+    #[serde(default)]
+    pub mode: Option<String>,
     /// Cert si va ser «forjat» pel mode autònom: treballa sempre amb recursos
     /// externs (internet + altres IAs) i pot tenir feines en segon pla.
     #[serde(default)]
@@ -37,6 +43,22 @@ pub struct ExpertInput {
     pub system_prompt: String,
     #[serde(default)]
     pub model: Option<String>,
+    #[serde(default)]
+    pub mode: Option<String>,
+}
+
+/// Deixa només els modes vàlids; qualsevol altre valor (p. ex. escrit a mà
+/// al .md o per un model) es converteix en None = «all».
+fn norm_mode(m: Option<String>) -> Option<String> {
+    let m = m?.trim().to_lowercase();
+    if m.is_empty() {
+        return None;
+    }
+    if matches!(m.as_str(), "primary" | "subagent" | "all") {
+        Some(m)
+    } else {
+        None
+    }
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -143,6 +165,7 @@ impl ExpertManager {
             role: input.role.trim().to_string(),
             system_prompt: input.system_prompt.clone(),
             model: input.model.filter(|m| !m.trim().is_empty()),
+            mode: norm_mode(input.mode),
             autonomous: false,
             created_at: chrono::Utc::now().timestamp_millis(),
         };
@@ -161,6 +184,7 @@ impl ExpertManager {
         e.role = input.role.trim().to_string();
         e.system_prompt = input.system_prompt.clone();
         e.model = input.model.filter(|m| !m.trim().is_empty());
+        e.mode = norm_mode(input.mode).or_else(|| e.mode.take());
         let updated = e.clone();
         self.save(&list)?;
         Ok(updated)

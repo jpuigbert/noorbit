@@ -1,7 +1,10 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 
-export type RightTab = "preview" | "agent" | "web" | "dev";
+/// Pestanyes de PRIMER NIVELL del panell dret (Fase 4): Git, Problemes i
+/// Consola ja no viuen amagades darrere «Treball» — són pestanyes pròpies,
+/// al costat d'Agent, Procés IA, IA web i Vista prèvia.
+export type RightTab = "preview" | "agent" | "web" | "process" | "git" | "problems" | "console";
 
 /// Les "Integracions" viuen DINS de l'agent (decisió v0.71): l'usuari no ha
 /// de plegar pestanyes per veure l'equip treballant — són sub-pestanyes de

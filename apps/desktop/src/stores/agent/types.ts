@@ -54,6 +54,15 @@ export interface TokenUsage {
   /// Tokens generats.
   output: number;
   total: number;
+  /// Tokens d'entrada servits des de la memòria cau del proveïdor: es
+  /// consumeixen igual, però es paguen a una fracció del preu d'entrada.
+  cacheRead?: number;
+  /// Tokens d'entrada escrits a la memòria cau (es paguen amb recàrrec).
+  cacheWrite?: number;
+  /// Tokens d'entrada que es paguen al preu sencer (els de la memòria cau no).
+  paidInput?: number;
+  /// Cost estimat del torn en dòlars (null si no es coneix el model).
+  costUsd?: number | null;
   /// Finestra de context del model (tokens).
   contextWindow: number;
   /// Percentatge del context ocupat pels tokens d'entrada.

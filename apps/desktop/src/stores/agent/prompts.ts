@@ -116,6 +116,123 @@ export const WP_THEME_CORE = [
   "footer.php",
 ];
 
+/// Detecció de context WordPress PER AL SCAFFOLD. Abans el regex incloïa
+/// «tema|theme|plugin» sols i QUIALSEVOL projecte «fes un tema fosc» queia al
+/// flux WordPress. Ara cal context EXPLÍCIT: la paraula «wordpress» (o
+/// «woocommerce», «wp-content»…), o «wp» acompanyat d'un mot de tema/plugin.
+export function esProjecteWordPress(text: string): boolean {
+  const t = text.toLowerCase();
+  if (/\bwordpress\b|\bwoocommerce\b|\bwp[-_](?:content|admin|includes|cli|theme|plugin)\b/.test(t)) {
+    return true;
+  }
+  // «tema wp», «wp theme», «plugin per a wp»…: «wp» explícit + mot de domini.
+  return /\bwp\b/.test(t) && /\b(tema|theme|plugin|complement|plantilla|template)\b/.test(t);
+}
+
+/// Plantilles REALS dels 5 fitxers canònics d'un tema WordPress. S'usen al
+/// nivell MÍNIM de degradació per OOM: el projecte mai queda «només amb un
+/// README amb el pla» — la llista canònica es crea amb codi de plantilla
+/// funcional i personalització parcial (nom del tema, autor, descripció).
+/// NO són placeholders: són un tema mínim que WordPress carrega de veritat.
+export function wpThemeTemplates(
+  name: string,
+  idea: string,
+  author: string,
+): { path: string; content: string }[] {
+  // Sanejament per a comentaris CSS/PHP: un «*/» tanca el comentari i un
+  // salt de línia trenca la capçalera/docblock. Mateix tractament per al
+  // nom del tema, l'autor i la descripció (abans només la descripció).
+  const sane = (s: string) => s.replace(/\*\//g, "* /").replace(/[\r\n]+/g, " ").trim();
+  const themeName = sane(name) || "Tema NoOrbit";
+  const slug =
+    themeName
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "tema-noorbit";
+  const autor = sane(author) || "Joan Puigbert Carreras";
+  const desc = sane(idea) || "Tema de WordPress generat per NoOrbit";
+  const prefix = slug.replace(/-/g, "_");
+  return [
+    {
+      path: "style.css",
+      content:
+        `/*\nTheme Name: ${themeName}\nTheme URI: https://thepuigberts.com\n` +
+        `Author: ${autor}\nDescription: ${desc}\nVersion: 1.0.0\n` +
+        `Requires at least: 6.0\nTested up to: 6.7\nRequires PHP: 7.4\n` +
+        `License: GNU General Public License v2 or later\n` +
+        `License URI: https://www.gnu.org/licenses/gpl-2.0.html\n` +
+        `Text Domain: ${slug}\n*/\n\n` +
+        `body { margin: 0; font-family: system-ui, sans-serif; line-height: 1.6; }\n` +
+        `.site-header, .site-footer { padding: 1rem 2rem; }\n` +
+        `.site-main { max-width: 72rem; margin: 0 auto; padding: 2rem; }\n`,
+    },
+    {
+      path: "functions.php",
+      content:
+        `<?php\n/**\n * Funcions del tema ${themeName}.\n */\n\n` +
+        `if ( ! defined( 'ABSPATH' ) ) { exit; }\n\n` +
+        `function ${prefix}_setup() {\n` +
+        `\tadd_theme_support( 'title-tag' );\n` +
+        `\tadd_theme_support( 'post-thumbnails' );\n` +
+        `\tregister_nav_menus( array( 'primary' => __( 'Menú principal', '${slug}' ) ) );\n` +
+        `}\nadd_action( 'after_setup_theme', '${prefix}_setup' );\n\n` +
+        `function ${prefix}_scripts() {\n` +
+        `\twp_enqueue_style( '${slug}-style', get_stylesheet_uri(), array(), '1.0.0' );\n` +
+        `}\nadd_action( 'wp_enqueue_scripts', '${prefix}_scripts' );\n`,
+    },
+    {
+      path: "index.php",
+      content:
+        `<?php get_header(); ?>\n\n<main class="site-main">\n` +
+        `\t<?php if ( have_posts() ) : ?>\n` +
+        `\t\t<?php while ( have_posts() ) : the_post(); ?>\n` +
+        `\t\t\t<article id="post-<?php the_ID(); ?>" <?php post_class(); ?>>\n` +
+        `\t\t\t\t<h2><a href="<?php the_permalink(); ?>"><?php the_title(); ?></a></h2>\n` +
+        `\t\t\t\t<?php the_content(); ?>\n` +
+        `\t\t\t</article>\n` +
+        `\t\t<?php endwhile; ?>\n` +
+        `\t\t<?php the_posts_navigation(); ?>\n` +
+        `\t<?php else : ?>\n` +
+        `\t\t<p><?php esc_html_e( 'No hi ha contingut.', '${slug}' ); ?></p>\n` +
+        `\t<?php endif; ?>\n</main>\n\n<?php get_footer(); ?>\n`,
+    },
+    {
+      path: "header.php",
+      content:
+        `<!DOCTYPE html>\n<html <?php language_attributes(); ?>>\n<head>\n` +
+        `<meta charset="<?php bloginfo( 'charset' ); ?>">\n` +
+        `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
+        `<?php wp_head(); ?>\n</head>\n<body <?php body_class(); ?>>\n` +
+        `<?php wp_body_open(); ?>\n<header class="site-header">\n` +
+        `<p class="site-title"><a href="<?php echo esc_url( home_url( '/' ) ); ?>"><?php bloginfo( 'name' ); ?></a></p>\n` +
+        `<?php wp_nav_menu( array( 'theme_location' => 'primary', 'fallback_cb' => false ) ); ?>\n` +
+        `</header>\n`,
+    },
+    {
+      path: "footer.php",
+      content:
+        `<footer class="site-footer">\n` +
+        `<p>&copy; <?php echo esc_html( gmdate( 'Y' ) ); ?> <?php bloginfo( 'name' ); ?></p>\n` +
+        `</footer>\n<?php wp_footer(); ?>\n</body>\n</html>\n`,
+    },
+  ];
+}
+
+/// Instruccions del nivell MÍNIM d'OOM del scaffold (abans demanava «només un
+/// README amb el pla» i el projecte quedava buit). Ara es manté la llista
+/// canònica: per WP, els 5 fitxers de WP_THEME_CORE (que el store completa amb
+/// plantilles reals si el model no els retorna); per la resta, els fitxers
+/// imprescindibles — mai un projecte sense codi.
+export const SCAFFOLD_MIN_WP =
+  "IMPORTANT: memòria MÍNIMA. Emet NOMÉS els 5 fitxers bàsics del tema de " +
+  "WordPress (style.css, functions.php, index.php, header.php, footer.php), " +
+  "cadascun curt però REAL i executable. Cap altre fitxer ni prosa.";
+export const SCAFFOLD_MIN_GENERIC =
+  "IMPORTANT: memòria MÍNIMA. Emet NOMÉS els 2–3 fitxers imprescindibles del " +
+  "projecte (curts, reals i executables) i un README.md breu. Cap prosa.";
+
 /// Sistema per demanar la LLISTA DE FITXERS del tema (una per línia): tasca
 /// molt més senzilla que escriure tot el tema, que un model dèbil sí que pot.
 export const WP_THEME_MANIFEST_SYSTEM =
@@ -218,6 +335,8 @@ export const COMPACT_SYSTEM =
   "continuació el contingut COMPLET del fitxer (mai buit ni amb «…»). " +
   "Per canviar només un tros: «@edit: ruta» + «<<<<<<< CERCA» + el text " +
   "antic EXACTE + «=======» + el text nou (buit = esborrar-lo) + «>>>>>>>». " +
+  "El text NOU ha de ser DIFERENT del CERCA: mai edicions buides; si no cal " +
+  "canviar res, no emetis res. " +
   "Per esborrar un fitxer: «@delete: ruta». Per crear carpetes: «@dir: ruta». " +
   "EMET CADA FITXER UNA SOLA VEGADA. Sigues breu: escriu el codi i una " +
   "frase de resum, res més.";
@@ -234,6 +353,9 @@ export const MEMORY_SYSTEM =
   "PER EDITAR només un tros d'un fitxer (millor que reemetre'l sencer): " +
   "«@edit: ruta» + marcador «<<<<<<< CERCA» + el text EXACTE que vols canviar " +
   "+ «=======» + el text NOU (buit = ESBORRAR-lo) + «>>>>>>>».\n" +
+  "MAI edicions buides: el text NOU ha de ser DIFERENT del CERCA (si són " +
+  "idèntics NoOrbit rebutja el bloc); si el fitxer ja és correcte, no emetis " +
+  "res d'aquell fitxer i escriu NOMÉS el que de veritat cal canviar.\n" +
   "IMPORTANT: emet cada fitxer UNA SOLA VEGADA (no repeteixis el mateix " +
   "@file: ni el mateix bloc de codi). Si un fitxer ja existeix, reemet-lo " +
   "amb «@edit:» o «@file:» una sola vegada i prou.\n" +
@@ -266,6 +388,10 @@ export const CONTEXT_SYSTEM =
   "MÉS FÀCIL I MILLOR per a canvis PETITS: «@edit: ruta» + «<<<<<<< CERCA» " +
   "+ el text EXACTE del fitxer a canviar + «=======» + el text NOU (buit = " +
   "esborrar-lo) + «>>>>>>>». NoOrbit aplica el canvi al fitxer real.\n" +
+  "MAI edicions buides: el text NOU ha de ser DIFERENT del CERCA; si el " +
+  "fitxer ja està bé, no emetis res d'ell. Escriu NOMÉS els fitxers que la " +
+  "petició demana — no afegeixis fitxers innecessaris ni repeteixis el " +
+  "mateix contingut.\n" +
   "EMET CADA FITXER UNA SOLA VEGADA: no repeteixis el mateix «@file:» ni el " +
   "mateix bloc de codi (són inútils i cremaven el context).\n" +
   "PER ESBORRAR UN FITXER SENCER (o codi que falla): una línia «@delete: " +
@@ -294,12 +420,19 @@ export const CONSOLIDATION_SYSTEM =
 /// Per a models petits (COMPACT_SYSTEM) només va aquest bloc, sense la
 /// nota llarga d'agents.
 export function rosterContext(
-  experts: { name: string; role: string }[],
+  experts: { name: string; role: string; mode?: string | null }[],
   selfName?: string,
 ): string {
-  const others = selfName
-    ? experts.filter((e) => e.name.trim().toLowerCase() !== selfName.trim().toLowerCase())
-    : experts;
+  // Mode (patró OpenCode): els experts «primary» són caps que donen ordres al
+  // xat — mai obrers delegables. Filtrar-los ACÍ cobreix tots els punts
+  // d'injecció del roster d'una sola vegada.
+  const others = experts.filter(
+    (e) =>
+      e.mode !== "primary" &&
+      (selfName
+        ? e.name.trim().toLowerCase() !== selfName.trim().toLowerCase()
+        : true),
+  );
   if (others.length === 0) return "";
   const lines = others
     .slice(0, 12)

@@ -5,6 +5,7 @@ import { X, FolderPlus, Folder, Palette } from "lucide-react";
 import { useT } from "../i18n";
 import { useUIStore } from "../stores/uiStore";
 import { useWorkspaceStore } from "../stores/workspaceStore";
+import { useEscapeToClose } from "../utils/useEscapeToClose";
 
 /// Crea un projecte nou: carpeta amb un README dins d'una carpeta pare
 /// (per defecte ~/Projects) i l'obre com a carpeta de treball.
@@ -24,8 +25,6 @@ export default function NewProjectModal() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (!show) return null;
-
   const close = () => {
     setShow(false);
     setName("");
@@ -33,6 +32,11 @@ export default function NewProjectModal() {
     setError(null);
     setTab("project");
   };
+
+  // Esc tanca el modal mentre és obert (com la X i el clic a l'overlay).
+  useEscapeToClose(show, close);
+
+  if (!show) return null;
 
   const browse = async () => {
     const selected = await open({ directory: true });

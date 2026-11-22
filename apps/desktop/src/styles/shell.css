@@ -30,7 +30,7 @@
   display: flex;
   align-items: center;
   height: 38px;
-  padding: 0 8px;
+  padding: 0 var(--space-2);
   background: var(--bg-1);
   border-bottom: 1px solid var(--border);
   gap: 2px;
@@ -190,7 +190,9 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 8px;
+  /* Alçada FIXA (24 px): el windowing de l'arbre en depèn (treeWindow.ts). */
+  height: 24px;
+  padding: 0 8px;
   font-size: 12.5px;
   color: var(--text-1);
   cursor: pointer;
@@ -265,14 +267,46 @@
 }
 .rp-tab {
   flex: 1;
-  padding: 8px;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-1);
+  min-height: 28px;
   font-size: 12px;
   color: var(--text-2);
   border-bottom: 2px solid transparent;
 }
+.rp-tab svg {
+  flex-shrink: 0;
+}
 .rp-tab.active {
   color: var(--text-0);
   border-bottom-color: var(--accent);
+}
+/* Pestanyes compactes (Fase 4): icona + tooltip sempre; l'etiqueta només
+   a l'activa, perquè 7 pestanyes de primer nivell hi càpiguen. */
+.rp-tab-label {
+  display: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rp-tab.active .rp-tab-label {
+  display: inline;
+}
+.rp-badge {
+  flex-shrink: 0;
+  min-width: 16px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-4);
+  color: var(--text-1);
 }
 .rp-body {
   flex: 1;
@@ -283,7 +317,7 @@
   width: 100%;
   height: 100%;
   border: none;
-  background: #fff;
+  background: var(--preview-bg);
 }
 
 /* ---- Nanses de redimensionat (entre panells, estil VS Code) ----
@@ -449,6 +483,227 @@ body.resizing iframe {
   font-size: 12.5px;
 }
 
+/* ---- Cerca global: files de consulta amb toggles (regex / substitució) ---- */
+.sp-query-row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding-right: 6px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border-2);
+}
+.sp-query-row .cp-palette-input {
+  border-bottom: none;
+  flex: 1;
+  min-width: 0;
+}
+.sp-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  align-self: center;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  color: var(--text-2);
+  flex-shrink: 0;
+  transition:
+    background var(--speed-fast) var(--ease-out),
+    color var(--speed-fast) var(--ease-out),
+    border-color var(--speed-fast) var(--ease-out);
+}
+.sp-toggle:hover {
+  background: var(--bg-2);
+  color: var(--text-0);
+}
+.sp-toggle.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.sp-replace-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: center;
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-2);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-size: 11.5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition:
+    background var(--speed-fast) var(--ease-out),
+    color var(--speed-fast) var(--ease-out),
+    border-color var(--speed-fast) var(--ease-out);
+}
+.sp-replace-all:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text-0);
+}
+.sp-replace-all:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.sp-regex-error {
+  padding: 6px 14px;
+  font-size: 11.5px;
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 8%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+.sp-truncated {
+  padding: 6px 14px;
+  font-size: 11.5px;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+.sp-file-group {
+  margin-bottom: 2px;
+}
+.sp-file-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 10px 3px;
+  font-size: 11.5px;
+}
+.sp-file-name {
+  color: var(--text-0);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sp-file-count {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 10.5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.sp-hit-line {
+  color: var(--text-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  min-width: 28px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ---- Menú contextual COMPARTIT (pestanyes de l'editor + arbre) ---- */
+.ctx-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+}
+.ctx-menu {
+  position: fixed;
+  min-width: 200px;
+  padding: 4px;
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  box-shadow: var(--shadow-lg, var(--shadow-md));
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ctx-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
+  font-size: 12.5px;
+  width: 100%;
+  text-align: left;
+  transition:
+    background var(--speed-fast) var(--ease-out),
+    color var(--speed-fast) var(--ease-out);
+}
+.ctx-row:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+.ctx-row.danger:hover {
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  color: var(--error);
+}
+.ctx-sep {
+  height: 1px;
+  margin: 3px 6px;
+  background: var(--border);
+}
+
+/* ---- Llista de referències LSP (⌥F12, Fase 3c) ---- */
+.refs-panel {
+  position: fixed;
+  left: 50%;
+  top: 18%;
+  transform: translateX(-50%);
+  width: min(560px, 90vw);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  box-shadow: var(--shadow-lg, var(--shadow-md));
+}
+.refs-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  color: var(--text-2);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.refs-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-top: 3px;
+}
+.refs-row.active {
+  background: var(--accent-soft);
+  color: var(--text-0);
+}
+.refs-name {
+  flex-shrink: 0;
+}
+.refs-path {
+  color: var(--text-3);
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.refs-pos {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  color: var(--text-2);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.refs-empty {
+  padding: 14px 12px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
 /* ---- Indicador de tasques en segon pla (Objectiu 4) ---- */
 .bg-task-badge {
   gap: 6px;
@@ -457,7 +712,7 @@ body.resizing iframe {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #facc15;
+  background: var(--warning);
   animation: bg-task-pulse 1.4s ease-in-out infinite;
 }
 @keyframes bg-task-pulse {

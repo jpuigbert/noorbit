@@ -21,6 +21,9 @@ struct Progress {
     detail: String,
     /// Mil·lisegons des de l'inici de l'equip (per mostrar el temps).
     elapsed_ms: u64,
+    /// Temps RESTANT estimat (ms) perquè l'equip acabi. 0 = encara sense
+    /// dades suficients per estimar-ho (la UI l'oculta).
+    eta_ms: u64,
 }
 
 #[derive(Clone, Serialize)]
@@ -88,11 +91,18 @@ pub async fn expert_delete(state: State<'_, AppState>, id: String) -> Result<(),
 /// codi o proves, ha d'emetre «@file: ruta» (NoOrbit l'escriu al projecte).
 /// Sense això, un especialista podia respondre amb prosa i la feina no
 /// existia al disc. S'afegeix DESPRÉS de les seues instruccions.
+/// Les regles d'estalvi (editar sense reemetre sencers, només el que cal) són
+/// deliberades: reduïen tokens, RAM i temps de resposta sense perdre feina.
 const FILE_PROTOCOL: &str = "\n\n— FITXERS REALS (NoOrbit) —\n\
-Quan generes o modifiques codi o proves (tests), emet cada fitxer amb una \
-línia «@file: ruta/real» seguida del contingut COMPLET (imports i lògica \
-real, mai «…» ni TODO). Les proves són fitxers de prova reals, no una \
-explicació. No diguis que ho has fet si no has emès cap «@file:».";
+Quan generes o modifiques codi o proves (tests), emet cada fitxer NOU amb \
+una línia «@file: ruta/real» seguida del contingut COMPLET (imports i lògica \
+real, mai «…» ni TODO). Per canviar un fitxer que JA EXISTEIX, si el canvi \
+és petit NO reemetris el fitxer sencer: emet «@edit: ruta» + «<<<<<<< CERCA» \
++ el text EXACTE + «=======» + el text NOU (ha de ser DISTINT del CERCA; \
+buit = esborrar-lo) + «>>>>>>>». Escriu NOMÉS els fitxers que la tasca \
+demana: ni fitxers de mostra, ni duplicats, ni el mateix fitxer dues \
+vegades. Les proves són fitxers de prova reals, no una explicació. No \
+diguis que ho has fet si no has emès cap «@file:» ni «@edit:».";
 
 /// Executa una tasca concreta amb un especialista (el seu rol, instruccions i
 /// model). `session`/`history` fan que la resposta pertanya al xat que l'ha
@@ -199,7 +209,19 @@ pub async fn experts_team_run(
     }
     let team: Vec<Expert> = match &expert_ids {
         Some(ids) if !ids.is_empty() => all.into_iter().filter(|e| ids.contains(&e.id)).collect(),
-        _ => all,
+        // Sense selecció explícita treballen els OBRERS (mode ≠ «primary»,
+        // patró OpenCode): el cap dona ordres, no executa subtasques. Si totes
+        // les especialitats fossen caps, no ens quedem sense equip.
+        _ => {
+            let has_worker = all.iter().any(|e| e.mode.as_deref() != Some("primary"));
+            if has_worker {
+                all.into_iter()
+                    .filter(|e| e.mode.as_deref() != Some("primary"))
+                    .collect()
+            } else {
+                all
+            }
+        }
     };
     if team.is_empty() {
         return Err("Cap especialista seleccionat.".into());
@@ -238,7 +260,10 @@ async fn run_team(
     ctl: &crate::experts::TeamControl,
 ) -> Result<TeamReport, String> {
     let started = std::time::Instant::now();
-    let emit = |stage: &str, expert: Option<String>, detail: String| {
+    // Durada prudent d'un torn quan encara no hi ha cap dada real: un model
+    // local en CPU vs un de núvol no tenen res a veure.
+    let base_turn_ms: u64 = if local { 150_000 } else { 40_000 };
+    let emit = |stage: &str, expert: Option<String>, detail: String, eta_ms: u64| {
         let _ = app.emit(
             "experts://progress",
             Progress {
@@ -246,6 +271,7 @@ async fn run_team(
                 expert,
                 detail,
                 elapsed_ms: started.elapsed().as_millis() as u64,
+                eta_ms,
             },
         );
     };
@@ -257,7 +283,12 @@ async fn run_team(
             task: goal.clone(),
         }]
     } else {
-        emit("planing", None, "Repartint l'objectiu entre l'equip…".into());
+        emit(
+            "planing",
+            None,
+            "Repartint l'objectiu entre l'equip…".into(),
+            team.len() as u64 * base_turn_ms,
+        );
         let roster: String = team
             .iter()
             .map(|e| format!("- id={} · {} ({})", e.id, e.name, e.role))
@@ -288,39 +319,67 @@ async fn run_team(
         })
     };
 
-    // 2) Execució. Local: d'un en un (per torns, igual de prou RAM); remot:
-    // fins a 3 alhora. Cada subtaska corre dins la SEUA sessió perquè el
-    // xat en mostre el text en viu amb el stream per sessió.
+    // 2) Execució. Local: d'un en un (per torns, prou RAM); remot: fins a 3
+    // alhora. Cada subtaska corre dins la SEUA sessió perquè el xat en mostre
+    // el text en viu amb el stream per sessió.
     let batch = if local { 1 } else { 3 };
-    let total_subs = plan.len();
+    let chunks: Vec<Vec<PlanItem>> = plan.chunks(batch).map(|c| c.to_vec()).collect();
+    // La fusió final és UN TORN més (només si l'equip en fa més d'un): entra
+    // al recompte de l'ETA.
+    let total_turns = plan.len() + if plan.len() > 1 { 1 } else { 0 };
+    // RAM/CPU: model que CARREGA cada torn. Dos especialistes consecutius amb
+    // el MATEIX model el comparteixen sense descargar res: cargar i cargar un
+    // model local és el cost més gran de tot l'equip (minuts de CPU). Només es
+    // descarga quan el model CANVIA o quan l'equip JA HA ACABAT.
+    let default_model = if local { ai.selected_model().await } else { None };
+    let model_of = |item: &PlanItem| -> Option<String> {
+        team.iter()
+            .find(|e| e.id == item.expert_id)
+            .and_then(|e| e.model.clone())
+            .or_else(|| default_model.clone())
+    };
     let mut subtasks: Vec<SubtaskResult> = Vec::new();
     let mut cancelled = false;
+    let mut done_turns = 0usize;
+    let mut loaded_model: Option<String> = None;
 
-    for (chunk_idx, chunk) in plan.chunks(batch).enumerate() {
+    for (chunk_idx, chunk) in chunks.iter().enumerate() {
         if ctl.is_cancelled() {
             cancelled = true;
             break;
         }
+        // ETA: ritme REAL de la feina ja feta; sense cap torn acabat, la
+        // durada prudent segons el tipus de proveïdor.
+        let secs_per = if done_turns > 0 {
+            started.elapsed().as_secs_f64() / done_turns as f64
+        } else {
+            base_turn_ms as f64 / 1000.0
+        };
+        let eta_ms = (total_turns.saturating_sub(done_turns) as f64 * secs_per * 1000.0) as u64;
         let futures = chunk.iter().map(|item| {
             let ai = ai.clone();
             let app2 = app.clone();
             let provider = provider.clone();
             let item = item.clone();
+            let used_model = model_of(&item);
             let expert = team.iter().find(|e| e.id == item.expert_id).cloned();
             let turn_label = if batch == 1 {
-                format!("Torn {}/{} · ", chunk_idx + 1, total_subs)
+                format!("Torn {}/{} · ", chunk_idx + 1, total_turns)
             } else {
                 String::new()
             };
             async move {
                 let Some(expert) = expert else {
-                    return SubtaskResult {
-                        expert_id: item.expert_id,
-                        expert_name: "(desconegut)".into(),
-                        task: item.task,
-                        result: "Especialista no trobat".into(),
-                        ok: false,
-                    };
+                    return (
+                        SubtaskResult {
+                            expert_id: item.expert_id,
+                            expert_name: "(desconegut)".into(),
+                            task: item.task,
+                            result: "Especialista no trobat".into(),
+                            ok: false,
+                        },
+                        used_model,
+                    );
                 };
                 let _ = app2.emit(
                     "experts://progress",
@@ -329,6 +388,7 @@ async fn run_team(
                         expert: Some(expert.name.clone()),
                         detail: format!("{}Treballant: {}", turn_label, truncate(&item.task)),
                         elapsed_ms: started.elapsed().as_millis() as u64,
+                        eta_ms,
                     },
                 );
                 let opts = ChatOpts {
@@ -369,42 +429,63 @@ async fn run_team(
                     Progress {
                         stage: "running".into(),
                         expert: Some(expert.name.clone()),
-                        detail: if ok {
-                            "Ha acabat".into()
-                        } else {
-                            "Ha fallat".into()
-                        },
+                        detail: if ok { "Ha acabat".into() } else { "Ha fallat".into() },
                         elapsed_ms: started.elapsed().as_millis() as u64,
+                        eta_ms,
                     },
                 );
-                // RAM: en proves locals, ALLIBERA el model just acabat d'usar
-                // abans del torn següent. Així, amb prou RAM el següent
-                // especialista del torn no troba la memòria plena del model
-                // de l'anterior (que pot ser un de més gran o diferent).
-                if local {
-                    let target: Option<String> = match &expert.model {
-                        Some(m) => Some(m.clone()),
-                        None => ai.selected_model().await,
-                    };
-                    if let Some(m) = target {
+                (
+                    SubtaskResult {
+                        expert_id: expert.id,
+                        expert_name: expert.name,
+                        task: item.task,
+                        result,
+                        ok,
+                    },
+                    used_model,
+                )
+            }
+        });
+        let got = futures::future::join_all(futures).await;
+        for (res, used) in got {
+            if local {
+                loaded_model = used;
+            }
+            subtasks.push(res);
+        }
+        done_turns += chunk.len();
+        // Entre torns (local = un model a la vegada): descarga NOMÉS si el
+        // proper especialista necessita un model DISTINT. Si no en queda cap,
+        // ja se n'encarrega el bloc de la fusió (descarregar-lo per error el
+        // obligaria a recarregar el mateix model: minuts de CPU perduts).
+        if local {
+            if let Some(next) = chunks.get(chunk_idx + 1).and_then(|c| c.first()).map(model_of) {
+                if next != loaded_model {
+                    if let Some(m) = loaded_model.take() {
                         let _ = ai.unload_models(Some(&m)).await;
                     }
                 }
-                SubtaskResult {
-                    expert_id: expert.id,
-                    expert_name: expert.name,
-                    task: item.task,
-                    result,
-                    ok,
-                }
             }
-        });
-        let mut got = futures::future::join_all(futures).await;
-        subtasks.append(&mut got);
+        }
+    }
+
+    // Acabats els torns: si la FUSió farà servir un model DISTINT del carregat
+    // (o no n'hi haurà cap, equip d'un sol especialista), allibera'l ja.
+    if local {
+        let merge_needs = if subtasks.len() > 1 { default_model.clone() } else { None };
+        if loaded_model != merge_needs {
+            if let Some(m) = loaded_model.take() {
+                let _ = ai.unload_models(Some(&m)).await;
+            }
+        }
     }
 
     if cancelled || ctl.is_cancelled() {
-        emit("cancelled", None, "Aturat per l'usuari.".into());
+        // Equip aturat: no es fusionarà res, el model carregat ja no serveix.
+        if let Some(m) = loaded_model.take() {
+            let _ = ai.unload_models(Some(&m)).await;
+        }
+        emit("cancelled", None, "Aturat per l'usuari.".into(), 0);
         return Ok(TeamReport {
             subtasks,
             answer: "Treball en equip aturat per l'usuari. Els resultats que ja havien acabat es mostren a dalt.".into(),
@@ -419,7 +500,12 @@ async fn run_team(
     } else if subtasks.len() == 1 {
         good[0].result.clone()
     } else {
-        emit("running", None, "Integrant els resultats de l'equip…".into());
+        emit(
+            "running",
+            None,
+            "Integrant els resultats de l'equip…".into(),
+            base_turn_ms / 2,
+        );
         let digest: String = good
             .iter()
             .map(|s| format!("## {} — {}\n{}", s.expert_name, truncate(&s.task), s.result))
@@ -438,7 +524,14 @@ async fn run_team(
             Err(_) => digest, // si no pot consolidar, mostra els resultats en brut
         }
     };
-    emit("done", None, "Treball en equip acabat".into());
+    // Tot acabat: l'equip ja no necessita cap model a la RAM (el de la fusió,
+    // si és que s'ha fet servir).
+    if local {
+        if let Some(m) = loaded_model.take() {
+            let _ = ai.unload_models(Some(&m)).await;
+        }
+    }
+    emit("done", None, "Treball en equip acabat".into(), 0);
 
     Ok(TeamReport { subtasks, answer })
 }

@@ -894,7 +894,18 @@ pub async fn emit_stream(
     // Comptabilització estimada (~4 caràcters per token), com els remots.
     let input = (prompt.chars().count() / 4).max(1) as u64;
     let output = (text.chars().count() / 4).max(1) as u64;
-    crate::ai::emit_usage(app, &ctl.id, KIND, model, input, output, None);
+    crate::ai::emit_usage(
+        app,
+        &ctl.id,
+        KIND,
+        model,
+        crate::ai::Usage {
+            input,
+            output,
+            ..Default::default()
+        },
+        None,
+    );
 }
 
 #[cfg(test)]
@@ -974,6 +985,27 @@ mod tests {
         let lessons = "[APRENENATGE LOCAL] Lliçons:\n- L'usuari treballa amb Rust i Tauri (rust, projecte)";
         let r = answer("recordes amb què treballa l'usuari rust tauri?", &brain, lessons);
         assert!(r.contains("Rust i Tauri"));
+    }
+
+    #[test]
+    fn routing_deterministic_inequivoque() {
+        // «crea un tema de wordpress» → plantilla de TEMA (5 fitxers), NO la
+        // pàgina PHP genèrica que abans segrestava qualsevol «wordpress».
+        let r = deterministic("crea un tema de wordpress", &[], "").unwrap();
+        assert!(r.contains("@file: wp-content/themes/tema/style.css"), "{}", r);
+        assert!(r.contains("Theme Name:"), "{}", r);
+        assert!(!r.contains("pàgina PHP"), "{}", r);
+        // «fes un joc» genèric → Godot 4 real, MAI l'endevinament Python.
+        let r = deterministic("fes un joc", &[], "").unwrap();
+        assert!(r.contains("@file: project.godot"), "{}", r);
+        assert!(!r.contains("random.randint"), "{}", r);
+        // L'endevinament només si es demana explícitament.
+        let r = deterministic("fes un joc d'endevinar", &[], "").unwrap();
+        assert!(r.contains("random.randint"), "{}", r);
+        // Una pàgina PHP senzilla continua sent el snippet PHP existent.
+        let r = deterministic("fes una pàgina php", &[], "").unwrap();
+        assert!(r.contains("```php"), "{}", r);
+        assert!(r.contains("htmlspecialchars"), "{}", r);
     }
 
     #[test]

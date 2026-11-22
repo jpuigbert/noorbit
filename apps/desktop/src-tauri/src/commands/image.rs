@@ -182,13 +182,25 @@ pub async fn file_context_read(path: String) -> Result<FileContext, String> {
     .map_err(|e| e.to_string())?
 }
 
-/// Llegeix una imatge local i la retorna com a data-URL, per que la UI la
-/// mostri sense activar el protocol d'assets (menys superfície d'atac).
-/// Només imatges conegudes i fins a 25 MB.
-#[command]
-pub async fn image_preview_base64(path: String) -> Result<String, String> {
+/// Valida la SIGNATURA (magic bytes) del format declarat per l'extensió.
+/// L'extensió sola no basta: la IA pot escriure text pla dins d'un .png i
+/// el data-URL resultant seria indecodificable per la webview.
+fn magic_ok(mime: &str, bytes: &[u8]) -> bool {
+    match mime {
+        "image/png" => bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]),
+        "image/jpeg" => bytes.starts_with(&[0xFF, 0xD8, 0xFF]),
+        "image/gif" => bytes.starts_with(b"GIF8"),
+        "image/webp" => {
+            bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP"
+        }
+        "image/bmp" => bytes.starts_with(b"BM"),
+        _ => false,
+    }
+}
+
+/// Cos síncron de `image_preview_base64` (testeable sense runtime Tauri).
+fn preview_data_url(p: &std::path::Path) -> Result<String, String> {
     use base64::Engine as _;
-    let p = std::path::Path::new(&path);
     if !p.is_file() {
         return Err("La imatge no existeix".into());
     }
@@ -205,8 +217,20 @@ pub async fn image_preview_base64(path: String) -> Result<String, String> {
         return Err("Imatge massa gran per mostrar-la al xat (màx. 25 MB)".into());
     }
     let bytes = std::fs::read(p).map_err(|e| e.to_string())?;
+    if !magic_ok(mime, &bytes) {
+        return Err("El fitxer no és una imatge vàlida (contingut no reconegut)".into());
+    }
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(format!("data:{mime};base64,{b64}"))
+}
+
+/// Llegeix una imatge local i la retorna com a data-URL, per que la UI la
+/// mostri sense activar el protocol d'assets (menys superfície d'atac).
+/// Només imatges conegudes i fins a 25 MB, amb la signatura del format
+/// verificada (un .png amb text pla NO és una imatge).
+#[command]
+pub async fn image_preview_base64(path: String) -> Result<String, String> {
+    preview_data_url(std::path::Path::new(&path))
 }
 
 /// Operació de píxel determinista: resize, crop, rotate, flip_h, flip_v o
@@ -237,4 +261,123 @@ pub async fn image_transform(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::preview_data_url;
+    use std::io::Write as _;
+
+    /// Capçalera PNG real mínima: signatura de 8 bytes + chunk IHDR.
+    const PNG_HEADER: &[u8] = &[
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // signatura
+        0x00, 0x00, 0x00, 0x0D, // llargària IHDR
+        0x49, 0x48, 0x44, 0x52, // «IHDR»
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1×1
+        0x08, 0x06, 0x00, 0x00, 0x00, // RGBA 8 bits
+        0x1F, 0x15, 0xC4, 0x89, // CRC
+    ];
+
+    fn write_tmp(dir: &std::path::Path, name: &str, bytes: &[u8]) -> std::path::PathBuf {
+        let p = dir.join(name);
+        let mut f = std::fs::File::create(&p).unwrap();
+        f.write_all(bytes).unwrap();
+        p
+    }
+
+    #[test]
+    fn png_valid_retorna_data_url() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = write_tmp(dir.path(), "cara.png", PNG_HEADER);
+        let url = preview_data_url(&p).unwrap();
+        assert!(url.starts_with("data:image/png;base64,"));
+    }
+
+    #[test]
+    fn text_pla_dins_de_png_es_rebutja() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = write_tmp(
+            dir.path(),
+            "face_diffuse.png",
+            "[Contingut de la textura de la cara]".as_bytes(),
+        );
+        let err = preview_data_url(&p).unwrap_err();
+        assert!(err.contains("no és una imatge vàlida"), "err: {err}");
+    }
+
+    #[test]
+    fn png_truncat_es_rebutja() {
+        let dir = tempfile::tempdir().unwrap();
+        // Tallat a mitja signatura: ni tan sols els 4 bytes màgics hi són.
+        let p = write_tmp(dir.path(), "tallat.png", &PNG_HEADER[..3]);
+        assert!(preview_data_url(&p).is_err());
+    }
+
+    #[test]
+    fn png_corrupt_es_rebutja() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut bytes = PNG_HEADER.to_vec();
+        bytes[0] = 0x00; // signatura trencada
+        let p = write_tmp(dir.path(), "corrupt.png", &bytes);
+        assert!(preview_data_url(&p).is_err());
+    }
+
+    #[test]
+    fn jpeg_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = write_tmp(dir.path(), "foto.jpg", &[0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10]);
+        assert!(preview_data_url(&p).unwrap().starts_with("data:image/jpeg;base64,"));
+    }
+
+    #[test]
+    fn gif_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = write_tmp(dir.path(), "anim.gif", b"GIF89a\x01\x00\x01\x00");
+        assert!(preview_data_url(&p).unwrap().starts_with("data:image/gif;base64,"));
+    }
+
+    #[test]
+    fn webp_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = write_tmp(dir.path(), "foto.webp", b"RIFF\x24\x00\x00\x00WEBPVP8 ");
+        assert!(preview_data_url(&p).unwrap().starts_with("data:image/webp;base64,"));
+    }
+
+    #[test]
+    fn webp_amb_riff_d_altre_format_es_rebutja() {
+        let dir = tempfile::tempdir().unwrap();
+        // RIFF d'àudio (WAVE) dins d'un .webp: no és una imatge.
+        let p = write_tmp(dir.path(), "so.webp", b"RIFF\x24\x00\x00\x00WAVEfmt ");
+        assert!(preview_data_url(&p).is_err());
+    }
+
+    #[test]
+    fn bmp_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = write_tmp(dir.path(), "mapa.bmp", b"BM\x36\x00\x0C\x00\x00\x00");
+        assert!(preview_data_url(&p).unwrap().starts_with("data:image/bmp;base64,"));
+    }
+
+    #[test]
+    fn extensio_no_suportada() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = write_tmp(dir.path(), "notes.txt", b"hola");
+        assert!(preview_data_url(&p).unwrap_err().contains("Format no suportat"));
+    }
+
+    #[test]
+    fn fitxer_inexistent() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(preview_data_url(&dir.path().join("no-hi-es.png")).is_err());
+    }
+
+    #[test]
+    fn limit_de_mida_es_mante() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("gegant.png");
+        let f = std::fs::File::create(&p).unwrap();
+        // Fitxer espars: metadata.len > 25 MB sense escriure 25 MB reals.
+        f.set_len(25_000_001).unwrap();
+        assert!(preview_data_url(&p).unwrap_err().contains("massa gran"));
+    }
 }

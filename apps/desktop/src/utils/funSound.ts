@@ -26,6 +26,9 @@ export function unlockFunSound() {
 }
 
 function ready(force: boolean): AudioContext | null {
+  // Mode professional: CAP so lúdic, ni tan sols amb «force» (el botó de
+  // prova de Configuració). El flag funSound de l'usuari es conserva.
+  if (useUIStore.getState().professionalMode) return null;
   if (!force && !useUIStore.getState().funSound) return null;
   unlockFunSound();
   // Sense gest previ el context queda suspès: no intentem sonar.

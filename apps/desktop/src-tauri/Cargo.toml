@@ -1,6 +1,6 @@
 [package]
 name = "no-orbit"
-version = "0.71.13-alpha"
+version = "0.71.17-alpha"
 description = "NoOrbit — IDE amb agent IA local, Blender i Unreal Engine 5"
 authors = ["NoOrbit"]
 edition = "2021"
@@ -41,6 +41,12 @@ zip = "2.2"
 urlencoding = "2.1"
 once_cell = "1"
 sha2 = "0.10"
+# Terminal PTY real multi-sessió (Fase 3b): pseudoterminals portables del
+# projecte wezterm (MIT). Vegeu NOTICE per a l'atribució.
+portable-pty = "0.9"
+# Tipus oficials del Language Server Protocol (Fase 3c): diagnòstics,
+# completions i hover tipats per al client LSP persistent (MIT). Vegeu NOTICE.
+lsp-types = "0.95"
 
 noorbit-guardian = { path = "../../../crates/noorbit-guardian" }
 noorbit-jam = { path = "../../../crates/noorbit-jam" }

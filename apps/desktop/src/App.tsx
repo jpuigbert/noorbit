@@ -49,43 +49,51 @@ const GameStudiosModal = lazy(() => import("./components/GameStudios/GameStudios
 // Informe de fallida («crash»): només es carrega quan l'usuari el demana.
 const CrashReportModal = lazy(() => import("./components/CrashReportModal"));
 import ComputerConfirmModal from "./components/Computer/ComputerConfirmModal";
+// Permisos de l'agent ACP (GitHub Copilot): sempre muntat perquè la
+// petició aparegui encara que l'usuari sigui a una altra pestanya.
+import AcpPermissionModal from "./components/Agent/AcpPermissionModal";
 import CommandPalette from "./components/CommandPalette";
 import QuickOpen from "./components/QuickOpen";
 import SearchPalette from "./components/SearchPalette";
 import TerminalPanel from "./components/Terminal/TerminalPanel";
 import ReviewPill from "./components/Editor/ReviewPill";
 import { markForPath, resolveMark } from "./stores/editReviewStore";
+import { getEditor } from "./editor/editorApi";
 import { useFunCursor } from "./utils/useFunCursor";
 import { useActivityPulse } from "./utils/useActivityPulse";
 import { initFunFx } from "./utils/funFx";
 import StartupScreen from "./components/StartupScreen";
 import Toaster from "./components/Toaster";
 import { fetchCrashReport } from "./crashReport";
-/// Autodesat (com l'«Auto Save» de VS Code): desa el fitxer obert poc
-/// després de l'últim canvi i també quan la finestra perd el focus.
+/// Autodesat (com l'«Auto Save» de VS Code): desa TOTES les pestanyes
+/// brutes poc després de l'últim canvi i també quan la finestra perd el focus.
 function useAutosave() {
   useEffect(() => {
     let timer: number | undefined;
 
     const flushSave = () => {
-      const f = useWorkspaceStore.getState().openFile;
-      if (!f || f.dirty === false || f.path.startsWith("untitled:")) return;
-      void useWorkspaceStore.getState().saveFile(f.path, f.content).catch(() => undefined);
+      const ws = useWorkspaceStore.getState();
+      for (const f of ws.openFiles) {
+        if (!f.dirty || f.path.startsWith("untitled:")) continue;
+        void ws.saveFile(f.path, f.content).catch(() => undefined);
+      }
     };
 
     const unsub = useWorkspaceStore.subscribe((state, prev) => {
       const ui = useUIStore.getState();
       if (!ui.autoSave) return;
-      const cur = state.openFile;
-      const old = prev.openFile;
-
-      // Canvi de fitxer: desa l'anterior si era brut
-      if (old && old.dirty && !old.path.startsWith("untitled:") && cur?.path !== old.path) {
-        void useWorkspaceStore.getState().saveFile(old.path, old.content).catch(() => undefined);
+      // Qualsevol pestanya bruta amb contingut nou (o acabada de brutar)
+      // rearma el temporitzador: un sol desat conjunt per a totes.
+      let changed = false;
+      for (const f of state.openFiles) {
+        if (!f.dirty || f.path.startsWith("untitled:")) continue;
+        const old = prev.openFiles.find((x) => x.path === f.path);
+        if (!old || !old.dirty || old.content !== f.content) {
+          changed = true;
+          break;
+        }
       }
-
-      // contingut modificat → desa poc després de l'últim canvi
-      if (cur && cur.dirty && !cur.path.startsWith("untitled:") && cur.content !== old?.content) {
+      if (changed) {
         window.clearTimeout(timer);
         timer = window.setTimeout(flushSave, ui.autoSaveDelay);
       }
@@ -239,6 +247,12 @@ export default function App() {
     }
     if (!useWorkspaceStore.getState().root) {
       useUIStore.getState().setShowStartup(true);
+      // Restaura l'últim projecte actiu («noorbit.lastRoot»): un reload no ha
+      // de deixar l'usuari a la pantalla de benvinguda. Si no n'hi ha o ja no
+      // existeix, es queda la StartupScreen amb els recents, com sempre.
+      void useWorkspaceStore.getState().restoreLastRoot().then((ok) => {
+        if (ok) useUIStore.getState().setShowStartup(false);
+      });
     }
     // Assistent de 3 passos NOMÉS a la primera arrencada real (es guarda quan
     // es completa; l'usuari també el pot obrir des de Configuració). La
@@ -314,13 +328,16 @@ export default function App() {
       }
       if (e.key === "F12" && !meta) {
         e.preventDefault();
-        void actions["goto.definition"]();
+        // ⌥F12: referències LSP reals; F12 sol: definició (heurística+LSP).
+        void (e.altKey ? actions["goto.references"]() : actions["goto.definition"]());
         return;
       }
 
       if (meta && k === "enter") {
         // ⌘↵: accepta el canvi de la IA que s'està revisant (com a VS Code).
-        const path = useWorkspaceStore.getState().openFile?.path;
+        const ws = useWorkspaceStore.getState();
+        const path =
+          ws.focusedGroup === "split" && ws.splitPath ? ws.splitPath : ws.openFile?.path;
         const mark = path ? markForPath(path) : undefined;
         if (mark && !mark.streaming) {
           e.preventDefault();
@@ -330,7 +347,9 @@ export default function App() {
       }
       if (meta && (k === "backspace" || k === "delete")) {
         // ⌘⌫: rebutja el canvi i torna el codi anterior de la IA.
-        const path = useWorkspaceStore.getState().openFile?.path;
+        const ws = useWorkspaceStore.getState();
+        const path =
+          ws.focusedGroup === "split" && ws.splitPath ? ws.splitPath : ws.openFile?.path;
         const mark = path ? markForPath(path) : undefined;
         if (mark) {
           e.preventDefault();
@@ -406,6 +425,20 @@ export default function App() {
       } else if (meta && e.ctrlKey && k === "g") {
         e.preventDefault();
         actions["goto.line"]();
+      } else if (meta && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key)) {
+        // ⌘1..9: salta a la pestanya n (com VS Code). ⌘0 continua sent el
+        // reset de zoom. El focus torna a l'editor del grup actiu.
+        const ws = useWorkspaceStore.getState();
+        const tab = ws.openFiles[Number(e.key) - 1];
+        if (tab) {
+          e.preventDefault();
+          ws.setActive(tab.path);
+          setTimeout(() => getEditor()?.focus(), 0);
+        }
+      } else if (meta && e.key === "\\") {
+        // ⌘\: divideix l'editor (o tanca la divisió), com VS Code.
+        e.preventDefault();
+        actions["view.splitEditor"]();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -509,6 +542,7 @@ export default function App() {
         {useUIStore((s) => s.showGameStudios) && <GameStudiosModal />}
       </Suspense>
       <ComputerConfirmModal />
+      <AcpPermissionModal />
       {/* Detecció d'entorn a l'obrir: es mostra SOL si falta algun component
           (i cada vegada, llevat que l'usuari premi «No tornar-la a mostrar»). */}
       <SetupCheckModal />

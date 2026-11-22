@@ -7,6 +7,15 @@ use crate::external_orchestrator::OrchestratorAgent;
 /// Compactació Densa del context (resum que conserva l'esperit del programa).
 pub mod compact;
 
+/// ROUTING del motor (Fase 2): local primer, núvol com a ampliació. Decisió
+/// pura i testable: sense clau tot és local; amb clau, el codi multi-fitxer
+/// pot anar al proveïdor de l'usuari; la selecció explícita es respecta.
+pub mod engine;
+
+/// System prompt EN CAPES (patró OpenCode, MIT — vegeu NOTICE): proveïdor +
+/// entorn (cwd, SO, eines al PATH) + instruccions del projecte (AGENTS.md).
+pub mod sysprompt;
+
 /// Hugging Bay (huggingbay.xyz): cerca i descàrrega de models GGUF.
 pub mod hf_bay;
 
@@ -53,6 +62,11 @@ pub mod fit;
 /// nou se'n comprova l'efecte sobre les respostes que l'usuari ja va
 /// aprovar; si les empitjora, es fa marxa enrere.
 pub mod brain_gate;
+
+/// PREUS i COST REAL d'un torn: quant s'ha consumit i quant s'ha pagat de
+/// veritat (els tokens de la memòria cau del proveïdor es paguen a una
+/// fracció del preu d'entrada).
+pub mod pricing;
 
 mod cloud;
 mod reasoning;
@@ -558,6 +572,9 @@ pub struct AiManager {
     ollama_url: String,
     default_model: String,
     active_provider: Arc<RwLock<String>>,
+    /// Mode del motor (Fase 2): «auto» (per defecte), «local» o «cloud».
+    /// El tria l'usuari al selector del xat; sense clau, «cloud» cau al local.
+    engine_mode: Arc<RwLock<String>>,
     /// Model d'Ollama triat per l'usuari (si és None, s'usa default_model).
     selected_model: Arc<RwLock<Option<String>>>,
     /// Temps que Ollama manté el model carregat a la RAM («5m», «1m», «0»…).
@@ -582,6 +599,10 @@ pub struct AiManager {
     /// disponible, amb els proveïdors en línia oficials de l'usuari.
     /// L'origen real de cada resposta delegada va etiquetat.
     pub external: Arc<OrchestratorAgent>,
+    /// Enganxa de l'aplicació: alguns camins (el xat sense streaming, que usen
+    /// els agents i els planificadors) no la reben com a paràmetre i, sense
+    /// això, no poden emetre la comptabilització de tokens del torn.
+    app: Arc<std::sync::RwLock<Option<tauri::AppHandle>>>,
 }
 
 /// Enrotlla una futura de xat amb la cancel·lació del seu xat: si l'usuari
@@ -691,6 +712,45 @@ pub fn context_window_for(model: &str) -> u64 {
     }
 }
 
+/// Comptabilització de tokens d'un torn: quant se n'ha CONSUMIT i quant se
+/// n'ha PAGAT de veritat. No és el mateix: els tokens servits des de la
+/// memòria cau del proveïdor es consumeixen igual, però es paguen a una
+/// fracció del preu d'entrada.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Usage {
+    /// Tokens d'entrada consumits en total (hi inclou els de la memòria cau).
+    pub input: u64,
+    /// Tokens generats.
+    pub output: u64,
+    /// Tokens d'entrada servits des de la memòria cau: no es paguen enters.
+    pub cache_read: u64,
+    /// Tokens d'entrada escrits a la memòria cau (es paguen amb recàrrec).
+    pub cache_write: u64,
+}
+
+impl Usage {
+    /// Tokens d'entrada pagats al preu sencer (els de la memòria cau no hi van).
+    pub fn paid_input(&self) -> u64 {
+        self.input.saturating_sub(self.cache_read)
+    }
+
+    /// Total de tokens consumits (entrada + sortida).
+    pub fn total(&self) -> u64 {
+        self.input.saturating_add(self.output)
+    }
+}
+
+/// Proveïdors que NO costen diners: la inferència és local (Ollama o el motor
+/// integrat de NoOrbit).
+fn is_free_provider(provider: &str) -> bool {
+    provider == "ollama"
+        || provider == native::PROVIDER_ID
+        || provider == native::KIND
+        // GitHub Copilot és una subscripció plana: el cost marginal de cada
+        // token el paga l'usuari amb la quota, no amb el nostre compte.
+        || provider == crate::acp::PROVIDER_ID
+}
+
 /// Emet la COMPTABILITZACIÓ DE TOKENS d'un torn amb l'event «ai://usage»:
 /// la interfície la mostra sota la resposta (quants tokens d'entrada i de
 /// sortida, i quin percentatge del context s'ha ocupat). És el que permet
@@ -700,30 +760,41 @@ pub fn emit_usage(
     session: &str,
     provider: &str,
     model: &str,
-    input: u64,
-    output: u64,
+    usage: Usage,
     context_window: Option<u64>,
 ) {
     use tauri::Emitter;
     let context_window = context_window
         .filter(|w| *w > 0)
         .unwrap_or_else(|| context_window_for(model));
-    let total = input.saturating_add(output);
+    let total = usage.total();
+    // COST REAL: la inferència local no costa res; la de núvol es calcula amb
+    // els preus del model. Si el model no és conegut no s'ensenya cap xifra:
+    // millor un buit que un número fals.
+    let cost_usd = if is_free_provider(provider) {
+        Some(0.0)
+    } else {
+        pricing::cost_for(model, &usage)
+    };
     let _ = app.emit(
         "ai://usage",
         serde_json::json!({
             "session": session,
             "provider": provider,
             "model": model,
-            "input": input,
-            "output": output,
+            "input": usage.input,
+            "output": usage.output,
             "total": total,
+            "cacheRead": usage.cache_read,
+            "cacheWrite": usage.cache_write,
+            "paidInput": usage.paid_input(),
             "contextWindow": context_window,
             "contextUsedPct": if context_window > 0 {
-                ((input as f64 / context_window as f64) * 100.0).min(100.0)
+                ((usage.input as f64 / context_window as f64) * 100.0).min(100.0)
             } else {
                 0.0
             },
+            "costUsd": cost_usd,
         }),
     );
 }
@@ -1675,6 +1746,7 @@ impl AiManager {
             ollama_url: config.ai.ollama_url.clone(),
             default_model: config.ai.default_model.clone(),
             active_provider: Arc::new(RwLock::new("ollama".into())),
+            engine_mode: Arc::new(RwLock::new(engine::MODE_AUTO.into())),
             selected_model: Arc::new(RwLock::new(None)),
             keep_alive: Arc::new(RwLock::new(Some(normalize_keep_alive(
                 &config.ai.keep_alive,
@@ -1684,6 +1756,7 @@ impl AiManager {
             background: Arc::new(AtomicBool::new(false)),
             caps_cache: Arc::new(Mutex::new(HashMap::new())),
             external: Arc::new(OrchestratorAgent::new()),
+            app: Arc::new(std::sync::RwLock::new(None)),
         }
     }
 
@@ -1702,6 +1775,20 @@ impl AiManager {
     /// prou recursos o ComfyUI no està disponible.
     pub fn remote_manager(&self) -> Option<Arc<Mutex<ApiManager>>> {
         self.remote.clone()
+    }
+
+    /// Enganxa l'aplicació per poder emetre events des dels camins que no la
+    /// reben com a paràmetre (la comptabilització de tokens del xat sense
+    /// streaming, és a dir, els torns dels agents i dels planificadors).
+    pub fn set_app(&self, app: tauri::AppHandle) {
+        if let Ok(mut slot) = self.app.write() {
+            *slot = Some(app);
+        }
+    }
+
+    /// L'aplicació, si l'ha enganxada.
+    fn app_handle(&self) -> Option<tauri::AppHandle> {
+        self.app.read().ok().and_then(|g| g.clone())
     }
 
     fn url(&self, path: &str) -> String {
@@ -2454,6 +2541,69 @@ impl AiManager {
         }
     }
 
+    /// Mode del motor (Fase 2): «auto», «local» o «cloud».
+    pub async fn engine_mode(&self) -> String {
+        self.engine_mode.read().await.clone()
+    }
+
+    /// Fixa el mode del motor (valors desconeguts → «auto»). La preferència
+    /// persistent viu a la UI (localStorage); ací només és l'estat en viu.
+    pub async fn set_engine_mode(&self, mode: &str) {
+        *self.engine_mode.write().await = engine::normalize_mode(mode).to_string();
+    }
+
+    /// (kind, model) d'un proveïdor per a les capes del system prompt. Amb id
+    /// buit s'usa el proveïdor actiu global.
+    pub async fn provider_info(&self, id: &str) -> (String, String) {
+        let id = if id.trim().is_empty() {
+            self.active_provider.read().await.clone()
+        } else {
+            id.to_string()
+        };
+        if id == "ollama" {
+            return ("ollama".to_string(), self.effective_model().await);
+        }
+        if id == native::PROVIDER_ID {
+            return ("native".to_string(), native::MODEL_NAME.to_string());
+        }
+        if let Some(remote) = &self.remote {
+            let guard = remote.lock().unwrap();
+            if let Some(p) = guard.providers.iter().find(|p| p.id == id) {
+                let kind = if p.is_anthropic() { "anthropic" } else { "openai" };
+                return (kind.to_string(), p.model.clone());
+            }
+        }
+        ("openai".to_string(), String::new())
+    }
+
+    /// ROUTING del motor (Fase 2) sobre el proveïdor efectiu del xat:
+    /// · selecció EXPLÍCITA (per xat o global) → es respecta sempre;
+    /// · «ollama» explícit → local (Ollama o nativa), mai núvol;
+    /// · sense selecció → el mode del motor decideix (auto: codi multi-fitxer
+    ///   amb clau → núvol; la resta, local; sense Ollama, caiguda al remot).
+    async fn routed_provider(&self, ctl: &Arc<SessionCtl>, prompt: &str) -> String {
+        let explicit = ctl.provider().await;
+        let base = match &explicit {
+            Some(p) => p.clone(),
+            None => self.active_provider.read().await.clone(),
+        };
+        if base != "ollama" {
+            return base;
+        }
+        let running = self.is_running().await;
+        if explicit.is_some() {
+            return if running {
+                "ollama".to_string()
+            } else {
+                native::PROVIDER_ID.to_string()
+            };
+        }
+        let mode = self.engine_mode().await;
+        let remote = self.first_working_remote();
+        let heavy = engine::is_multi_file_code_task(&engine::question_of(prompt));
+        engine::decide_engine(None, &mode, running, remote.as_deref(), heavy)
+    }
+
     /// Primer proveïdor EN LÍNIA utilitzable (activat i amb token). Serveix
     /// perquè NoOrbit funcioni SENSE OLLAMA: si el motor local no hi és (o no
     /// està instal·lat), el xat continua amb la IA del núvol de l'usuari.
@@ -2559,7 +2709,11 @@ impl AiManager {
 
     /// Model corresponent a un proveïdor: el d'Ollama (triat o per defecte),
     /// el de la IA nativa o el que té configurat el proveïdor en línia.
-    async fn model_for_provider(&self, provider: &str) -> String {
+    ///
+    /// És `pub` perquè la Jam ha de poder saber quin model correspon a un
+    /// proveïdor triat per l'usuari al panell (sense Depends, el model
+    /// quedaria buit i la Jam aniria amb la IA del proveïdor actiu).
+    pub async fn model_for_provider(&self, provider: &str) -> String {
         if provider == native::PROVIDER_ID {
             return native::MODEL_NAME.to_string();
         }
@@ -2862,16 +3016,28 @@ impl AiManager {
         self.bind(&ctl, opts).await;
         // Cada generació nova comença sense bandera d'aturada i sense raonament.
         ctl.begin().await;
-        let mut provider = self.effective_provider(&ctl).await;
-        // SENSE OLLAMA ni remot: la IA NATIVA integrada respon (només instal·lant
-        // NoOrbit, sense baixar res). Mateixa caiguda que al camí streaming.
-        if provider == "ollama" && !self.is_running().await {
-            if let Some(remot) = self.first_working_remote() {
-                provider = remot;
-            } else {
-                provider = native::PROVIDER_ID.to_string();
-            }
-        }
+        // FASE 2 · routing del motor: sense clau tot és local (Ollama →
+        // nativa); amb clau, «Auto» envia el codi multi-fitxer al núvol. La
+        // selecció explícita de proveïdor MAI es rerouteja.
+        let provider = self.routed_provider(&ctl, prompt).await;
+        // System prompt en capes (proveïdor + entorn + AGENTS.md) només al
+        // núvol; idempotent per marques, no duplica capes ja presents.
+        let layered_sys;
+        let system = if provider != "ollama"
+            && provider != native::PROVIDER_ID
+            && provider != crate::acp::PROVIDER_ID
+        {
+            let (kind, model) = self.provider_info(&provider).await;
+            layered_sys = sysprompt::layered(
+                system,
+                &kind,
+                &model,
+                crate::commands::workspace::current_root().as_deref(),
+            );
+            Some(layered_sys.as_str())
+        } else {
+            system
+        };
         let mut result = self.chat_inner(prompt, system, &ctl, &provider, opts).await;
         // Memòria exhaurida a mitja resposta: ATUREM, ALLIBEREM RAM i
         // CONDENSEM el context (no el retallem: així es conserva l'esperit del
@@ -2928,31 +3094,25 @@ impl AiManager {
         ctl.begin().await;
         let start = std::time::Instant::now();
 
-        let mut active = self.effective_provider(&ctl).await;
-        // SENSE OLLAMA: si el motor local no està instal·lat (o no escolta) i
-        // l'usuari té un proveïdor EN LÍNIA amb token, el xat continua amb
-        // aquell — NoOrbit funciona igual (editor, terminal, imatges, Blender).
-        if active == "ollama" && !self.is_running().await {
-            if let Some(remot) = self.first_working_remote() {
-                let (_, m) = self.session_labels(&ctl.id).await;
-                ctl.process(
-                    app,
-                    &remot,
-                    &m,
-                    "thinking",
-                    &format!(
-                        "Ollama no està instal·lat o no està en marxa: faig servir                          «{}» (el teu proveïdor en línia). NoOrbit funciona igual                          sense el motor local.",
-                        remot
-                    ),
-                    0,
-                );
-                active = remot;
+        // FASE 2 · routing del motor (mateixes regles que `chat_opts`): la
+        // caiguda sense Ollama es conserva i, amb clau + «Auto», el codi
+        // multi-fitxer va al proveïdor en línia de l'usuari.
+        let base = self.effective_provider(&ctl).await;
+        let active = self.routed_provider(&ctl, prompt).await;
+        if base == "ollama" && active != "ollama" && active != native::PROVIDER_ID {
+            let (_, m) = self.session_labels(&ctl.id).await;
+            let nota = if self.is_running().await {
+                format!(
+                    "Tasca de codi multi-fitxer: faig servir «{}» (el teu proveïdor en línia).",
+                    active
+                )
             } else {
-                // Sense Ollama NI cap proveïdor en línia: la IA NATIVA integrada
-                // respon igualment. NoOrbit funciona NOMÉS INSTAL·LANT-LO, sense
-                // baixar cap model ni motor de cap altre lloc.
-                active = native::PROVIDER_ID.to_string();
-            }
+                format!(
+                    "Ollama no està instal·lat o no està en marxa: faig servir «{}» (el teu proveïdor en línia). NoOrbit funciona igual sense el motor local.",
+                    active
+                )
+            };
+            ctl.process(app, &active, &m, "thinking", &nota, 0);
         }
         // IA NATIVA: motor integrat al binari. Respon localment (i es millora
         // en silenci quan l'usuari ho demana), sense cap petició de xarxa.
@@ -2969,6 +3129,35 @@ impl AiManager {
             native::emit_stream(app, &ctl, prompt, &text, start).await;
             return Ok(text);
         }
+        // MOTOR DE GITHUB COPILOT: l'agent del CLI de Copilot parla ACP.
+        // No és un proveïdor d'API: obrim sessió ACP i retransmetem el text.
+        if active == crate::acp::PROVIDER_ID {
+            ctl.process(
+                app,
+                crate::acp::PROVIDER_NAME,
+                "copilot",
+                "thinking",
+                "Faig servir GitHub Copilot (motor ACP local).",
+                0,
+            );
+            return self
+                .copilot_turn(Some(app), prompt, system, &ctl, &start)
+                .await;
+        }
+        // FASE 2 · system prompt en capes per al núvol (idempotent).
+        let layered_sys;
+        let system = if active != "ollama" && active != crate::acp::PROVIDER_ID {
+            let (kind, model) = self.provider_info(&active).await;
+            layered_sys = sysprompt::layered(
+                system,
+                &kind,
+                &model,
+                crate::commands::workspace::current_root().as_deref(),
+            );
+            Some(layered_sys.as_str())
+        } else {
+            system
+        };
         // Proveïdor remot: fa streaming SSE (emet «ai://process» token a token,
         // com Ollama). La cancel·lació és la del XAT que ha enviat el missatge.
         if active != "ollama" {
@@ -3032,6 +3221,23 @@ impl AiManager {
             }
         }
 
+        // «Fes un joc» GENÈRIC amb motor local: el scaffold determinista
+        // Godot 4 (3 fitxers canònics, verificat) mana ABANS de cridar el
+        // LLM — els models petits improvisen un Pygame si ningú els fixa
+        // el motor per defecte. Les mencions EXPLÍCITES de motor/llenguatge
+        // no s'intercepten mai (scaffold_joc_generic retorna None).
+        if let Some(r) = codegen::scaffold_joc_generic(prompt) {
+            ctl.process(
+                app,
+                native::PROVIDER_NAME,
+                native::MODEL_NAME,
+                "thinking",
+                "Joc genèric: genero el projecte Godot 4 verificat amb el motor determinista (sense cridar el LLM).",
+                0,
+            );
+            native::emit_stream(app, &ctl, prompt, &r, start).await;
+            return Ok(r);
+        }
         // Ollama (local): intent normal amb el prompt sencer; si la connexió es
         // talla per manca de memòria, segon intent amb el context CONDENSAT,
         // perquè l'agent pugui SEGUIR PROGRAMANT en lloc de rendir-se.
@@ -3640,8 +3846,11 @@ impl AiManager {
                 &ctl.id,
                 "ollama",
                 &model_label,
-                usage_input,
-                usage_output,
+                Usage {
+                    input: usage_input,
+                    output: usage_output,
+                    ..Default::default()
+                },
                 ctx_window,
             );
         } else {
@@ -3653,13 +3862,219 @@ impl AiManager {
                     &ctl.id,
                     "ollama",
                     &model_label,
-                    est_in,
-                    est_out,
+                    Usage {
+                        input: est_in,
+                        output: est_out,
+                        ..Default::default()
+                    },
                     ctx_window,
                 );
             }
         }
         Ok(full)
+    }
+
+    /// Espera que l'usuari premi «Atura» en aquest xat concret.
+    async fn espera_cancel(ctl: Arc<SessionCtl>) {
+        loop {
+            if ctl.is_cancelled() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+        }
+    }
+
+    /// Obre (o reutilitza) la sessió ACP del xat i en torna el client i
+    /// l'identificador de sessió. La clau combina el xat i el projecte:
+    /// canviar de projecte obre una sessió nova.
+    async fn copilot_client(
+        &self,
+        app: Option<&tauri::AppHandle>,
+        clau: &str,
+        root: &std::path::Path,
+    ) -> Result<(Arc<crate::acp::AcpClient>, String)> {
+        if let Some(client) = crate::acp::existing_session(clau) {
+            if let Some(sid) = client.session_id() {
+                return Ok((client, sid));
+            }
+            // La sessió ha mort: la tirem i en fem una de nova.
+            crate::acp::forget(clau);
+        }
+        let handle = app
+            .cloned()
+            .or_else(|| self.app_handle())
+            .ok_or_else(|| anyhow!("No hi ha interfície per obrir la sessió de Copilot"))?;
+        let cmd = crate::external_orchestrator::copilot::acp_command()?;
+        let client = crate::acp::connect(clau, cmd, root.to_path_buf(), handle).await?;
+        let sid = client
+            .session_id()
+            .ok_or_else(|| anyhow!("Copilot no ha obert la sessió ACP"))?;
+        Ok((client, sid))
+    }
+
+    /// TORN AMB EL MOTOR DE GITHUB COPILOT (ACP).
+    ///
+    /// El CLI de Copilot parla ACP (JSON-RPC sobre NDJSON). NoOrbit fa de
+    /// client: obre la sessió, hi mana el prompt i retransmeteix cada
+    /// fragment que arriba com a «ai://chunk», igual que la resta de
+    /// motors. La sessió es conserva entre torns, de manera que el fil del
+    /// diàleg no es perdi.
+    async fn copilot_turn(
+        &self,
+        app: Option<&tauri::AppHandle>,
+        prompt: &str,
+        system: Option<&str>,
+        ctl: &Arc<SessionCtl>,
+        start: &std::time::Instant,
+    ) -> Result<String> {
+        let root = crate::commands::workspace::current_root().unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        });
+        let clau = format!("{}::{}", ctl.id, root.display());
+        let (client, sessio) = self.copilot_client(app, &clau, &root).await?;
+
+        // Prompt: les instruccions del sistema (si n'hi ha) van en un bloc
+        // apart i el text de l'usuari en un altre.
+        let mut blocs: Vec<serde_json::Value> = Vec::new();
+        if let Some(s) = system {
+            if !s.trim().is_empty() {
+                blocs.push(serde_json::json!({ "type": "text", "text": s }));
+            }
+        }
+        blocs.push(serde_json::json!({ "type": "text", "text": prompt }));
+
+        // Els esdeveniments de l'agent es retransmeten a la interfície.
+        let app_clon = app.cloned();
+        let ctl_clon = ctl.clone();
+        let model = "copilot".to_string();
+        let inici = *start;
+        let pensament = Arc::new(Mutex::new(String::new()));
+        let pensament_clon = pensament.clone();
+
+        let fut = client.prompt(&sessio, &blocs, move |ev| {
+            let ms = inici.elapsed().as_millis() as u64;
+            match ev {
+                crate::acp::AcpEvent::Message(t) => {
+                    if let Some(app) = &app_clon {
+                        ctl_clon.chunk(app, &t);
+                        ctl_clon.process(
+                            app,
+                            crate::acp::PROVIDER_NAME,
+                            &model,
+                            "streaming",
+                            &t,
+                            ms,
+                        );
+                    }
+                }
+                crate::acp::AcpEvent::Thought(t) => {
+                    if let Ok(mut g) = pensament_clon.lock() {
+                        g.push_str(&t);
+                    }
+                    if let Some(app) = &app_clon {
+                        ctl_clon.process(
+                            app,
+                            crate::acp::PROVIDER_NAME,
+                            &model,
+                            "thinking",
+                            &t,
+                            ms,
+                        );
+                    }
+                }
+                crate::acp::AcpEvent::Tool {
+                    title, kind, status, text, ..
+                } => {
+                    if let Some(app) = &app_clon {
+                        let mut nota = format!("Eina de Copilot: {title}");
+                        if !kind.is_empty() {
+                            nota.push_str(&format!(" ({kind})"));
+                        }
+                        if !status.is_empty() {
+                            nota.push_str(&format!(" [{status}]"));
+                        }
+                        if !text.is_empty() {
+                            nota.push('\n');
+                            nota.push_str(&text);
+                        }
+                        ctl_clon.process(
+                            app,
+                            crate::acp::PROVIDER_NAME,
+                            &model,
+                            "thinking",
+                            &nota,
+                            ms,
+                        );
+                    }
+                }
+                crate::acp::AcpEvent::Notice(t) => {
+                    if let Some(app) = &app_clon {
+                        ctl_clon.process(
+                            app,
+                            crate::acp::PROVIDER_NAME,
+                            &model,
+                            "thinking",
+                            &t,
+                            ms,
+                        );
+                    }
+                }
+            }
+        });
+        tokio::pin!(fut);
+        let res = tokio::select! {
+            r = &mut fut => r,
+            _ = Self::espera_cancel(ctl.clone()) => {
+                // Atura: l'agent rep la cancel·lació i deixa el torn.
+                client.cancel(&sessio);
+                return Err(anyhow!(CANCELLED_MSG));
+            }
+        };
+        let text = match res {
+            Ok(t) => t,
+            Err(e) => {
+                // La connexió ha mort: esborrem la sessió perquè el proper
+                // torn en obri una de nova.
+                crate::acp::forget(&clau);
+                return Err(e);
+            }
+        };
+        // El raonament acumulat queda al visor de pensament. La còpia es fa
+        // ABANS d'esperar: el guard del pany no pot travessar un await.
+        let pensament_text = pensament.lock().ok().map(|g| g.clone());
+        if let Some(t) = pensament_text {
+            if !t.trim().is_empty() {
+                ctl.set_thinking(Some(t)).await;
+            }
+        }
+        if let Some(app) = app {
+            ctl.process(
+                app,
+                crate::acp::PROVIDER_NAME,
+                "copilot",
+                "done",
+                "",
+                start.elapsed().as_millis() as u64,
+            );
+            // ACP no informa de tokens: n'estimem (≈4 caràcters per token)
+            // com fa la IA nativa, perquè la interfície pugui dir quant ha
+            // ocupat el context. El cost és zero ( subscripció plana).
+            let entrada = ((prompt.chars().count() + system.map_or(0, |s| s.len())) / 4).max(1) as u64;
+            let sortida = (text.chars().count() / 4).max(1) as u64;
+            emit_usage(
+                app,
+                &ctl.id,
+                crate::acp::PROVIDER_ID,
+                "copilot",
+                Usage {
+                    input: entrada,
+                    output: sortida,
+                    ..Default::default()
+                },
+                None,
+            );
+        }
+        Ok(text)
     }
 
     /// Nucli del xat sense streaming, DINS D'UN XAT concret: usa el seu
@@ -3678,6 +4093,12 @@ impl AiManager {
         if provider == native::PROVIDER_ID {
             return self.native_compute(prompt, system, ctl).await;
         }
+        // MOTOR DE GITHUB COPILOT (ACP): el mateix agent, però per aquest camí
+        // (sense streaming) el fan servir els agents i els planificadors.
+        if provider == crate::acp::PROVIDER_ID {
+            let start = std::time::Instant::now();
+            return self.copilot_turn(None, prompt, system, ctl, &start).await;
+        }
         if provider != "ollama" {
             if let Some(remote) = &self.remote {
                 // prepare() retorna dades propietàries; el guard allibera abans de l'await
@@ -3687,13 +4108,35 @@ impl AiManager {
                 // Les imatges adjuntes també arriben als proveïdors remots
                 // (Claude i DeepSeek tenen visió); abans només les veia Ollama.
                 let images = opts.images.clone();
-                let (content, thinking) = race_cancel(ctl, async move {
-                    api::chat_with_images(&client, &prov, &conv, system.as_deref(), &images).await
+                // Còpia del proveïdor: el closure consumeix l'original i, després,
+                // en volem el nom i el model per a la comptabilització.
+                let prov_info = prov.clone();
+                let (content, thinking, usage) = race_cancel(ctl, async move {
+                    api::chat_with_images_usage(&client, &prov, &conv, system.as_deref(), &images).await
                 })
                 .await?;
                 ctl.set_thinking(thinking).await;
+                // COMPTABILITZACIÓ: aquest camí (sense streaming) també ha de
+                // deixar el compte de tokens, sinó els torns dels agents i dels
+                // planificadors no costen res a la vista.
+                if let (Some(app), Some(u)) = (self.app_handle(), usage) {
+                    crate::ai::emit_usage(
+                        &app,
+                        &ctl.id,
+                        &prov_info.kind_name(),
+                        &prov_info.model,
+                        u,
+                        None,
+                    );
+                }
                 return Ok(content);
             }
+        }
+        // «Fes un joc» GENÈRIC: mateixa regla que a `chat_stream` — el
+        // scaffold determinista Godot 4 resol la petició abans de delegar
+        // al LLM local; els motors/llenguatges EXPLÍCITS es respecten sempre.
+        if let Some(r) = codegen::scaffold_joc_generic(prompt) {
+            return Ok(r);
         }
         let model = self.model_for(ctl).await;
         // Respatller: si el model triat/per defecte no és instal·lat, agafa'n

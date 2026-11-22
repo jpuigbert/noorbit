@@ -261,7 +261,9 @@ print("{Nom}: cub i llum creados a l'escena (via Python, sense C++)")
             file: "project.godot",
             lang: "text",
             triggers: &["2d", "escena", "plataformes", "sprite"],
-            strong: &["godot", "gdscript", "videojoc"],
+            // «joc»/«videojoc» genèrics → Godot 4 (projecte REAL), MAI
+            // l'endevinament Python de consola com a resposta per defecte.
+            strong: &["godot", "gdscript", "videojoc", "joc"],
             code: r#"; {Nom} — projecte Godot 4 generat per la IA nativa de NoOrbit.
 ; Renderer «Compatibility» (OpenGL 3.3): ideal per a Mac Intel amb GPU integrada.
 ; Obre'l amb l'editor de Godot 4 i prem Play.
@@ -283,7 +285,7 @@ renderer/rendering_method.mobile="gl_compatibility"
             title: "Projecte Defold",
             file: "game.project",
             lang: "text",
-            triggers: &["2d", "lleuger", "mobil", "escena"],
+            triggers: &["2d", "lleuger", "mobil", "escena", "joc"],
             strong: &["defold", "lua"],
             code: r#"; {Nom} — projecte Defold generat per la IA nativa de NoOrbit.
 ; El motor més lleuger (editor d'1-3 MB): obre'l amb l'editor de Defold.
@@ -320,7 +322,7 @@ bevy = "0.14"
             title: "Escena Panda3D (Python)",
             file: "{nom}.py",
             lang: "python",
-            triggers: &["3d", "escena", "camera", "model"],
+            triggers: &["3d", "escena", "camera", "model", "joc"],
             strong: &["panda3d", "panda"],
             code: r#"""{Nom} — escena Panda3D generada per la IA nativa de NoOrbit.
 
@@ -564,8 +566,11 @@ if __name__ == "__main__":
             title: "Joc d'endevinament (Python)",
             file: "{nom}.py",
             lang: "python",
-            triggers: &["random", "console", "numero", "adivina"],
-            strong: &["joc", "jocs", "endevina", "videojoc"],
+            triggers: &["random", "console", "numero", "joc"],
+            // NOMÉS quan la petició demana EXPLÍCITAMENT endevinar (o un joc
+            // en Python, via la ruta dedicada de `match_snippet`). Un «fes un
+            // joc» genèric ha d'anar a un motor de joc real (Godot 4).
+            strong: &["endevina", "endevinar", "endevinament", "adivina"],
             code: r#""""{Nom} — joc de consola generat per la IA nativa de NoOrbit.
 
     python3 {nom}.py
@@ -668,8 +673,12 @@ servidor.listen(PORT, "127.0.0.1", () => {
             title: "Pàgina PHP",
             file: "{nom}.php",
             lang: "php",
-            triggers: &["taula", "formulari", "dinamic"],
-            strong: &["php", "wordpress"],
+            triggers: &["taula", "formulari", "dinamic", "pagina"],
+            // «wordpress» NO és un marcador d'aquesta pàgina genèrica: un
+            // «crea un tema de wordpress» demana el TEMA (plantilla dedicada),
+            // no una pàgina PHP de taula. «pagina» desempata amb l'HTML quan
+            // la petició diu «pàgina php» (el llenguatge mana).
+            strong: &["php"],
             code: r#"<?php
 /**
  * {Nom} — pàgina PHP generada per la IA nativa de NoOrbit.
@@ -698,6 +707,41 @@ $dades = [
   <p>Hora del servidor: <?= date('H:i:s') ?></p>
 </body>
 </html>
+"#,
+        },
+        Snippet {
+            title: "Tema WordPress (mínim)",
+            file: "wp-content/themes/{nom}/style.css",
+            lang: "css",
+            triggers: &["tema", "theme", "wordpress"],
+            strong: &["wordpress"],
+            code: r#"/*
+Theme Name: {Nom}
+Theme URI: https://example.com/{nom}
+Author: NoOrbit
+Author URI: https://noorbit.app
+Description: Tema mínim de WordPress generat per la IA nativa de NoOrbit: base sòlida i vàlida per personalitzar.
+Version: 1.0.0
+Requires at least: 6.0
+Tested up to: 6.7
+Requires PHP: 7.4
+License: GNU General Public License v2 or later
+License URI: https://www.gnu.org/licenses/gpl-2.0.html
+Text Domain: {nom}
+Tags: blog, one-column
+*/
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  line-height: 1.6;
+  color: #1a1a1a;
+  background: #fafafa;
+}
+.capcalera, .peu { padding: 1rem 1.5rem; background: #111; color: #fff; }
+.capcalera a, .peu a { color: #fff; }
+.lloc-contingut { max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+article { margin-bottom: 2rem; }
 "#,
         },
         Snippet {
@@ -855,6 +899,122 @@ print("{Nom}: escena lleugera creada via Python (sense compilar C++)")
 "#,
             ),
         ],
+        "Tema WordPress (mínim)" => &[
+            (
+                "wp-content/themes/{nom}/functions.php",
+                "php",
+                r#"<?php
+/**
+ * {Nom} — funcions del tema: enqueue d'estils i suports bàsics.
+ *
+ * @package {Nom}
+ */
+
+if ( ! defined( 'ABSPATH' ) ) {
+    exit; // Accés directe prohibit.
+}
+
+/**
+ * Encua el full d'estils del tema (style.css amb el header canònic).
+ * Prefix PER TEMA ({Nom}): dos temes generats poden conviure sense
+ * «Cannot redeclare» (les funcions globals de PHP xoquen si el nom és fix).
+ */
+function {Nom}_encua_estils() {
+    wp_enqueue_style(
+        '{nom}-estil',
+        get_stylesheet_uri(),
+        array(),
+        wp_get_theme()->get( 'Version' )
+    );
+}
+add_action( 'wp_enqueue_scripts', '{Nom}_encua_estils' );
+
+/**
+ * Suports bàsics del tema (prefix per tema, com dalt).
+ */
+function {Nom}_suports() {
+    add_theme_support( 'title-tag' );
+    add_theme_support( 'post-thumbnails' );
+    add_theme_support( 'html5', array( 'search-form', 'gallery', 'caption' ) );
+}
+add_action( 'after_setup_theme', '{Nom}_suports' );
+"#,
+            ),
+            (
+                "wp-content/themes/{nom}/index.php",
+                "php",
+                r#"<?php
+/**
+ * {Nom} — plantilla principal: el loop bàsic de WordPress.
+ *
+ * @package {Nom}
+ */
+
+get_header();
+?>
+<main id="contingut" class="lloc-contingut">
+    <?php if ( have_posts() ) : ?>
+        <?php
+        while ( have_posts() ) :
+            the_post();
+            ?>
+            <article id="post-<?php the_ID(); ?>" <?php post_class(); ?>>
+                <h2><a href="<?php the_permalink(); ?>"><?php the_title(); ?></a></h2>
+                <?php the_excerpt(); ?>
+            </article>
+        <?php endwhile; ?>
+        <?php the_posts_navigation(); ?>
+    <?php else : ?>
+        <p><?php esc_html_e( 'Encara no hi ha contingut.', '{nom}' ); ?></p>
+    <?php endif; ?>
+</main>
+<?php
+get_footer();
+"#,
+            ),
+            (
+                "wp-content/themes/{nom}/header.php",
+                "php",
+                r#"<?php
+/**
+ * {Nom} — capçalera del tema.
+ *
+ * @package {Nom}
+ */
+?>
+<!doctype html>
+<html <?php language_attributes(); ?>>
+<head>
+    <meta charset="<?php bloginfo( 'charset' ); ?>">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <?php wp_head(); ?>
+</head>
+<body <?php body_class(); ?>>
+<?php wp_body_open(); ?>
+<header class="capcalera">
+    <h1><a href="<?php echo esc_url( home_url( '/' ) ); ?>"><?php bloginfo( 'name' ); ?></a></h1>
+</header>
+"#,
+            ),
+            (
+                "wp-content/themes/{nom}/footer.php",
+                "php",
+                r#"<?php
+/**
+ * {Nom} — peu de pàgina del tema.
+ *
+ * @package {Nom}
+ */
+?>
+<footer class="peu">
+    <p>&copy; <?php echo esc_html( gmdate( 'Y' ) ); ?> <?php bloginfo( 'name' ); ?></p>
+</footer>
+<?php wp_footer(); ?>
+</body>
+</html>
+"#,
+            ),
+        ],
         "Joc Bevy (Rust)" => &[(
             "src/main.rs",
             "rust",
@@ -930,7 +1090,7 @@ fn te_intencio(prompt: &str) -> bool {
         .split(|c: char| !c.is_alphanumeric())
         .filter(|w| !w.is_empty())
         .collect();
-    let pregunta = mots.first().map(|m| INTERROGATIUS.contains(m)).unwrap_or(false);
+    let pregunta = comenca_amb_pregunta(prompt);
     // «com puc fer…» és una ordre educada, no una pregunta d'informació.
     let educada = mots
         .iter()
@@ -944,6 +1104,31 @@ fn te_intencio(prompt: &str) -> bool {
     })
 }
 
+/// La petició comença amb un interrogatiu («què», «com», «how»…)?
+fn comenca_amb_pregunta(prompt: &str) -> bool {
+    let low = pla(prompt);
+    low.split(|c: char| !c.is_alphanumeric())
+        .find(|w| !w.is_empty())
+        .map(|m| INTERROGATIUS.contains(&m))
+        .unwrap_or(false)
+}
+
+/// Petició INEQUÍVOCA de tema WordPress: «tema de wordpress», «wordpress
+/// theme», «tema wp», «crear tema wordpress» (i variants sense accents, via
+/// `pla`). Cal el concepte de TEMA + WordPress: «crea un plugin de wordpress»
+/// o «fes un lloc wordpress» NO són aquesta plantilla. «wp» es compara sobre
+/// el text normalitzat perquè `learning::tokens` descarta mots de 2 lletres.
+fn demana_tema_wp(prompt: &str) -> bool {
+    let low = pla(prompt);
+    let mots: Vec<&str> = low
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let tema = mots.iter().any(|w| matches!(*w, "tema" | "temes" | "theme" | "themes"));
+    let wp = mots.iter().any(|w| matches!(*w, "wordpress" | "wp"));
+    tema && wp
+}
+
 /// Plantilla que millor encaixa amb la petició, si n'hi ha cap. Un sol mot
 /// fort (llenguatge o format) ja n'hi ha prou; si no, calen dos tokens de la
 /// plantilla. Així «fes un component React» dispara, però «què és React» no
@@ -951,11 +1136,36 @@ fn te_intencio(prompt: &str) -> bool {
 /// de plantilla).
 pub fn match_snippet(prompt: &str) -> Option<Snippet> {
     let tokens = crate::learning::tokens(prompt);
-    if tokens.is_empty() || !te_intencio(prompt) {
+    if tokens.is_empty() {
         return None;
+    }
+    // TEMA WORDPRESS: ruta dedicada per frases inequívoques. Guanya ABANS de
+    // puntuar perquè cap matcher genèric (pàgina PHP, HTML…) no segresti la
+    // petició, i perquè «tema wp» perdria el token «wp» (massa curt).
+    // «wordpress theme» sense verb també és una petició clara; una pregunta
+    // («què és un tema de wordpress?») no dispara res.
+    if demana_tema_wp(prompt) && (te_intencio(prompt) || !comenca_amb_pregunta(prompt)) {
+        return catalog().into_iter().find(|s| s.title == "Tema WordPress (mínim)");
+    }
+    if !te_intencio(prompt) {
+        return None;
+    }
+    // Joc EN PYTHON explícit («fes un joc en python»): l'única plantilla de
+    // joc Python és l'endevinament de consola. MAI per a un «fes un joc»
+    // genèric, que va al Godot 4 real.
+    if tokens.iter().any(|w| w == "python")
+        && tokens.iter().any(|w| matches!(w.as_str(), "joc" | "jocs" | "videojoc"))
+    {
+        return catalog().into_iter().find(|s| s.title == "Joc d'endevinament (Python)");
     }
     let mut millor: Option<(usize, Snippet)> = None;
     for s in catalog() {
+        // El tema WordPress NOMÉS es dispara per la frase inequívoca de dalt:
+        // «wordpress» sol no ha de crear un tema (podria ser un plugin, un
+        // lloc, una consulta…).
+        if s.title == "Tema WordPress (mínim)" {
+            continue;
+        }
         let forts = s
             .strong
             .iter()
@@ -1030,6 +1240,7 @@ fn default_per_titol(s: &Snippet) -> &'static str {
         "Joc d'endevinament (Python)" => "endevina",
         "Programa Rust" => "main",
         "Pàgina PHP" => "taula",
+        "Tema WordPress (mínim)" => "tema",
         "Projecte Godot 4" | "Projecte Defold" => "Joc",
         "Joc Bevy (Rust)" | "Escena Panda3D (Python)" => "joc",
         "Escena Blender (bpy)" => "escena",
@@ -1094,7 +1305,14 @@ pub fn starter(prompt: &str) -> Option<String> {
     // projecte») dispararia una plantilla per culpa del README.
     let q = super::project::question_of(prompt);
     let s = match_snippet(&q)?;
-    let demanat = nom_demanat(&q, &s);
+    Some(resposta_plantilla(&s, &q))
+}
+
+/// Resposta MATERIALITZABLE d'una plantilla JA triada: la part comuna entre
+/// `starter` (puntuació del catàleg) i `scaffold_joc_generic` (joc genèric
+/// també quan hi ha LLM local disponible). Mateix format estricte «@file:».
+fn resposta_plantilla(s: &Snippet, q: &str) -> String {
+    let demanat = nom_demanat(q, s);
     let nom_slug = slug(&demanat);
     let nom_id = identificador(&demanat);
     let fitxer = omple(s.file, &nom_slug, &nom_id);
@@ -1113,17 +1331,121 @@ pub fn starter(prompt: &str) -> Option<String> {
     } else {
         String::new()
     };
-    Some(format!(
+    // TEMA WORDPRESS: missatge propi — és una base sòlida i vàlida (5 fitxers
+    // canònics) que el model personalitzarà quan l'usuari demani canvis.
+    if s.title == "Tema WordPress (mínim)" {
+        return format!(
+            "Et creo una **base sòlida de tema WordPress**: els 5 fitxers canònics \
+             (style.css amb el header «Theme Name:», functions.php amb l'enqueue \
+             d'estils, index.php amb el loop, header.php i footer.php), mínims i \
+             vàlids. És el punt de partida que el model personalitzarà quan li \
+             demanis canvis (colors, plantilles, parts…). Prem «Crea al projecte» \
+             per materialitzar-los.\n\n\
+             @file: {fitxer}\n```{lang}\n{cos}```{extres}\n\
+             Si el vols amb un altre nom, digues-ho («crea un tema de wordpress \
+             que s'anomeni X»).",
+            fitxer = fitxer,
+            lang = s.lang,
+            cos = cos,
+            extres = extres,
+        );
+    }
+    // Joc genèric resolt amb Godot: si l'usuari no ha demanat cap motor
+    // concret, oferim també la Jam (planificació i progrés multi-dia).
+    let jam = if s.title == "Projecte Godot 4"
+        && !crate::learning::tokens(q).iter().any(|w| w == "godot" || w == "gdscript")
+    {
+        "\nSi el que vols és una game jam completa (planificació, tasques i progrés \
+         multi-dia), prova la **Jam** de NoOrbit."
+    } else {
+        ""
+    };
+    format!(
         "Això ho sé programar: et creo **{fitxer}**{quants} ({title}). \
          Prem «Crea al projecte» a la targeta de sota per materialitzar'l.\n\n\
          @file: {fitxer}\n```{lang}\n{cos}```{extres}\n\
          Si el vols amb un altre nom, digues-ho («fes un {lower} que s'anomeni X»). \
-         {catalog}",
+         {catalog}{jam}",
         title = s.title,
         lower = s.title.to_lowercase(),
         lang = s.lang,
         catalog = catalog_line(),
-    ))
+        jam = jam,
+    )
+}
+
+/// Petició de joc GENÈRIC («fes un joc», «crea un videojoc», «make a game»,
+/// «un videojoc») sense cap motor ni llenguatge EXPLÍCIT: es resol amb el
+/// scaffold determinista Godot 4 (els 3 fitxers canònics, ja verificat).
+/// Pensat per al camí de xat amb LLM local disponible (Ollama): els models
+/// petits improvisen un Pygame/Python si ningú els fixa el motor per defecte.
+/// Les mencions explícites («joc en pygame», «joc en Unreal», «joc en
+/// Godot»…) retornen `None`: la tria de l'usuari es respecta SEMPRE.
+pub fn scaffold_joc_generic(prompt: &str) -> Option<String> {
+    // Invariant dels deterministes: només la PREGUNTA darrere del marcador
+    // «PREGUNTA / TASCA:», mai el context del projecte que el xat anteposa.
+    let q = super::project::question_of(prompt);
+    let t = q.trim_start();
+    // Els informes del bucle d'eines i els recordatoris de NoOrbit no són
+    // peticions de l'usuari (poden contenir «joc» per una ruta o un text
+    // anterior) i no han de disparar cap scaffold.
+    if t.starts_with("RUN|RESULTAT|") || t.starts_with("NoOrbit:") {
+        return None;
+    }
+    // Una pregunta d'informació («què és un joc?», «how to make a game»)
+    // no és una petició de crear res.
+    if comenca_amb_pregunta(&q) {
+        return None;
+    }
+    let low = pla(&q);
+    let mots: Vec<&str> = low
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    const JOC: &[&str] = &[
+        "joc", "jocs", "videojoc", "videojocs",
+        "juego", "juegos", "videojuego", "videojuegos",
+        "game", "games", "videogame", "videogames",
+    ];
+    const CREAR: &[&str] = &[
+        "fes", "fer", "fem", "feu", "crea", "crear", "creem", "genera",
+        "generar", "programa", "programar", "munta", "muntar", "vull",
+        "necessit", "haz", "hazme", "hacer", "quiero", "necesito",
+        "make", "create", "build", "generate", "write", "develop", "code",
+    ];
+    // Motors/llenguatges EXPLÍCITS: no s'intercepten mai (el LLM o la
+    // plantilla corresponent decideix). «c#»/«c++» es miren sobre el text
+    // sencer perquè el separador de mots els partiria.
+    const EXPLICITS: &[&str] = &[
+        "pygame", "python", "unreal", "ue5", "ue4", "bevy", "rust", "defold",
+        "lua", "panda3d", "panda", "unity", "godot", "gdscript", "javascript",
+        "typescript", "phaser", "threejs", "web", "html", "canvas", "consola",
+        "terminal", "tkinter", "raylib", "sdl", "opengl", "love2d", "monogame",
+        "csharp", "cpp", "java", "kotlin", "swift", "golang", "node", "react",
+        "vue", "js", "ts",
+    ];
+    if !mots.iter().any(|w| JOC.contains(w)) {
+        return None;
+    }
+    if mots.iter().any(|w| EXPLICITS.contains(w)) || low.contains("c#") || low.contains("c++") {
+        return None;
+    }
+    // Si el catàleg determinista ja tria UNA ALTRA plantilla (p. ex.
+    // l'endevinament Python per «fes un joc d'endevinar»), no la
+    // sobreescriguem: la petició específica es respecta tal qual.
+    if let Some(s) = match_snippet(&q) {
+        if s.title != "Projecte Godot 4" {
+            return None;
+        }
+    }
+    // Verb de crear, o petició molt curta («un videojoc», «a game»): anomenar
+    // un joc sense res més ja és una petició de crear-lo.
+    let te_verb = mots.iter().any(|w| CREAR.contains(w));
+    if !te_verb && mots.len() > 4 {
+        return None;
+    }
+    let s = catalog().into_iter().find(|s| s.title == "Projecte Godot 4")?;
+    Some(resposta_plantilla(&s, &q))
 }
 
 /// Llenguatges i formats que la nativa RECONÈIX però pels quals no té
@@ -1346,5 +1668,241 @@ mod tests {
             let r = starter(prompt).unwrap_or_default();
             assert!(!r.contains(marcador), "{}: queda {} al codi", prompt, marcador);
         }
+    }
+
+    /// Extreu els blocs «@file: ruta» + tanca de codi d'una resposta (tests).
+    fn blocs_file(text: &str) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        let mut rest = text;
+        while let Some(i) = rest.find("@file: ") {
+            let after = &rest[i + "@file: ".len()..];
+            let path = after.lines().next().unwrap_or("").trim().to_string();
+            let Some(a) = after.find("```") else { break };
+            let cos = &after[a + 3..];
+            let Some(nl) = cos.find('\n') else { break };
+            let cos = &cos[nl + 1..];
+            let Some(b) = cos.find("```") else { break };
+            out.push((path, cos[..b].to_string()));
+            rest = &cos[b + 3..];
+        }
+        out
+    }
+
+    #[test]
+    fn tema_wordpress_routing_inequivoque() {
+        for p in [
+            "crea un tema de wordpress",
+            "crear tema wordpress",
+            "fes un tema wp",
+            "wordpress theme",
+            "vull un tema de WordPress",
+            "genera un tema wordpress",
+        ] {
+            let s = match_snippet(p).unwrap_or_else(|| panic!("cap plantilla per a «{}»", p));
+            assert_eq!(s.title, "Tema WordPress (mínim)", "{}", p);
+        }
+        let r = starter("crea un tema de wordpress").unwrap();
+        for f in ["style.css", "functions.php", "index.php", "header.php", "footer.php"] {
+            assert!(r.contains(&format!("@file: wp-content/themes/tema/{}", f)), "{}", r);
+        }
+        assert!(r.contains("Theme Name:"), "{}", r);
+        assert!(r.contains("base sòlida"), "{}", r);
+        // NO la pàgina PHP genèrica (l'antic segrest «wordpress» → taula PHP).
+        assert!(!r.contains("pàgina PHP"), "{}", r);
+        assert!(!r.contains("Serveix-la amb"), "{}", r);
+        // Nom derivat de la petició quan és clar.
+        let r = starter("crea un tema de wordpress que s'anomeni Botiga").unwrap();
+        assert!(r.contains("wp-content/themes/botiga/style.css"), "{}", r);
+        assert!(r.contains("Theme Name: Botiga"), "{}", r);
+        // Preguntes i peticions que NO són un tema: cap segrest cap al tema.
+        assert!(match_snippet("què és un tema de wordpress").is_none());
+        assert!(match_snippet("crea un plugin de wordpress")
+            .map(|s| s.title != "Tema WordPress (mínim)")
+            .unwrap_or(true));
+    }
+
+    #[test]
+    fn plantilla_wordpress_php_valid() {
+        // Els 5 fitxers canònics es materialitzen en un tempdir i els 4 PHP
+        // han de passar `php -l` (PHP real de la màquina; si no n'hi ha,
+        // s'omet la verificació de sintaxi i es comprova l'estructura).
+        let r = starter("crea un tema de wordpress").unwrap();
+        let blocs = blocs_file(&r);
+        assert_eq!(blocs.len(), 5, "blocs: {:?}", blocs.iter().map(|(p, _)| p).collect::<Vec<_>>());
+        for (_, c) in &blocs {
+            assert!(!c.contains("{nom}") && !c.contains("{Nom}"), "marcador sense emplenar");
+        }
+        let css = blocs.iter().find(|(p, _)| p.ends_with("style.css")).unwrap();
+        assert!(css.1.contains("Theme Name:"));
+        let func = blocs.iter().find(|(p, _)| p.ends_with("functions.php")).unwrap();
+        assert!(func.1.contains("wp_enqueue_scripts") && func.1.contains("wp_enqueue_style"));
+        let index = blocs.iter().find(|(p, _)| p.ends_with("index.php")).unwrap();
+        assert!(index.1.contains("get_header") && index.1.contains("get_footer") && index.1.contains("have_posts"));
+        let header = blocs.iter().find(|(p, _)| p.ends_with("header.php")).unwrap();
+        assert!(header.1.contains("wp_head") && header.1.contains("language_attributes"));
+        let footer = blocs.iter().find(|(p, _)| p.ends_with("footer.php")).unwrap();
+        assert!(footer.1.contains("wp_footer"));
+
+        let php = if std::path::Path::new("/usr/local/bin/php").exists() {
+            "/usr/local/bin/php".to_string()
+        } else {
+            "php".to_string()
+        };
+        let dir = std::env::temp_dir().join(format!("noorbit-wp-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut php_files = 0;
+        for (path, code) in &blocs {
+            let dest = dir.join(path);
+            std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+            std::fs::write(&dest, code).unwrap();
+            if path.ends_with(".php") {
+                php_files += 1;
+                let out = match std::process::Command::new(&php).arg("-l").arg(&dest).output() {
+                    Ok(o) => o,
+                    Err(e) => {
+                        eprintln!("php -l no disponible ({}): s'omet la verificació de sintaxi", e);
+                        let _ = std::fs::remove_dir_all(&dir);
+                        return;
+                    }
+                };
+                assert!(
+                    out.status.success(),
+                    "php -l falla a {}: {}",
+                    path,
+                    String::from_utf8_lossy(&out.stderr)
+                );
+            }
+        }
+        assert_eq!(php_files, 4);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn funcions_wp_prefixades_per_tema_sense_xoc_entre_dos_temes() {
+        // Dos temes generats amb noms diferents NO comparteixen cap nom de
+        // funció global: poden conviure a la mateixa instal·lació sense
+        // «Cannot redeclare» (abans el prefix noorbit_tema_* era fix).
+        let a = starter("crea un tema de wordpress anomenat Orbita").unwrap();
+        let b = starter("crea un tema de wordpress anomenat Farola").unwrap();
+        let funcions = |r: &str| -> Vec<String> {
+            blocs_file(r)
+                .into_iter()
+                .find(|(p, _)| p.ends_with("functions.php"))
+                .expect("functions.php")
+                .1
+                .lines()
+                .filter_map(|l| l.trim().strip_prefix("function "))
+                .map(|l| l.trim_end_matches("() {").trim().to_string())
+                .collect()
+        };
+        let fa = funcions(&a);
+        let fb = funcions(&b);
+        assert!(fa.contains(&"Orbita_encua_estils".to_string()), "{fa:?}");
+        assert!(fa.contains(&"Orbita_suports".to_string()), "{fa:?}");
+        assert!(fb.contains(&"Farola_encua_estils".to_string()), "{fb:?}");
+        assert!(fa.iter().all(|f| !fb.contains(f)), "xoc de noms: {fa:?} vs {fb:?}");
+    }
+
+    /// «Fes un joc» genèric TAMBÉ amb LLM local disponible (camí Ollama):
+    /// el scaffold determinista Godot 4 resol la petició en català, castellà
+    /// i anglès, sense passar per l'endevinament Python.
+    #[test]
+    fn joc_generic_amb_llm_local_resol_el_scaffold_godot() {
+        for p in [
+            "fes un joc", "crea un joc", "make a game", "un videojoc",
+            "crea un videojoc", "haz un juego", "fes un videojoc",
+            "create a game", "vull un joc", "fes un joc 2d",
+        ] {
+            let r = scaffold_joc_generic(p)
+                .unwrap_or_else(|| panic!("cap scaffold per a «{}»", p));
+            assert!(r.contains("@file: project.godot"), "{}: {}", p, r);
+            assert!(r.contains("@file: main.tscn"), "{}", p);
+            assert!(r.contains("@file: main.gd"), "{}", p);
+            assert!(r.contains("gl_compatibility"), "{}", p);
+            assert!(!r.contains("random.randint"), "{}: Pygame no és el defecte", p);
+        }
+    }
+
+    /// Les mencions EXPLÍCITES de motor/llenguatge no s'intercepten MAI:
+    /// el camí local (LLM o plantilla) rep la petició tal qual.
+    #[test]
+    fn joc_explicit_no_s_intercepta_mai() {
+        for p in [
+            "fes un joc en pygame", "fes un joc en python",
+            "crea un joc en Unreal", "fes un joc en Bevy",
+            "fes un joc en Godot", "make a game in python",
+            "fes un joc web", "haz un juego en pygame",
+            "fes un joc de consola", "crea un joc en C#",
+            "fes un joc d'endevinar",
+        ] {
+            assert!(scaffold_joc_generic(p).is_none(), "interceptat: «{}»", p);
+        }
+        // El determinista de tota la vida continua respectant el Python
+        // explícit (endevinament) i el Godot explícit.
+        let r = starter("fes un joc en python").unwrap();
+        assert!(r.contains("random.randint"), "{}", r);
+        let r = starter("fes un joc en godot").unwrap();
+        assert!(r.contains("@file: project.godot"), "{}", r);
+    }
+
+    /// El scaffold del camí amb LLM respecta l'invariant del marcador
+    /// «PREGUNTA / TASCA:» i no dispara amb preguntes, informes ni nudges.
+    #[test]
+    fn joc_generic_nomes_la_pregunta_real() {
+        // Preguntes d'informació: no són peticions de crear.
+        assert!(scaffold_joc_generic("què és un joc?").is_none());
+        assert!(scaffold_joc_generic("how to make a game").is_none());
+        // Context amb «pygame/python» davant del marcador: només mana la
+        // pregunta de darrere.
+        let prompt = format!(
+            "{}\n\n---\nPREGUNTA / TASCA:\nfes un joc",
+            "pygame python ".repeat(400)
+        );
+        assert!(scaffold_joc_generic(&prompt).is_some());
+        // A l'inrevés: el context parla de joc però la pregunta és innocent.
+        let invers = format!(
+            "{}\n\n---\nPREGUNTA / TASCA:\nquè fa aquest projecte?",
+            "joc godot ".repeat(400)
+        );
+        assert!(scaffold_joc_generic(&invers).is_none());
+        // Informes del bucle d'eines i recordatoris: no són l'usuari.
+        assert!(scaffold_joc_generic("RUN|RESULTAT| fitxers escrits: joc/main.py (crea)").is_none());
+        assert!(scaffold_joc_generic("NoOrbit: l'usuari ha demanat crear un joc…").is_none());
+    }
+
+    #[test]
+    fn joc_generic_godot_i_endevinament_nomes_explicit() {
+        // «fes un joc» genèric → Godot 4 REAL, MAI l'endevinament Python.
+        for p in ["fes un joc", "crea un joc", "vull un videojoc", "fes un joc 2d"] {
+            let r = starter(p).unwrap_or_else(|| panic!("cap plantilla per a «{}»", p));
+            assert!(r.contains("@file: project.godot"), "{}: {}", p, r);
+            assert!(r.contains("@file: main.tscn"), "{}", p);
+            assert!(r.contains("@file: main.gd"), "{}", p);
+            assert!(!r.contains("random.randint"), "{}: l'endevinament no és el defecte", p);
+        }
+        // La Jam s'ofereix quan no s'ha demanat cap motor concret.
+        assert!(starter("fes un joc").unwrap().contains("Jam"));
+        assert!(!starter("fes un joc en godot").unwrap().contains("**Jam**"));
+        // Endevinament NOMÉS quan es demana explícitament.
+        let r = starter("fes un joc d'endevinar").unwrap();
+        assert!(r.contains("random.randint"), "{}", r);
+        let r = starter("vull un joc en python").unwrap();
+        assert!(r.contains("random.randint"), "{}", r);
+        // Els motors explícits continuen guanyant les seves peticions.
+        assert!(starter("crea un joc amb defold").unwrap().contains("@file: game.project"));
+        assert!(starter("vull un joc bevy").unwrap().contains("@file: Cargo.toml"));
+        assert!(starter("fes un joc en unreal").unwrap().contains(".uproject"));
+        assert!(starter("fes un joc en panda3d").unwrap().contains("ShowBase"));
+    }
+
+    #[test]
+    fn pagina_php_senzilla_es_el_snippet_php() {
+        let r = starter("fes una pàgina php").unwrap();
+        assert!(r.contains("```php"), "{}", r);
+        assert!(r.contains("htmlspecialchars"), "{}", r);
+        assert!(r.contains(".php"), "{}", r);
+        // I l'HTML continua guanyant quan es demana html.
+        let r = starter("crea una pàgina html").unwrap();
+        assert!(r.contains("```html"), "{}", r);
     }
 }

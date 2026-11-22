@@ -6,6 +6,7 @@
 //! - 3d         -> backend 3D local (Ollama genera l'script Blender)
 
 pub mod runtools;
+pub mod snapshot;
 
 use crate::ai::AiManager;
 use anyhow::{anyhow, Result};
@@ -637,6 +638,9 @@ impl AgentOrchestrator {
             role: role.clone(),
             system_prompt,
             model: bound.clone(),
+            // Creat per la IA principal: pot treballar tant sola (xat) com en
+            // equip/delegada — el mode l'afinarà l'usuari si cal.
+            mode: None,
         })?;
 
         // 5) Feina autònoma acotada: sobreviu a disc i arrenca sola.

@@ -326,6 +326,122 @@ Si la tasca demanava proves, crea també els fitxers de prova. Quan acabis els \
 fitxers, si cal compilar, executar o provar res, escriu «RUN|<comanda>» i \
 atura el torn. Comença ara mateix pel primer fitxer.";
 
+/// Límit de torns eina→resultat→model del bucle `chat_with_tools`: prou per a
+/// cicles escriure→verificar→corregir→compilar→corregir→tornar a compilar
+/// dins d'UNA tasca (el bucle de verificació obligatori consumeix torns).
+const MAX_ROUNDS: usize = 10;
+/// Els nudges són REPETIBLES: fins a 2 usos cadascun per torn (abans un
+/// de sol cop, i els models menuts tornaven a caure en el mateix error).
+const MAX_NUDGE_USES: usize = 2;
+
+/// Torns EXTRA permesos amb EXACTAMENT el mateix pla d'accions (mateixes
+/// «RUN|», mateixos blocs «@edit:»/«@file:», mateixes «NB|»). El primer cop
+/// que es repeteix, el model rep `IDENTICAL_ACTIONS_NOTE` i NoOrbit NO
+/// reexecuta res; si encara insisteix, el torn s'atura i ho diem a l'usuari.
+///
+/// Sense això, la deduplicació de reemissions només cobria els blocs «@file:»
+/// (frontend): un model encallat en una ruta absoluta o en una edició
+/// CERCA == NOU reemetia el MESMEIX bloc ~15 vegades fins a esgotar
+/// `MAX_ROUNDS`, i el xat quedava ple de còpies del mateix text.
+const MAX_IDENTICAL_ACTION_ROUNDS: usize = 1;
+
+/// Avís al model quan reemet el mateix pla d'accions: li donem exactament el
+/// que li falta per eixir del forat (les quatre causes reals que s'han vist
+/// al xat real), en lloc de tornar-li a executar la mateixa comanda.
+const IDENTICAL_ACTIONS_NOTE: &str = "RUN|RESULTAT| Has reemet EXACTAMENT les mateixes accions que al torn anterior i NoOrbit NO les ha tornat a executar (el resultat seria idèntic). Corregeix ABANS d'intentar res més:\n1) Les rutes de «@file:», «@edit:» i «@delete:» han de ser RELATIVES a l'arrel del projecte: mai absolutes i mai reproduir l'arrel dins la ruta.\n2) Un bloc «@edit:» amb el text NOU IDÈNTIC al CERCA no canvia res: fes-lo DISTINT o no emetis res.\n3) Les rutes amb espais dins «RUN|» van ENTRECOMILLADES.\n4) Cada directriu a la seva pròpia línia (mai dos «RUN|» enganxats).\nSi el fitxer que vols tocar és fora del projecte obert, digues-ho en prosa: NoOrbit no pot escriure-hi.";
+
+/// Comptadors d'ús de cada nudge dins d'un torn (límit MAX_NUDGE_USES).
+#[derive(Default)]
+struct NudgeCounters {
+    exec: usize,
+    files: usize,
+    img: usize,
+    project: usize,
+    docs: usize,
+    code: usize,
+    tests: usize,
+}
+
+/// Decisió PURA de la cadena de recordatoris del bucle `chat_with_tools`:
+/// donats el prompt de l'usuari, la resposta del model, la ronda actual i els
+/// comptadors, retorna el nudge que s'ha d'enviar (i incrementa el comptador)
+/// o `None` si el torn pot acabar. L'ORDRE i les condicions són els del bucle
+/// real; extreure'ls ací permet testejar el guion complet sense AppHandle.
+fn next_nudge(prompt: &str, text: &str, round: usize, c: &mut NudgeCounters) -> Option<String> {
+    // Sense directrius… però la tasca demanava accions reals? Si encara
+    // queden usos del recordatori, donem-li una oportunitat més: el
+    // torn que ve hauria d'anar ple de «RUN|» (o «@file:» si falten
+    // fitxers) i NoOrbit l'executarà de veritat.
+    if round < MAX_ROUNDS && c.exec < MAX_NUDGE_USES && expects_execution(prompt, text) {
+        c.exec += 1;
+        return Some(EXEC_NUDGE.to_string());
+    }
+    // I si l'usuari ha demanat PROVES i la resposta només les explica
+    // (cap «@file:»)? És el cas «fes els tests»: la prova ha d'existir
+    // com a fitxer real, no com a prosa. Va ABANS del recordatori de
+    // «projecte sencer» perquè «fes els tests del projecte» no acabe
+    // generant tot el projecte en lloc de les proves. Fins a 2 usos.
+    if round < MAX_ROUNDS
+        && c.tests < MAX_NUDGE_USES
+        && asks_for_code(prompt)
+        && asks_for_tests(prompt)
+        && !has_file_blocks(text)
+    {
+        c.tests += 1;
+        return Some(TESTS_NUDGE.to_string());
+    }
+    // I si ha annunciat fitxers amb «@file:» i els ha deixat BUITS
+    // (el model menut crea l'arxiu i promet el codi «després»)? Un
+    // recordatori, fins a 2 usos: que reemetja cada fitxer COMPLET.
+    if round < MAX_ROUNDS && c.files < MAX_NUDGE_USES {
+        let empties = empty_file_paths(text);
+        if !empties.is_empty() {
+            c.files += 1;
+            return Some(format!(
+                "{}\n\nFitxers que han quedat buits: {}",
+                FILE_NUDGE,
+                empties.join(", ")
+            ));
+        }
+        // I si ha demanat CREAR EL PROJECTE SENCER però només ha emés
+        // un README amb un pla de passos en prosa? Recordatori
+        // imperatiu perquè emeti CADA fitxer del pla amb @file:.
+        if c.project < MAX_NUDGE_USES && project_underbuilt(prompt, text) {
+            c.project += 1;
+            return Some(PROJECT_NUDGE.to_string());
+        }
+    }
+    // I si l'usuari demanava CODI i la resposta només conté
+    // DOCUMENTACIÓ (tots els «@file:» són .md)? Aquest cas NO el
+    // captura el CODE_NUDGE normal (hi ha fitxers, però no són codi):
+    // sense aquest recordatori el model es queda fent README i
+    // «bloc_2.md» fins que s'esgota.
+    if round < MAX_ROUNDS && c.docs < MAX_NUDGE_USES && nomes_documentacio(prompt, text) {
+        c.docs += 1;
+        return Some(DOCS_ONLY_NUDGE.to_string());
+    }
+    // I si l'usuari ha demanat FER codi (implementar, crear, modificar,
+    // arreglar…) i la resposta no té ni fitxers ni cap bloc de codi?
+    // Un recordatori imperatiu perquè emeta els fitxers de veritat.
+    if round < MAX_ROUNDS
+        && c.code < MAX_NUDGE_USES
+        && asks_for_code(prompt)
+        && !has_file_blocks(text)
+        && !has_code_fence(text)
+    {
+        c.code += 1;
+        return Some(CODE_NUDGE.to_string());
+    }
+    // I si ha demanat CREAR UNA IMATGE però ha respost amb prosa sense
+    // emetre cap «IMG|»? Recordatori imperatiu: que la generi el
+    // sistema amb la directriu, i ell tan sols la copie.
+    if round < MAX_ROUNDS && c.img < MAX_NUDGE_USES && image_requested(prompt, text) {
+        c.img += 1;
+        return Some(IMG_NUDGE.to_string());
+    }
+    None
+}
+
 /// Un torn de xat amb les EINES DE NOORBIT connectades: qualsevol resposta
 /// del model que continga directrius «NB|…» (navegador) o «RUN|…» / «IMG|…»
 /// (terminal del projecte i generador d'imatges) s'executa de veritat, se'n
@@ -348,9 +464,6 @@ async fn chat_with_tools(
 ) -> Result<String, String> {
     use crate::agent::runtools;
     use crate::browser::tools;
-    // Límit de torns eina→resultat→model: prou per a cicles
-    // escriure→compilar→corregir→tornar a compilar dins d'UNA tasca.
-    const MAX_ROUNDS: usize = 6;
     // El manual de directrius s'afegeix AL SYSTEM PROMPT DE TOTES les IAs.
     // S'hi afegeix l'ESTAT REAL de les eines ara mateix (Blender connectat?
     // Unreal? projecte obert? imatges en local?) perquè el model no propose
@@ -396,21 +509,51 @@ async fn chat_with_tools(
     } else {
         format!("{}\n\n{}", sys, lessons_block)
     };
+    // ── FASE 2 · system prompt en capes (patró OpenCode, MIT) ──────────
+    // Proveïdor + entorn (cwd del projecte, SO, eines detectades al PATH
+    // sense spawnar res) + instruccions d'AGENTS.md/NOORBIT.md. Idempotent
+    // per marques: el camí cloud no duplica les capes ja presents.
+    let root = crate::commands::workspace::current_root();
+    let (kind, model_info) = ai
+        .provider_info(&opts.provider.clone().unwrap_or_default())
+        .await;
+    let sys = crate::ai::sysprompt::layered(Some(&sys), &kind, &model_info, root.as_deref());
+    // ── FASE 2 · compaction al 90% del context ─────────────────────────
+    // Si la conversa estimada supera el 90% de la finestra del model, els
+    // torns antics es substitueixen per un resum (via proveïdor o extractiu
+    // local) conservant els darrers; el xat rep la nota «ai://compacted».
+    let limit = if kind == "native" {
+        crate::ai::native_llm::finestra_base()
+    } else {
+        crate::ai::context_window_for(&model_info)
+    };
+    crate::ai::compact::maybe_compact(&app, ai, sid, &mut opts, prompt, Some(&sys), limit).await;
     let mut current = prompt.to_string();
     let mut text = String::new();
-    let mut nudged = false;
-    let mut files_nudged = false;
-    // «Crea una imatge» respost amb prosa sense IMG|: un sol recordatori.
-    let mut img_nudged = false;
-    // «Emet tot el projecte» (README + pla sense codi): un sol recordatori.
-    let mut project_nudged = false;
-    // Ha demanat CODI i ha respost amb només .md (documentació): un sol
-    // recordatori perquè escrigui el codi de veritat.
-    let mut docs_nudged = false;
-    // Tasca de codi/proves respost amb prosa i cap fitxer: un sol recordatori.
-    let mut code_nudged = false;
-    let mut tests_nudged = false;
+    // Comptadors d'ús de cada nudge (límit MAX_NUDGE_USES per torn): la
+    // decisió de la cadena viu a `next_nudge` (pura, coberta per tests).
+    let mut nudges = NudgeCounters::default();
+    // Bucle de verificació obligatori: rondes amb errors de lint JA
+    // realimentades al model aquest torn (límit MAX_VERIFY_RETRIES).
+    let mut verify_retries = 0usize;
+    // Anti-bucle: segell de les accions del torn anterior i quants cops
+    // s'ha repetit seguidament (vegeu MAX_IDENTICAL_ACTION_ROUNDS).
+    let mut prev_fp = String::new();
+    let mut repeats = 0usize;
     let t0 = std::time::Instant::now();
+    // SNAPSHOT del torn (git shadow): es captura l'estat del projecte ABANS
+    // que el model escriga res — ni els lots del backend ni la
+    // materialització «en viu» del frontend durant el streaming. Si git no
+    // hi és o no hi ha projecte obert, es degrada amb nota i el xat continua.
+    let snap_root = crate::commands::workspace::current_root();
+    if let Some(root) = snap_root.clone() {
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            if let Err(e) = crate::agent::snapshot::begin_turn(&root) {
+                eprintln!("NoOrbit/snapshot: sense snapshot del torn ({e})");
+            }
+        })
+        .await;
+    }
     for round in 0..=MAX_ROUNDS {
         let res = if streaming {
             crate::ai::in_session(sid, ai.chat_stream(&app, &current, Some(&sys), &opts)).await
@@ -435,113 +578,53 @@ async fn chat_with_tools(
                         t0.elapsed().as_millis() as u64,
                     );
                 }
+                // Tanca el torn de snapshot: si el disc no ha canviat, el
+                // baseline es descarta (no hi haurà «Desfés el pas» buit).
+                if let Some(root) = snap_root.clone() {
+                    let _ = tauri::async_runtime::spawn_blocking(move || {
+                        crate::agent::snapshot::end_turn(&root, false, &[]);
+                    })
+                    .await;
+                }
                 return Err(msg);
             }
         };
         let nb = tools::parse(&text);
         let runs = runtools::parse(&text);
+        // ── GUARD ANTI-BUCLE ────────────────────────────────────────────
+        // Les PARAULES del model poden canviar entre torns i el pla d'accions
+        // ser idèntic: comparem només les accions (mai la prosa).
+        let fp = runtools::action_fingerprint(&text);
+        repeats = if !fp.is_empty() && fp == prev_fp { repeats + 1 } else { 0 };
+        prev_fp = fp;
+        if repeats > MAX_IDENTICAL_ACTION_ROUNDS {
+            // Ja l'hem avisat i torna a fer el mateix: aturem el torn i ho
+            // diguem de manera visible a l'usuari, en lloc de deixar el xat
+            // tallat sense explicació (era el transcript de 15 blocs repetits).
+            text.push_str(
+                "\n\n⛔ NoOrbit ha ATURAT aquest torn: la IA ha reemet EXACTAMENT les mateixes accions dues vegades seguides (la mateixa «RUN|» i la mateixa «@edit:» sense canvis), així que tornar-les a executar no hauria canviat res. Les causes habituals: una ruta ABSOLUTA en lloc d'una de RELATIVA a la carpeta oberta, o un bloc d'edició amb el text NOU igual que el CERCA. Torna-ho a demanar concretant la carpeta del projecte, o digues «aplica els canvis fitxer a fitxer».",
+            );
+            break;
+        }
+        if repeats == 1 && !(nb.is_empty() && runs.is_empty()) {
+            // Primer reintent idèntic: NO tornem a executar el que ja
+            // s'ha executat; enviem la nota perquè el model corregeixca el pla.
+            opts.history.push(HistoryTurn {
+                role: "assistant".into(),
+                content: text.clone(),
+            });
+            current = IDENTICAL_ACTIONS_NOTE.to_string();
+            continue;
+        }
         if (nb.is_empty() && runs.is_empty()) || round == MAX_ROUNDS {
-            // Sense directrius… però la tasca demanava accions reals? Si encara
-            // no hem fet cap recordatori, donem-li UNA oportunitat més: el
-            // torn que ve hauria d'anar ple de «RUN|» (o «@file:» si falten
-            // fitxers) i NoOrbit l'executarà de veritat.
-            if round < MAX_ROUNDS && !nudged && expects_execution(prompt, &text) {
-                nudged = true;
+            // Cadena de recordatoris (decisió pura): si en queda cap d'útil,
+            // el torn del model entra a l'historial i el nudge és el nou prompt.
+            if let Some(nudge) = next_nudge(prompt, &text, round, &mut nudges) {
                 opts.history.push(HistoryTurn {
                     role: "assistant".into(),
                     content: text.clone(),
                 });
-                current = EXEC_NUDGE.to_string();
-                continue;
-            }
-            // I si l'usuari ha demanat PROVES i la resposta només les explica
-            // (cap «@file:»)? És el cas «fes els tests»: la prova ha d'existir
-            // com a fitxer real, no com a prosa. Va ABANS del recordatori de
-            // «projecte sencer» perquè «fes els tests del projecte» no acabe
-            // generant tot el projecte en lloc de les proves. UNA vegada.
-            if round < MAX_ROUNDS
-                && !tests_nudged
-                && asks_for_code(prompt)
-                && asks_for_tests(prompt)
-                && !has_file_blocks(&text)
-            {
-                tests_nudged = true;
-                opts.history.push(HistoryTurn {
-                    role: "assistant".into(),
-                    content: text.clone(),
-                });
-                current = TESTS_NUDGE.to_string();
-                continue;
-            }
-            // I si ha annunciat fitxers amb «@file:» i els ha deixat BUITS
-            // (el model menut crea l'arxiu i promet el codi «després»)? Un
-            // recordatori, UNA vegada: que reemetja cada fitxer COMPLET.
-            if round < MAX_ROUNDS && !files_nudged {
-                let empties = empty_file_paths(&text);
-                if !empties.is_empty() {
-                    files_nudged = true;
-                    opts.history.push(HistoryTurn {
-                        role: "assistant".into(),
-                        content: text.clone(),
-                    });
-                    current =
-                        format!("{}\n\nFitxers que han quedat buits: {}", FILE_NUDGE, empties.join(", "));
-                    continue;
-                }
-                // I si ha demanat CREAR EL PROJECTE SENCER però només ha emés
-                // un README amb un pla de passos en prosa? UN recordatori
-                // imperatiu perquè emeti CADA fitxer del pla amb @file:.
-                if !project_nudged && project_underbuilt(prompt, &text) {
-                    project_nudged = true;
-                    opts.history.push(HistoryTurn {
-                        role: "assistant".into(),
-                        content: text.clone(),
-                    });
-                    current = PROJECT_NUDGE.to_string();
-                    continue;
-                }
-            }
-            // I si l'usuari demanava CODI i la resposta només conté
-            // DOCUMENTACIÓ (tots els «@file:» són .md)? Aquest cas NO el
-            // captura el CODE_NUDGE normal (hi ha fitxers, però no són codi):
-            // sense aquest recordatori el model es queda fent README i
-            // «bloc_2.md» fins que s'esgota.
-            if round < MAX_ROUNDS && !docs_nudged && nomes_documentacio(prompt, &text) {
-                docs_nudged = true;
-                opts.history.push(HistoryTurn {
-                    role: "assistant".into(),
-                    content: text.clone(),
-                });
-                current = DOCS_ONLY_NUDGE.to_string();
-                continue;
-            }
-            // I si l'usuari ha demanat FER codi (implementar, crear, modificar,
-            // arreglar…) i la resposta no té ni fitxers ni cap bloc de codi?
-            // Un recordatori imperatiu perquè emeta els fitxers de veritat.
-            if round < MAX_ROUNDS
-                && !code_nudged
-                && asks_for_code(prompt)
-                && !has_file_blocks(&text)
-                && !has_code_fence(&text)
-            {
-                code_nudged = true;
-                opts.history.push(HistoryTurn {
-                    role: "assistant".into(),
-                    content: text.clone(),
-                });
-                current = CODE_NUDGE.to_string();
-                continue;
-            }
-            // I si ha demanat CREAR UNA IMATGE però ha respost amb prosa sense
-            // emetre cap «IMG|»? UN recordatori imperatiu: que la generi el
-            // sistema amb la directriu, i ell tan sols la copie.
-            if round < MAX_ROUNDS && !img_nudged && image_requested(prompt, &text) {
-                img_nudged = true;
-                opts.history.push(HistoryTurn {
-                    role: "assistant".into(),
-                    content: text.clone(),
-                });
-                current = IMG_NUDGE.to_string();
+                current = nudge;
                 continue;
             }
             break;
@@ -559,14 +642,28 @@ async fn chat_with_tools(
             let app_pre = app.clone();
             let text_pre = text.clone();
             let pre = tauri::async_runtime::spawn_blocking(move || {
-                runtools::write_announced_files(&app_pre, &text_pre)
+                let written = runtools::write_announced_files(&app_pre, &text_pre);
+                // El que NO s'ha escrit també compta: sense aquesta llista,
+                // una «@file:» amb ruta absoluta de fora del projecte es
+                // descartava en silenci i el model la reemetia IDÈNTICA.
+                let rejected = crate::commands::workspace::current_root()
+                    .map(|r| runtools::rejected_write_paths(&r, &text_pre))
+                    .unwrap_or_default();
+                (written, rejected)
             })
             .await
             .unwrap_or_default();
-            if !pre.is_empty() {
+            if !pre.0.is_empty() {
                 report.push_str(&format!(
                     "RUN|RESULTAT| fitxers escrits al projecte abans d'executar: {}\n",
-                    pre.join(", ")
+                    pre.0.join(", ")
+                ));
+            }
+            if !pre.1.is_empty() {
+                report.push_str(&format!(
+                    "RUN|RESULTAT| ERROR: {} «@file:» NO s'han escrit perquè la ruta és FORA del projecte obert: {}. Reemet-les amb la ruta RELATIVA a l'arrel del projecte (mai absoluta, mai reproduir l'arrel dins la ruta). Si el fitxer és realment de fora, NoOrbit no hi pot escriure: digues-ho en prosa.\n",
+                    pre.1.len(),
+                    pre.1.join(", ")
                 ));
             }
             // Edicions quirúrgiques «@edit:» (CERCA/NOU): aplicar-les TAMBÉ
@@ -585,6 +682,48 @@ async fn chat_with_tools(
                     "RUN|RESULTAT| edicions aplicades: {}\n",
                     edits.join(" · ")
                 ));
+            }
+            // BUCLE DE VERIFICACIÓ OBLIGATORI: el codi acabat d'escriure es
+            // comprova amb EINES REALS (php -l / node --check) i els errors
+            // es realimenten al model. MAI es reporta èxit d'escriptura amb
+            // lint fallant sense informar-ne. Límit: 3 reintents per torn.
+            let mut touched: Vec<String> = pre.0.clone();
+            for b in runtools::extract_edit_blocks(&text) {
+                if edits.iter().any(|r| r.contains("aplicades") && r.starts_with(b.path.as_str())) {
+                    touched.push(b.path);
+                }
+            }
+            touched.sort();
+            touched.dedup();
+            if !touched.is_empty() {
+                if verify_retries < runtools::MAX_VERIFY_RETRIES {
+                    if let Some(root) = crate::commands::workspace::current_root() {
+                        let lint = tauri::async_runtime::spawn_blocking(move || {
+                            let mut results = runtools::lint_paths_blocking(&root, &touched);
+                            // Fase 3c: si hi ha sessió LSP ACTIVA per al
+                            // llenguatge, els seus errors reals també es
+                            // realimenten (sense spawnar cap servidor nou).
+                            runtools::augment_with_active_lsp(&root, &mut results);
+                            results
+                        })
+                        .await
+                        .unwrap_or_default();
+                        if lint.iter().any(|r| !r.ok) {
+                            verify_retries += 1;
+                        }
+                        if let Some(msg) = runtools::verification_report(&lint, verify_retries) {
+                            report.push_str("RUN|RESULTAT| ");
+                            report.push_str(&msg);
+                            report.push('\n');
+                        }
+                    }
+                } else {
+                    report.push_str(
+                        "RUN|RESULTAT| Verificació: límit de 3 reintents assolit aquest torn; \
+                         els errors de sintaxi anteriors no s'han pogut reverificar. NO declaris \
+                         èxit sense corregir-los al codi.\n",
+                    );
+                }
             }
             report.push_str(&runtools::execute(&app, computer, ai, &runs, prompt).await);
             report.push('\n');
@@ -615,7 +754,57 @@ async fn chat_with_tools(
             );
         }
     }
+    // Tanca el torn de snapshot. La resposta final pot portar codi que el
+    // frontend materialitzarà DESPRÉS (``` o @file:/@edit:/@delete:/@dir:):
+    // el baseline es conserva per poder desfer eixe pas. Si només era prosa
+    // i el disc no ha canviat, el snapshot es descarta.
+    if let Some(root) = snap_root {
+        let may_write = has_file_blocks(&text)
+            || has_code_fence(&text)
+            || text.contains("@edit:")
+            || text.contains("@delete:")
+            || text.contains("@esborra:")
+            || text.contains("@dir:");
+        // Rutes que el frontend materialitzarà DESPRÉS d'aquest torn (blocs
+        // @file:/@edit: de la resposta final): es registren al snapshot perquè
+        // «Desfés el pas» puga esborrar-les (i només eixes, no les de l'usuari).
+        let mut final_written: Vec<String> = runtools::extract_file_blocks(&text)
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect();
+        for b in runtools::extract_edit_blocks(&text) {
+            final_written.push(b.path);
+        }
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            crate::agent::snapshot::end_turn(&root, may_write, &final_written);
+        })
+        .await;
+    }
     Ok(text)
+}
+
+/// Verificació de sintaxi BARATA per a la UI i els bucles d'IA: `php -l`
+/// (.php) i `node --check` (.js/.mjs/.cjs) sobre rutes RELATIVES dins el
+/// projecte, amb contenció (rutes fora del projecte es rebutgen). Altres
+/// extensions → `ok:true, output:""`. Si l'eina no és instal·lada, s'omet
+/// amb nota. Contracte: `invoke("lint_paths", { projectPath, paths })` →
+/// `Vec<{ path, ok, output }>`.
+#[command]
+pub async fn lint_paths(
+    project_path: String,
+    paths: Vec<String>,
+) -> Result<Vec<crate::agent::runtools::LintResult>, String> {
+    let root = std::path::PathBuf::from(project_path.trim());
+    if !root.is_dir() {
+        return Err(format!("la carpeta del projecte no existeix: {}", root.display()));
+    }
+    // Els processos de lint són bloquejants: en un fil a part per no aturar
+    // el runtime async de la UI.
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::agent::runtools::lint_paths_blocking(&root, &paths)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// La pregunta «real» de l'usuari dins del prompt enviat. El frontend la
@@ -705,6 +894,24 @@ pub async fn ai_chat_plain(
     ai.chat_opts(&prompt, system.as_deref(), &opts)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Mode del motor de la IA («auto», «local», «cloud»). La UI desa la
+/// preferència i la sincronitza ací a l'arrencada i en cada canvi.
+#[command]
+pub async fn ai_engine_mode_get(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state.ai_manager.engine_mode().await)
+}
+
+/// Fixa el mode del motor. Valors desconeguts cauen a «auto» (mai trenca
+/// el funcionament local). Retorna el mode normalitzat aplicat.
+#[command]
+pub async fn ai_engine_mode_set(
+    state: State<'_, AppState>,
+    mode: String,
+) -> Result<String, String> {
+    state.ai_manager.set_engine_mode(&mode).await;
+    Ok(state.ai_manager.engine_mode().await)
 }
 
 /// Envia un prompt i va emetent fragments amb l'event «ai://chunk» mentre el
@@ -862,6 +1069,55 @@ pub async fn ollama_unload_models(
     ai.unload_models(model.as_deref())
         .await
         .map_err(|e| e.to_string())
+}
+
+/// ALLIBERA la memòria que NoOrbit ja NO necessita per funcionar.
+///
+/// Fa tres coses d'un sol cop:
+/// 1. Descarrega els models que Ollama té a la RAM (`keep_alive: 0`).
+/// 2. Atura els motors locals (llama.cpp) que tenen el model carregat: cada
+///    `llama-server` es menja gigabytes.
+/// 3. Ho mesura (memòria usada abans i després) perquè l'usuari vegi si
+///    realment s'ha recuperat alguna cosa.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RamFreed {
+    /// Models d'Ollama descarregats de la RAM.
+    pub models: usize,
+    /// Motors locals (llama.cpp) aturats.
+    pub engines: usize,
+    /// Memòria usada abans (bytes).
+    pub used_before: u64,
+    /// Memòria usada després (bytes).
+    pub used_after: u64,
+    /// Bytes recuperats.
+    pub freed: u64,
+}
+
+#[command]
+pub async fn ai_free_ram(state: State<'_, AppState>) -> Result<RamFreed, String> {
+    let used_before = crate::commands::system::system_memory_status()
+        .await
+        .map(|m| m.used)
+        .unwrap_or(0);
+    // 1) Models d'Ollama a la RAM.
+    let models = state.ai_manager.unload_models(None).await.unwrap_or(0);
+    // 2) Motors locals: cada `llama-server` té el model sencer a memòria.
+    let engines = crate::ai::llamacpp::servers().len();
+    crate::ai::llamacpp::stop_all();
+    // 3) Mesura: el SO retorna la memòria a poc a poc, donem-li un moment.
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    let used_after = crate::commands::system::system_memory_status()
+        .await
+        .map(|m| m.used)
+        .unwrap_or(used_before);
+    Ok(RamFreed {
+        models,
+        engines,
+        used_before,
+        used_after,
+        freed: used_before.saturating_sub(used_after),
+    })
 }
 
 /// Quant de temps Ollama manté els models a la memòria (buit = «1m» recomanat).
@@ -1731,6 +1987,41 @@ pub async fn dsh_web_running() -> Result<bool, String> {
     .is_ok())
 }
 
+// ── GitHub Copilot (motor ACP): detecció, instal·lació i permisos ─────────
+
+/// Diu si el CLI de GitHub Copilot està disponible: la instal·lació del
+/// sistema (npm global, Homebrew…) o la LOCAL que NoOrbit gestiona dins de
+/// les seves dades (amb el seu propi Node.js, si al sistema no n'hi ha).
+#[command]
+pub async fn copilot_installed() -> Result<bool, String> {
+    Ok(crate::external_orchestrator::copilot::copilot_installed())
+}
+
+/// Versió del CLI de Copilot instal·lat (si n'hi ha).
+#[command]
+pub async fn copilot_version() -> Result<Option<String>, String> {
+    Ok(crate::external_orchestrator::copilot::version())
+}
+
+/// Instal·la el CLI de GitHub Copilot automaticament: baixa el Node.js LTS
+/// oficial (si no n'hi ha cap) i el paquet @github/copilot, tot DINS de les
+/// dades de NoOrbit (o de NoOrbitData/ en mode portàtil/USB). No demanà
+/// administració, no modifica el sistema i es pot emportar en un USB.
+#[command]
+pub async fn install_copilot(app: AppHandle) -> Result<String, String> {
+    crate::external_orchestrator::copilot::install(app)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Contesta una petició de permís de l'agent ACP (el CLI de Copilot demana
+/// permís abans d'usar una eina o d'escriure un fitxer). `option_id` és
+/// l'opció triada; si no n'hi ha, l'operació es rebutja.
+#[command]
+pub fn acp_permission_reply(id: String, option_id: Option<String>) -> Result<bool, String> {
+    Ok(crate::acp::answer_permission(&id, option_id))
+}
+
 /// Diu si ComfyUI és al sistema (per oferir instal·lar-lo o arrencar-lo).
 #[command]
 pub async fn comfyui_installed() -> Result<bool, String> {
@@ -2533,6 +2824,189 @@ mod nudge_tests {
         assert!(!expects_execution("explica'm què és un nan de jardí", ""));
         // Una xerrada tampoc.
         assert!(!expects_execution("bon dia, com va tot?", ""));
+    }
+}
+
+/// Tests GUIONITZATS del bucle `chat_with_tools` amb proveïdor SIMULAT.
+///
+/// Per què no s'injecta un proveïdor fals al comandament sencer: la costura
+/// seria massa invasiva — `chat_with_tools` exigeix un `AppHandle` real de
+/// Tauri (el crate no activa la feature "test", no hi ha `mock_app`), un
+/// `AiManager`, un `ComputerController`, un `LearningStore` i l'estat GLOBAL
+/// del workspace; simular tot això canviaria el comportament real o exigiria
+/// refactoritzar el comandament. En lloc d'això, es cobreixen els DOS nuclis
+/// de decisió del bucle amb el MATEIX codi que usa el comandament:
+///   1. `next_nudge` — la cadena de recordatoris (extreta pura, sense canvis
+///      d'ordre ni de condicions respecte del bucle original).
+///   2. El cicle escriure→verificar→realimentar (`write_announced_files_at`
+///      + `lint_paths_blocking` + `verification_report`) amb `php -l` REAL.
+/// El conductor de sota reprodueix l'estructura del bucle (rondes, historial,
+/// nudges, reintents de verificació) sense Tauri.
+#[cfg(test)]
+mod bucle_guionitzat {
+    use super::*;
+    use crate::agent::runtools;
+
+    /// Prompt que demana codi (activa `asks_for_code`): el cas real del nucli
+    /// xat→codi. «tema» sol no és objecte de `asks_for_code`; amb «codi» el
+    /// recordatori CODE_NUDGE és el que dispara el bucle real.
+    const PROMPT: &str = "crea el codi d'un tema de wordpress anomenat Orbit";
+
+    /// Torn 1: prosa sense codi → ha de rebre el CODE_NUDGE.
+    const TORN1_PROSA: &str =
+        "D'acord: crearé el tema de WordPress amb els fitxers necessaris i després els revisaré.";
+    /// Torn 2: @file: amb PHP INVÀLID + RUN| → verificació amb error real.
+    const TORN2_PHP_INVALID: &str = "@file: wp-content/themes/orbit/functions.php\n\
+        ```php\n\
+        <?php\n\
+        function orbit_setup( {\n\
+        ```\n\
+        RUN|php -l wp-content/themes/orbit/functions.php";
+    /// Torn 3: correcció → lint verd.
+    const TORN3_CORREGIT: &str = "@file: wp-content/themes/orbit/functions.php\n\
+        ```php\n\
+        <?php\n\
+        function orbit_setup() {\n\
+            add_theme_support('title-tag');\n\
+        }\n\
+        ```\n\
+        RUN|php -l wp-content/themes/orbit/functions.php";
+
+    /// Guion complet: prosa → nudge; PHP invàlid → error realimentat;
+    /// correcció → verificació verda. Cap èxit sense verificació real.
+    #[test]
+    fn guio_prosa_nudge_php_invalid_correccio_verd() {
+        if runtools::php_binary().is_none() {
+            eprintln!("php no disponible en aquesta màquina: test omès");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let guio = [TORN1_PROSA, TORN2_PHP_INVALID, TORN3_CORREGIT];
+        let mut c = NudgeCounters::default();
+        let mut verify_retries = 0usize;
+        let mut history: Vec<HistoryTurn> = Vec::new();
+        let mut feedbacks: Vec<String> = Vec::new();
+        for (round, text) in guio.iter().enumerate() {
+            let runs = runtools::parse(text);
+            if runs.is_empty() {
+                // Sense directrius: cadena de nudges (com el bucle real).
+                if let Some(nudge) = next_nudge(PROMPT, text, round, &mut c) {
+                    history.push(HistoryTurn { role: "assistant".into(), content: text.to_string() });
+                    feedbacks.push(nudge);
+                    continue;
+                }
+                break;
+            }
+            // Amb RUN|: PRIMER fitxers, DESPRÉS verificació amb eines reals.
+            let pre = runtools::write_announced_files_at(root, text);
+            assert_eq!(pre, vec!["wp-content/themes/orbit/functions.php".to_string()]);
+            let lint = runtools::lint_paths_blocking(root, &pre);
+            if lint.iter().any(|r| !r.ok) {
+                verify_retries += 1;
+            }
+            if let Some(msg) = runtools::verification_report(&lint, verify_retries) {
+                feedbacks.push(msg);
+            }
+            history.push(HistoryTurn { role: "assistant".into(), content: text.to_string() });
+        }
+        assert_eq!(history.len(), 3, "els tres torns del guion han d'entrar a l'historial");
+        assert_eq!(feedbacks.len(), 3, "nudge + informe fallit + informe verd");
+        // Torn 1: el recordatori imperatiu de codi, no una altra cosa.
+        assert_eq!(feedbacks[0], CODE_NUDGE);
+        assert_eq!(c.code, 1);
+        // Torn 2: l'error REAL de php -l es realimenta, amb l'ordre de corregir.
+        assert!(feedbacks[1].contains("NO donis la feina per acabada"), "informe: {}", feedbacks[1]);
+        assert!(feedbacks[1].contains("functions.php"), "informe: {}", feedbacks[1]);
+        assert!(feedbacks[1].to_lowercase().contains("error"), "informe: {}", feedbacks[1]);
+        assert_eq!(verify_retries, 1);
+        // Torn 3: verificació verda amb eina real (mai èxit mut).
+        assert!(feedbacks[2].contains("cap error de sintaxi"), "informe: {}", feedbacks[2]);
+        // El fitxer final al disc és el CORREGIT.
+        let final_code = std::fs::read_to_string(root.join("wp-content/themes/orbit/functions.php")).unwrap();
+        assert!(final_code.contains("add_theme_support"));
+        assert!(!final_code.contains("orbit_setup( {"));
+    }
+
+    /// Els nudges són REPETIBLES però amb SOSTRE: màxim MAX_NUDGE_USES (2)
+    /// usos de cada tipus per torn; després la cadena passa al següent o acaba.
+    #[test]
+    fn nudges_repetibles_com_a_maxim_dos_usos() {
+        assert_eq!(MAX_NUDGE_USES, 2);
+        let mut c = NudgeCounters::default();
+        let prosa = "El tema tindria les parts habituals i es podria activar des del panell.";
+        let n1 = next_nudge(PROMPT, prosa, 0, &mut c);
+        let n2 = next_nudge(PROMPT, prosa, 1, &mut c);
+        let n3 = next_nudge(PROMPT, prosa, 2, &mut c);
+        assert_eq!(n1.as_deref(), Some(CODE_NUDGE));
+        assert_eq!(n2.as_deref(), Some(CODE_NUDGE), "el nudge s'ha de poder repetir");
+        assert!(n3.is_none(), "al tercer cop ja no queden usos: el torn pot acabar");
+        assert_eq!(c.code, MAX_NUDGE_USES);
+        // Un altre tipus de nudge té el seu PROPI comptador: «fes els tests»
+        // gasta TESTS_NUDGE (2 usos) i després cau al CODE_NUDGE.
+        let mut c2 = NudgeCounters::default();
+        let p_tests = "fes els tests del projecte";
+        assert_eq!(next_nudge(p_tests, prosa, 0, &mut c2).as_deref(), Some(TESTS_NUDGE));
+        assert_eq!(next_nudge(p_tests, prosa, 1, &mut c2).as_deref(), Some(TESTS_NUDGE));
+        assert_eq!(next_nudge(p_tests, prosa, 2, &mut c2).as_deref(), Some(CODE_NUDGE));
+        assert_eq!(c2.tests, MAX_NUDGE_USES);
+        assert_eq!(c2.code, 1);
+    }
+
+    /// El límit de rondes del bucle és 10 i TALLA els nudges: a la ronda
+    /// MAX_ROUNDS el torn acaba encara que la resposta siga prosa buida.
+    #[test]
+    fn max_rounds_deu_i_talla_els_nudges() {
+        assert_eq!(MAX_ROUNDS, 10);
+        let mut c = NudgeCounters::default();
+        let prosa = "només prosa sense cap resultat";
+        assert!(next_nudge(PROMPT, prosa, MAX_ROUNDS, &mut c).is_none());
+        assert!(next_nudge(PROMPT, prosa, MAX_ROUNDS - 1, &mut c).is_some());
+        // Conductor: un model que MAI deixa de parlar s'atura pel sostre de
+        // nudges molt abans de MAX_ROUNDS (2 emissions), mai bucle infinit.
+        let mut c2 = NudgeCounters::default();
+        let mut emissions = 0usize;
+        for round in 0..=MAX_ROUNDS {
+            if next_nudge(PROMPT, prosa, round, &mut c2).is_some() {
+                emissions += 1;
+            } else {
+                break;
+            }
+        }
+        assert_eq!(emissions, MAX_NUDGE_USES);
+    }
+
+    /// L'ORDRE de la cadena es preserva: execució > tests > fitxers buits >
+    /// projecte sencer > docs > codi > imatge.
+    #[test]
+    fn l_ordre_de_la_cadena_es_preserva() {
+        let mut c = NudgeCounters::default();
+        // «compila» demana execució: EXEC_NUDGE va primer que CODE_NUDGE.
+        assert_eq!(
+            next_nudge("compila el projecte", "ara ho faré", 0, &mut c).as_deref(),
+            Some(EXEC_NUDGE)
+        );
+        // Prosa davant «fes els tests»: TESTS_NUDGE abans que CODE_NUDGE.
+        let mut c2 = NudgeCounters::default();
+        assert_eq!(
+            next_nudge("fes els tests del projecte", "els tests es poden escriure amb pytest", 0, &mut c2).as_deref(),
+            Some(TESTS_NUDGE)
+        );
+        // Fitxers anunciats BUITS: FILE_NUDGE amb la llista de rutes.
+        let mut c3 = NudgeCounters::default();
+        let buits = "@file: src/app.py\n\n@file: src/util.py\n";
+        let n = next_nudge("crea el codi de l'app", buits, 0, &mut c3).unwrap();
+        assert!(n.starts_with(FILE_NUDGE), "nudge: {n}");
+        assert!(n.contains("src/app.py") && n.contains("src/util.py"), "nudge: {n}");
+        // Només documentació (.md) demanant codi: DOCS_ONLY_NUDGE. El README
+        // ha de tindre contingut real (≥40 caràcters): si quedara BUIT, el
+        // FILE_NUDGE aniria primer — és l'ordre del bucle de veritat.
+        let mut c4 = NudgeCounters::default();
+        let readme = "@file: README.md\n# Pla del projecte\n\nAquest projecte conté una botiga en línia feta amb WordPress i WooCommerce.\n";
+        assert_eq!(
+            next_nudge("fes el codi del projecte", readme, 0, &mut c4).as_deref(),
+            Some(DOCS_ONLY_NUDGE)
+        );
     }
 }
 

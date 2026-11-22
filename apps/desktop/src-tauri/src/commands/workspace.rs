@@ -13,13 +13,14 @@ static WORKSPACE_ROOT: Lazy<RwLock<Option<PathBuf>>> = Lazy::new(|| RwLock::new(
 const DEFAULT_GITIGNORE: &str = "# SO i editors\n.DS_Store\nThumbs.db\n.idea/\n.vscode/\n\n# Dependències i cachés\nnode_modules/\n__pycache__/\n*.pyc\n.venv/\nvenv/\n\n# Motors de joc\n.godot/\n*.import\nLibrary/\nTemp/\nLogs/\nSaved/\nIntermediate/\nBuilds/\n\n# Sortides\ndist/build/\nbuild/\nexport/\n";
 
 /// Inicialitza un repo git NET amb un primer commit. Es fa servir perquè la
-/// Autonomous Jam NECESSITA git: el checkpointer torna enrere amb
-/// `reset --hard` i desa cada tasca com un commit. Un projecte nou sense repo
-/// no hi podia participar (`el projecte ha de ser un repositori git`).
+/// Autonomous Jam VOL git per desfer feina (el checkpointer torna enrere amb
+/// `reset --hard` i desa cada tasca com un commit), però JA NO és un
+/// requisit de l'usuari: «Fitxer ▸ Nou projecte» el crida en crear-ne un, i
+/// la Jam l'aplica sola quan obre un projecte sense repo.
 ///
 /// MAI toca la configuració global de l'usuari: les dades de l'autor es passen
 /// amb `-c` només per a aquest commit.
-async fn init_git_repo(dir: &Path) -> Result<(), String> {
+pub(crate) async fn init_git_repo(dir: &Path) -> Result<(), String> {
     // Git < 2.28 no coneix `--initial-branch`: s'intenta i, si falla, es fa un
     // `git init` pla (la branca per defecta és la que tingui l'usuari).
     if run_git(dir, vec!["init", "-q", "--initial-branch=main"])
@@ -27,6 +28,13 @@ async fn init_git_repo(dir: &Path) -> Result<(), String> {
         .is_err()
     {
         run_git(dir, vec!["init", "-q"]).await?;
+    }
+    // Sense `.gitignore` el `git add -A` de la Jam comitaria `node_modules`,
+    // `.godot/` o `__pycache__/`. Només si no n'hi ha (els projectes nous en
+    // porten un d'escriptura pròpia).
+    let gi = dir.join(".gitignore");
+    if !gi.exists() {
+        let _ = std::fs::write(&gi, DEFAULT_GITIGNORE);
     }
     run_git(dir, vec!["add", "-A"]).await?;
     run_git(
@@ -44,6 +52,25 @@ async fn init_git_repo(dir: &Path) -> Result<(), String> {
         ],
     )
     .await
+}
+
+/// La carpeta és JA un repo git aprofitable per a la Jam —amb un commit
+/// base—? El control que fa `GitCheckpointer::new` només mira que el repo
+/// EXISTEIXI, però el bucle de la Jam arrenca llegint `HEAD`: un repo creat
+/// per `git init` sense cap commit (passa amb projectes d'alguns motors) no
+/// en té i llavors `run_inner` se salta totes les tasques en silenci — la
+/// Jam sembla viva però no escriu cap fitxer.
+pub(crate) fn te_base_commit(dir: &Path) -> bool {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["rev-parse", "HEAD"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 /// Executa git a `dir` sense bloquejar el runtime (aquests comandos van dins
@@ -89,8 +116,20 @@ pub fn resolve_in_root(path: &str) -> PathBuf {
 #[command]
 pub async fn open_workspace(app: AppHandle, path: String) -> Result<String, String> {
     let p = PathBuf::from(&path);
-    if !p.is_dir() {
-        return Err(format!("La carpeta {} no existeix", path));
+    // `is_dir()` tornava `false` TANT per «no existeix» COM per accés denegat
+    // (p. ex. el permís TCC de l'Escriptori pendent després d'una re-firma):
+    // el frontend no podia distingir una fallada definitiva d'una transitòria
+    // i esborrava el lastRoot per sempre. NotFound manté el missatge històric
+    // (contracte intacte); la resta d'errors d'accés en tenen un de diferent.
+    match std::fs::metadata(&p) {
+        Ok(m) if m.is_dir() => {}
+        Ok(_) => return Err(format!("La carpeta {} no existeix", path)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(format!("La carpeta {} no existeix", path));
+        }
+        Err(e) => {
+            return Err(format!("No s'ha pogut accedir a la carpeta {}: {}", path, e));
+        }
     }
     // unwrap_or_else: si el lock està ENVERINAT (un panic en un altre fil), no
     // cal enfonsar tota l'app: es recupera el valor i es continua.

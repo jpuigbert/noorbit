@@ -1,11 +1,22 @@
 import Editor, { DiffEditor } from "@monaco-editor/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { invoke } from "@tauri-apps/api/core";
 import { readFile } from "@tauri-apps/plugin-fs";
-import { X, ExternalLink, FolderOpen, ImageOff, Film, Check, Undo2, Sparkles } from "lucide-react";
+import {
+  X,
+  ExternalLink,
+  FolderOpen,
+  ImageOff,
+  Film,
+  Check,
+  Undo2,
+  Sparkles,
+  Columns2,
+  ArrowRightToLine,
+} from "lucide-react";
 import { useT } from "../../i18n";
-import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { useWorkspaceStore, type OpenFile } from "../../stores/workspaceStore";
 import {
   AUTO_ACCEPT_MS,
   dropMarkOnManualSave,
@@ -15,7 +26,13 @@ import {
   type EditMark,
 } from "../../stores/editReviewStore";
 import { useUIStore } from "../../stores/uiStore";
-import { bindEditor, monacoThemeFor } from "../../editor/editorApi";
+import { useEditorStatusStore } from "../../stores/editorStatusStore";
+import {
+  bindEditor,
+  monacoThemeFor,
+  setFocusedEditorGroup,
+  type EditorGroup as EditorGroupKind,
+} from "../../editor/editorApi";
 import { validateCurrentFile } from "../../editor/diagnostics";
 import { registerQuickFixes, aiQuickFix } from "../../editor/quickFixes";
 import {
@@ -24,10 +41,17 @@ import {
   toggleAutocomplete,
 } from "../../editor/inlineComplete";
 import { aiReplaceSelection } from "../../editor/aiSelection";
+import {
+  registerLspProviders,
+  scheduleLspDiagnostics,
+  setLspProjectRoot,
+} from "../../editor/lspBridge";
 import { useMonacoReady } from "../../editor/monReady";
 import { ArtEmpty } from "../Illustrations";
 import { getEditor } from "../../editor/editorApi";
 import AiSelectionModal from "./AiSelectionModal";
+import ReferencesOverlay from "./ReferencesOverlay";
+import Breadcrumbs from "./Breadcrumbs";
 
 const EXT_LANG: Record<string, string> = {
   ts: "typescript",
@@ -41,6 +65,8 @@ const EXT_LANG: Record<string, string> = {
   html: "html",
   md: "markdown",
   toml: "ini",
+  ini: "ini",
+  cfg: "ini",
   yml: "yaml",
   yaml: "yaml",
   c: "c",
@@ -48,6 +74,13 @@ const EXT_LANG: Record<string, string> = {
   h: "c",
   glsl: "glsl",
   usf: "glsl",
+  // PHP de primera classe: basic-languages del paquet local + lint real.
+  php: "php",
+  // GDScript (Godot): tokenizer monarch propi a monacoSetup.
+  gd: "gdscript",
+  xml: "xml",
+  sh: "shell",
+  sql: "sql",
 };
 
 function langFor(name: string): string {
@@ -115,7 +148,8 @@ function ReviewBar({ mark }: { mark: EditMark }) {
 
 /** Previsualització d'una imatge: la llegim via «image_preview_base64» (el
     mateix que fa el xat) i la centrem. Si falla, mostrem el nom + botons. */
-function ImageViewer({ path, name }: { path: string; name: string }) {
+export function ImageViewer({ path, name }: { path: string; name: string }) {
+  const { t } = useT();
   const [url, setUrl] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
@@ -133,7 +167,16 @@ function ImageViewer({ path, name }: { path: string; name: string }) {
   return (
     <div className="editor-content image-viewer">
       {url ? (
-        <img src={url} alt={name} />
+        <img
+          src={url}
+          alt={name}
+          onError={() => {
+            // Data-URL indecodificable (p. ex. text pla dins d'un .png):
+            // degradem al placeholder amb el nom, com els errors d'invoke.
+            setUrl(null);
+            setErr(`${name} · ${t("editor.imageInvalid")}`);
+          }}
+        />
       ) : (
         <div className="image-viewer-msg">
           <ImageOff size={18} /> {err ?? "Carregant imatge…"}
@@ -169,9 +212,7 @@ function videoMime(path: string): string {
 
 /** Reproductor de vídeo dins de l'editor: llegeix els bytes amb el plugin fs
     (permís de lectura sobre tot el disc) i crea un Blob URL reproduïble. */
-function VideoViewer({ path, name }: { path: string; name: string }) {
-  const { t } = useT();
-  const closeFile = useWorkspaceStore((s) => s.closeFile);
+function VideoViewer({ path }: { path: string }) {
   const [url, setUrl] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
@@ -197,165 +238,135 @@ function VideoViewer({ path, name }: { path: string; name: string }) {
   }, [path]);
 
   return (
-    <div className="editor-pane">
-      <div className="editor-tabs">
-        <div className="editor-tab">{name}</div>
-        <div style={{ flex: 1 }} />
-        <button
-          className="btn sm"
-          title={t("common.openExternHint")}
-          onClick={() => void invoke("open_externally", { path }).catch(() => undefined)}
-        >
-          <ExternalLink size={12} /> {t("common.openExtern")}
-        </button>
-        <button
-          className="btn sm"
-          title={t("common.revealHint")}
-          onClick={() => void invoke("reveal_in_finder", { path }).catch(() => undefined)}
-        >
-          <FolderOpen size={12} /> {t("common.reveal")}
-        </button>
-        <button className="icon-btn" style={{ width: 16, height: 16 }} onClick={() => closeFile()}>
-          <X size={12} />
-        </button>
-      </div>
-      <div className="editor-content image-viewer">
-        {url ? (
-          <video
-            src={url}
-            controls
-            style={{ maxWidth: "100%", maxHeight: "100%" }}
-          />
-        ) : (
-          <div className="image-viewer-msg">
-            <Film size={18} /> {err ?? "Carregant vídeo…"}
-          </div>
-        )}
-      </div>
+    <div className="editor-content image-viewer">
+      {url ? (
+        <video src={url} controls style={{ maxWidth: "100%", maxHeight: "100%" }} />
+      ) : (
+        <div className="image-viewer-msg">
+          <Film size={18} /> {err ?? "Carregant vídeo…"}
+        </div>
+      )}
     </div>
   );
 }
 
-export default function EditorPane() {
+/// Capçalera auxiliar d'un grup: per a imatge/vídeo (obrir externament,
+/// mostrar al Finder) i per al grup dividit (nom + tancar la divisió).
+function GroupBar({ file, isSplit }: { file: OpenFile; isSplit: boolean }) {
   const { t } = useT();
-  const { openFile, updateContent, saveFile, closeFile } = useWorkspaceStore(
-    useShallow((st) => ({
-      openFile: st.openFile,
-      updateContent: st.updateContent,
-      saveFile: st.saveFile,
-      closeFile: st.closeFile,
-    }))
-  );
-  const theme = useUIStore((s) => s.theme);
-  // Autocomplete IA ( sugeriments durant l'escriptura): flag persistent.
-  const [acOn, setAcOn] = useState(autocompleteEnabled());
-  // Diàleg «Edita la selecció amb la IA».
-  const [aiSel, setAiSel] = useState(false);
-  const [aiSelEmpty, setAiSelEmpty] = useState(false);
-  const [aiSelBusy, setAiSelBusy] = useState(false);
-  const [aiSelErr, setAiSelErr] = useState<string | null>(null);
-  const openAiSel = () => {
-    const ed = getEditor();
-    const sel = ed?.getSelection?.();
-    setAiSelEmpty(!sel || sel.isEmpty());
-    setAiSelErr(null);
-    setAiSel(true);
-  };
-  /// Aplica la instrucció: demana el fragment nou a la IA i el posa al lloc
-  /// de la selecció entrant pel flux de revisió (diff + Accepta/Rebutja).
-  const applyAiSel = async (instruction: string) => {
-    if (!openFile) return;
-    const ed = getEditor();
-    const model = ed?.getModel?.();
-    const sel = ed?.getSelection?.();
-    if (!ed || !model || !sel || sel.isEmpty()) return;
-    const lang = langFor(openFile.name);
-    setAiSelBusy(true);
-    setAiSelErr(null);
-    const replaced = await aiReplaceSelection(openFile.name, lang, model.getValueInRange(sel), instruction);
-    if (!replaced) {
-      setAiSelBusy(false);
-      setAiSelErr(t("aiEdit.error"));
-      return;
-    }
-    const startOffset = model.getOffsetAt({ lineNumber: sel.startLineNumber, column: sel.startColumn });
-    const endOffset = model.getOffsetAt({ lineNumber: sel.endLineNumber, column: sel.endColumn });
-    const original = openFile.content;
-    const newFull =
-      original.slice(0, startOffset) + replaced + original.slice(endOffset);
-    setAiSel(false);
-    setAiSelBusy(false);
-    // Pel flux de revisió: aprofegim el vell i armem el Verd/Verment.
-    updateContent(newFull);
-    void saveFile(openFile.path, newFull).catch(() => undefined);
-    noteFileEdited(openFile.path, newFull, original, true);
-  };
-  // Edició de la IA pendent de revisar en aquest fitxer (verd = nou /
-  // roig = vell). Mentre n'hi ha, l'editor normal es manté muntat però
-  // ocult (així no es perd la instància que usa l'LSP i les diagnotificacions).
-  const review = useEditReviewStore((s) => s.marks.find((m) => m.path === openFile?.path));
-  const reviewing = !!review && !review.streaming;
-
-  // Monaco es carrega ÀJUS (primera obertura d'un fitxer de codi): fins que
-  // el seu chunk arribi, fem el marc de l'editor amb un placeholder de pes
-  // zero — l'arrencada de l'app no el toca mai.
-  const monReady = useMonacoReady();
-
-  if (!openFile) {
-    return (
-      <div className="editor-pane empty-art">
-        <ArtEmpty />
-        <div style={{ fontSize: 14, marginBottom: 6, color: "var(--text-0)" }}>{t("editor.noFile")}</div>
-        <span className="empty-hint">{t("editor.noFileHint")}</span>
-      </div>
-    );
-  }
-
-  // Fitxer imatge: previsualització en lloc de codi. Monaco no pinten binari.
-  if (openFile.imagePath) {    return (
-      <div className="editor-pane">
-        <div className="editor-tabs">
-          <div className="editor-tab">{openFile.name}</div>
-          <div style={{ flex: 1 }} />
+  const closeFile = useWorkspaceStore((s) => s.closeFile);
+  const toggleSplit = useWorkspaceStore((s) => s.toggleSplit);
+  const media = file.imagePath ?? file.videoPath;
+  return (
+    <div className="editor-group-head">
+      {file.dirty && <span className="dirty-dot" />}
+      <span className="editor-group-name" title={file.path}>
+        {file.name}
+      </span>
+      <div style={{ flex: 1 }} />
+      {media && (
+        <>
           <button
             className="btn sm"
             title={t("common.openExternHint")}
-            onClick={() => void invoke("open_externally", { path: openFile.imagePath }).catch(() => undefined)}
+            onClick={() => void invoke("open_externally", { path: media }).catch(() => undefined)}
           >
             <ExternalLink size={12} /> {t("common.openExtern")}
           </button>
           <button
             className="btn sm"
             title={t("common.revealHint")}
-            onClick={() => void invoke("reveal_in_finder", { path: openFile.imagePath }).catch(() => undefined)}
+            onClick={() => void invoke("reveal_in_finder", { path: media }).catch(() => undefined)}
           >
             <FolderOpen size={12} /> {t("common.reveal")}
           </button>
-          <button className="icon-btn" style={{ width: 16, height: 16 }} onClick={() => closeFile()}>
+        </>
+      )}
+      {isSplit ? (
+        <button
+          className="icon-btn"
+          style={{ width: 16, height: 16 }}
+          title={t("editor.splitClose")}
+          onClick={() => toggleSplit()}
+        >
+          <X size={12} />
+        </button>
+      ) : (
+        media && (
+          <button
+            className="icon-btn"
+            style={{ width: 16, height: 16 }}
+            title={t("editor.tabClose")}
+            onClick={() => closeFile(file.path)}
+          >
             <X size={12} />
           </button>
-        </div>
-        <ImageViewer path={openFile.imagePath} name={openFile.name} />
+        )
+      )}
+    </div>
+  );
+}
+
+/// Un grup d'editor (principal o dividit): mostra UN fitxer amb el seu
+/// Monaco, la revisió verd/roig de la IA o el visor d'imatge/vídeo.
+function EditorGroup({
+  group,
+  file,
+  onOpenAiSel,
+}: {
+  group: EditorGroupKind;
+  file: OpenFile;
+  onOpenAiSel: () => void;
+}) {
+  const { t } = useT();
+  const theme = useUIStore((s) => s.theme);
+  const updateContent = useWorkspaceStore((s) => s.updateContent);
+  const setFocusedGroup = useWorkspaceStore((s) => s.setFocusedGroup);
+  const root = useWorkspaceStore((s) => s.root);
+  const isSplit = group === "split";
+  // Edició de la IA pendent de revisar en aquest fitxer (verd = nou /
+  // roig = vell). Mentre n'hi ha, l'editor normal es manté muntat però
+  // ocult (així no es perd la instància que usa l'LSP i els diagnòstics).
+  const review = useEditReviewStore((s) => s.marks.find((m) => m.path === file.path));
+  const reviewing = !!review && !review.streaming;
+  const monReady = useMonacoReady();
+
+  // En desmuntar el grup (divisió tancada) alliberem el binding: les
+  // accions globals no han d'apuntar mai a un editor mort.
+  useEffect(() => {
+    return () => {
+      bindEditor(null, undefined, group);
+    };
+  }, [group]);
+
+  const focusHere = () => {
+    setFocusedEditorGroup(group);
+    setFocusedGroup(group);
+  };
+
+  if (file.imagePath) {
+    return (
+      <div className="editor-group" onFocusCapture={focusHere} onMouseDownCapture={focusHere}>
+        <GroupBar file={file} isSplit={isSplit} />
+        <ImageViewer path={file.imagePath} name={file.name} />
       </div>
     );
   }
-
-  // Fitxer vídeo: reproductor dins del programa.
-  if (openFile.videoPath) {
-    return <VideoViewer path={openFile.videoPath} name={openFile.name} />;
+  if (file.videoPath) {
+    return (
+      <div className="editor-group" onFocusCapture={focusHere} onMouseDownCapture={focusHere}>
+        <GroupBar file={file} isSplit={isSplit} />
+        <VideoViewer path={file.videoPath} />
+      </div>
+    );
   }
 
   // Fita de Monaco: mentre el chunk arriba (només la primera obertura),
   // mostrem l'esquelet de l'editor — instantani, sense cap megabyte.
   if (!monReady) {
     return (
-      <div className="editor-pane">
-        <div className="editor-tabs">
-          <div className="editor-tab">
-            {openFile.dirty && <span className="dirty-dot" />}
-            {openFile.name}
-          </div>
-        </div>
+      <div className="editor-group">
+        {isSplit && <GroupBar file={file} isSplit />}
         <div className="empty-hint" aria-busy="true" style={{ margin: "auto" }}>
           {t("editor.loading")}
         </div>
@@ -364,81 +375,64 @@ export default function EditorPane() {
   }
 
   return (
-    <div className="editor-pane">
-      <div className="editor-tabs">
-        <div className="editor-tab">
-          {openFile.dirty && <span className="dirty-dot" />}
-          {openFile.name}
-          <button
-            className="icon-btn"
-            style={{ width: 16, height: 16 }}
-            onClick={() => closeFile()}
-          >
-            <X size={12} />
-          </button>
-        </div>
-        <div style={{ flex: 1 }} />
-        {/* Autocomplete IA: un clic el posa/llevo (persisteix). */}
-        {/* Editar amb la IA la selecció actual mitjà botó (mateix flux de
-            revisió en diff verd/roig que la resta d'edicions). */}
-        <button className="btn sm" onClick={openAiSel} title={t("aiEdit.title")}>
-          <Sparkles size={12} /> {t("aiEdit.short")}
-        </button>
-        <button
-          className="btn sm"
-          title={acOn ? t("editor.acHintOff") : t("editor.acHintOn")}
-          onClick={() => void toggleAutocomplete().then(setAcOn)}
-        >
-          <Sparkles size={12} style={{ opacity: acOn ? 1 : 0.35 }} />
-          {acOn ? t("editor.acOn") : t("editor.acOff")}
-        </button>
-        <button
-          className="btn sm"
-          disabled={!openFile.dirty}
-          onClick={() => {
-            // El store ja avisa amb un toast si el desat falla; aquí només
-            // evitem el rebuig sense gestionar.
-            void saveFile(openFile.path, openFile.content).catch(() => undefined);
-          }}
-        >
-          {t("common.save")}
-        </button>
-      </div>
+    <div className="editor-group" onFocusCapture={focusHere} onMouseDownCapture={focusHere}>
+      {isSplit && <GroupBar file={file} isSplit />}
       {review && <ReviewBar mark={review} />}
       <div className="editor-content">
         <div className={"editor-host" + (reviewing ? " hidden" : "")}>
           <Editor
             theme={monacoThemeFor(theme)}
-            path={openFile.path}
-            defaultLanguage={langFor(openFile.name)}
-            language={langFor(openFile.name)}
-            value={openFile.content}
+            path={file.path}
+            defaultLanguage={langFor(file.name)}
+            language={langFor(file.name)}
+            value={file.content}
             onChange={(v) => {
               // Si l'usuari escriu sobre un canvi de la IA, la seua edició
               // guanya: la revisió es tanca (evita que un fragment arribat
               // tard li aixafi el que està escrivint).
-              dropMarkOnManualSave(openFile.path);
-              updateContent(v ?? "");
-              validateCurrentFile(openFile.name, v ?? "");
+              dropMarkOnManualSave(file.path);
+              updateContent(v ?? "", file.path);
+              validateCurrentFile(file.name, v ?? "", file.path);
+              // Diagnòstics LSP reals (debounce + cancel·lació propis).
+              scheduleLspDiagnostics(root, file.path);
             }}
             onMount={(ed, mon) => {
-              bindEditor(ed, mon);
-              validateCurrentFile(openFile.name, openFile.content);
+              bindEditor(ed, mon, group);
+              validateCurrentFile(file.name, file.content, file.path);
               // Autocomplete IA (suggeriments grisos en línia), amb debounce
-              // i timeout propis perquè no engargoli mai el teclejat.
+              // i timeout propis perquè no alenteixi mai el teclejat.
               registerInlineComplete(mon);
+              // LSP persistent (Fase 3c): completion/hover per a llenguatges
+              // amb servidor detectat + diagnòstics de projecte del tsserver.
+              registerLspProviders(mon);
+              scheduleLspDiagnostics(root, file.path);
+              // El focus del text mana: les dreceres globals (⌘W, IA…)
+              // actuen sobre ESTE grup mentre s'hi escriu.
+              ed.onDidFocusEditorText(() => {
+                focusHere();
+                // StatusBar d'IDE: el llenguatge i la posició segueixen
+                // l'editor que l'usuari està tocant.
+                useEditorStatusStore.getState().setLanguage(langFor(file.name));
+                const p = ed.getPosition();
+                if (p) useEditorStatusStore.getState().setPosition(p.lineNumber, p.column);
+              });
+              // Ln/Col en viu per a la barra d'estat (Fase 4).
+              ed.onDidChangeCursorPosition((e) => {
+                useEditorStatusStore.getState().setPosition(e.position.lineNumber, e.position.column);
+              });
               // ⇧⌘2: edició de la selecció amb la IA (mateix flux de revisió).
               ed.addCommand(mon.KeyMod.CtrlCmd | mon.KeyMod.Shift | mon.KeyCode.Digit2, () => {
-                openAiSel();
+                focusHere();
+                onOpenAiSel();
               });
-              // Correccions ràpides estil Eclipse: ⌘+1 / Ctrl+1 obri el menú de
-              // «quick fix» (les accions natives de Monaco + les nostres). Amb
-              // ⇧⌘+1 / ⇧Ctrl+1 la IA repara la línia del cursor.
+              // Correccions ràpides: ⌘. obri el menú de «quick fix» (les
+              // accions natives de Monaco + les nostres); ⇧⌘. la IA repara
+              // la línia del cursor. (⌘1..9 ara salten a la pestanya n.)
               registerQuickFixes();
-              ed.addCommand(mon.KeyMod.CtrlCmd | mon.KeyCode.Digit1, () => {
+              ed.addCommand(mon.KeyMod.CtrlCmd | mon.KeyCode.Period, () => {
                 ed.getAction("editor.action.quickFix")?.run();
               });
-              ed.addCommand(mon.KeyMod.CtrlCmd | mon.KeyMod.Shift | mon.KeyCode.Digit1, () => {
+              ed.addCommand(mon.KeyMod.CtrlCmd | mon.KeyMod.Shift | mon.KeyCode.Period, () => {
                 void aiQuickFix();
               });
             }}
@@ -459,7 +453,7 @@ export default function EditorPane() {
             <DiffEditor
               height="100%"
               theme={monacoThemeFor(theme)}
-              language={langFor(openFile.name)}
+              language={langFor(file.name)}
               original={review.original}
               modified={review.newContent}
               options={
@@ -479,6 +473,302 @@ export default function EditorPane() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/// Barra de PESTANYES (com VS Code): nom + punt de «sense desar», tancar
+/// amb creu o clic del mig, menú contextual (obri al costat / tanca…),
+/// scroll horitzontal quan no caben i les accions del fitxer amb focus.
+function TabBar({
+  onOpenAiSel,
+  onMenu,
+}: {
+  onOpenAiSel: () => void;
+  onMenu: (m: { x: number; y: number; path: string }) => void;
+}) {
+  const { t } = useT();
+  const { openFiles, activePath, splitPath, focusedGroup } = useWorkspaceStore(
+    useShallow((st) => ({
+      openFiles: st.openFiles,
+      activePath: st.activePath,
+      splitPath: st.splitPath,
+      focusedGroup: st.focusedGroup,
+    }))
+  );
+  const setActive = useWorkspaceStore((s) => s.setActive);
+  const closeFile = useWorkspaceStore((s) => s.closeFile);
+  const saveFile = useWorkspaceStore((s) => s.saveFile);
+  const toggleSplit = useWorkspaceStore((s) => s.toggleSplit);
+  const [acOn, setAcOn] = useState(autocompleteEnabled());
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const focusedFile =
+    focusedGroup === "split" && splitPath
+      ? openFiles.find((f) => f.path === splitPath)
+      : openFiles.find((f) => f.path === activePath);
+
+  // La pestanya activa sempre visible (scroll horitzontal automàtic).
+  useEffect(() => {
+    scrollRef.current
+      ?.querySelector(".editor-tab.active")
+      ?.scrollIntoView({ inline: "nearest", block: "nearest" });
+  }, [activePath]);
+
+  return (
+    <div className="editor-tabs">
+      <div className="editor-tabs-scroll" ref={scrollRef} role="tablist">
+        {openFiles.map((f) => (
+          <div
+            key={f.path}
+            role="tab"
+            aria-selected={f.path === activePath}
+            className={
+              "editor-tab" +
+              (f.path === activePath ? " active" : "") +
+              (f.path === splitPath ? " in-split" : "")
+            }
+            title={f.path + (f.dirty ? " — " + t("editor.dirty") : "")}
+            onClick={() => setActive(f.path)}
+            onAuxClick={(e) => {
+              // Clic del mig: tanca la pestanya (com VS Code).
+              if (e.button === 1) {
+                e.preventDefault();
+                closeFile(f.path);
+              }
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              onMenu({ x: e.clientX, y: e.clientY, path: f.path });
+            }}
+          >
+            {f.dirty && <span className="dirty-dot" />}
+            <span className="tab-name">{f.name}</span>
+            <button
+              className="tab-close"
+              title={t("editor.tabClose")}
+              onClick={(e) => {
+                e.stopPropagation();
+                closeFile(f.path);
+              }}
+            >
+              <X size={11} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="editor-tabs-actions">
+        <button
+          className="icon-btn"
+          title={t("editor.splitToggle")}
+          onClick={() => toggleSplit()}
+        >
+          <Columns2 size={13} style={{ opacity: splitPath ? 1 : 0.55 }} />
+        </button>
+        {/* Editar amb la IA la selecció actual (mateix flux de revisió en
+            diff verd/roig que la resta d'edicions). */}
+        <button className="btn sm" onClick={onOpenAiSel} title={t("aiEdit.title")}>
+          <Sparkles size={12} /> {t("aiEdit.short")}
+        </button>
+        {/* Autocomplete IA: un clic el posa/lleva (persisteix). */}
+        <button
+          className="btn sm"
+          title={acOn ? t("editor.acHintOff") : t("editor.acHintOn")}
+          onClick={() => void toggleAutocomplete().then(setAcOn)}
+        >
+          <Sparkles size={12} style={{ opacity: acOn ? 1 : 0.35 }} />
+          {acOn ? t("editor.acOn") : t("editor.acOff")}
+        </button>
+        <button
+          className="btn sm"
+          disabled={!focusedFile?.dirty}
+          onClick={() => {
+            if (!focusedFile) return;
+            if (focusedFile.path.startsWith("untitled:")) {
+              // Sense títol: cal el diàleg «Desa com a…» (sobre l'actiu).
+              setActive(focusedFile.path);
+              void useWorkspaceStore.getState().saveAs();
+              return;
+            }
+            // El store ja avisa amb un toast si el desat falla; aquí només
+            // evitem el rebuig sense gestionar.
+            void saveFile(focusedFile.path, focusedFile.content).catch(() => undefined);
+          }}
+        >
+          {t("common.save")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function EditorPane() {
+  const { t } = useT();
+  const { openFiles, activePath, splitPath, focusedGroup } = useWorkspaceStore(
+    useShallow((st) => ({
+      openFiles: st.openFiles,
+      activePath: st.activePath,
+      splitPath: st.splitPath,
+      focusedGroup: st.focusedGroup,
+    }))
+  );
+  const root = useWorkspaceStore((s) => s.root);
+  // El pont d'accions globals (menús, dreceres) segueix el grup amb focus.
+  useEffect(() => {
+    setFocusedEditorGroup(focusedGroup);
+  }, [focusedGroup]);
+  // Els providers LSP consulten l'arrel del projecte en cada petició.
+  useEffect(() => {
+    setLspProjectRoot(root);
+  }, [root]);
+
+  // Menú contextual d'una pestanya (obri al costat, tanca, tanca les altres…).
+  const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
+  // Diàleg «Edita la selecció amb la IA» (sobre l'editor amb focus).
+  const [aiSel, setAiSel] = useState(false);
+  const [aiSelEmpty, setAiSelEmpty] = useState(false);
+  const [aiSelBusy, setAiSelBusy] = useState(false);
+  const [aiSelErr, setAiSelErr] = useState<string | null>(null);
+
+  const mainFile = openFiles.find((f) => f.path === activePath);
+  const splitFile = splitPath ? openFiles.find((f) => f.path === splitPath) : undefined;
+  const focusedFile = focusedGroup === "split" && splitFile ? splitFile : mainFile;
+
+  // StatusBar d'IDE: el llenguatge mostrat és el del fitxer amb focus
+  // (també quan es canvia de pestanya sense tocar l'editor).
+  const focusedName = focusedFile?.name;
+  useEffect(() => {
+    const st = useEditorStatusStore.getState();
+    st.setLanguage(focusedName ? langFor(focusedName) : null);
+    const p = getEditor()?.getPosition?.();
+    if (p) st.setPosition(p.lineNumber, p.column);
+  }, [focusedName]);
+
+  const openAiSel = () => {
+    const ed = getEditor();
+    const sel = ed?.getSelection?.();
+    setAiSelEmpty(!sel || sel.isEmpty());
+    setAiSelErr(null);
+    setAiSel(true);
+  };
+
+  /// Aplica la instrucció: demana el fragment nou a la IA i el posa al lloc
+  /// de la selecció entrant pel flux de revisió (diff + Accepta/Rebutja).
+  const applyAiSel = async (instruction: string) => {
+    // Estat EN VIU: el diàleg pot haver-se obert sobre un grup i el focus
+    // canviar mentre s'escriu la instrucció.
+    const s = useWorkspaceStore.getState();
+    const file =
+      s.focusedGroup === "split" && s.splitPath
+        ? s.openFiles.find((f) => f.path === s.splitPath)
+        : s.openFile;
+    if (!file) return;
+    const ed = getEditor();
+    const model = ed?.getModel?.();
+    const sel = ed?.getSelection?.();
+    if (!ed || !model || !sel || sel.isEmpty()) return;
+    const lang = langFor(file.name);
+    setAiSelBusy(true);
+    setAiSelErr(null);
+    const replaced = await aiReplaceSelection(file.name, lang, model.getValueInRange(sel), instruction);
+    if (!replaced) {
+      setAiSelBusy(false);
+      setAiSelErr(t("aiEdit.error"));
+      return;
+    }
+    const startOffset = model.getOffsetAt({ lineNumber: sel.startLineNumber, column: sel.startColumn });
+    const endOffset = model.getOffsetAt({ lineNumber: sel.endLineNumber, column: sel.endColumn });
+    const original = file.content;
+    const newFull = original.slice(0, startOffset) + replaced + original.slice(endOffset);
+    setAiSel(false);
+    setAiSelBusy(false);
+    // Pel flux de revisió: capturem el vell i armem el verd/roig.
+    s.updateContent(newFull, file.path);
+    void s.saveFile(file.path, newFull).catch(() => undefined);
+    noteFileEdited(file.path, newFull, original, true);
+  };
+
+  if (!mainFile) {
+    return (
+      <div className="editor-pane empty-art">
+        <ArtEmpty />
+        <div style={{ fontSize: 14, marginBottom: 6, color: "var(--text-0)" }}>{t("editor.noFile")}</div>
+        <span className="empty-hint">{t("editor.noFileHint")}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="editor-pane">
+      <TabBar onOpenAiSel={openAiSel} onMenu={setMenu} />
+      {/* Ruta del fitxer actiu (carpeta > … > fitxer), segments clicables. */}
+      <Breadcrumbs />
+      <div className={"editor-groups" + (splitFile ? " split" : "")}>
+        <EditorGroup group="main" file={mainFile} onOpenAiSel={openAiSel} />
+        {splitFile && <EditorGroup group="split" file={splitFile} onOpenAiSel={openAiSel} />}
+      </div>
+
+      {/* Menú contextual de pestanya: «Obre al costat» i tancaments. */}
+      {menu && (
+        <div
+          className="ctx-overlay"
+          onClick={() => setMenu(null)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setMenu(null);
+          }}
+        >
+          <div
+            className="ctx-menu"
+            style={{
+              left: Math.min(menu.x, window.innerWidth - 240),
+              top: Math.min(menu.y, window.innerHeight - 170),
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="ctx-row"
+              onClick={() => {
+                void useWorkspaceStore.getState().openSide(menu.path);
+                setMenu(null);
+              }}
+            >
+              <ArrowRightToLine size={13} /> {t("editor.openSide")}
+            </button>
+            <div className="ctx-sep" />
+            <button
+              className="ctx-row"
+              onClick={() => {
+                useWorkspaceStore.getState().closeFile(menu.path);
+                setMenu(null);
+              }}
+            >
+              <X size={13} /> {t("editor.tabClose")}
+            </button>
+            <button
+              className="ctx-row"
+              onClick={() => {
+                useWorkspaceStore.getState().closeOthers(menu.path);
+                setMenu(null);
+              }}
+            >
+              <X size={13} /> {t("editor.tabCloseOthers")}
+            </button>
+            <button
+              className="ctx-row"
+              onClick={() => {
+                useWorkspaceStore.getState().closeAll();
+                setMenu(null);
+              }}
+            >
+              <X size={13} /> {t("editor.tabCloseAll")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Referències LSP (⌥F12): llista navegable amb salt al fitxer. */}
+      <ReferencesOverlay />
 
       {/* Diàleg «Edita la selecció amb la IA»: instrucció → fragment nou →
           revisió (diff + Accepta/Rebutja) igual que la IA del xat. */}
@@ -492,7 +782,7 @@ export default function EditorPane() {
               : "";
           })()}
           empty={aiSelEmpty}
-          fileName={openFile.name}
+          fileName={focusedFile?.name ?? ""}
           busy={aiSelBusy}
           error={aiSelErr}
           onApply={(instruction) => void applyAiSel(instruction)}

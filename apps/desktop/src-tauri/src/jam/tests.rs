@@ -206,6 +206,111 @@ async fn el_verifier_falla_si_el_build_falla() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  REGRESSIÓ (Fase 1e): cap camí autònom reporta èxit sense verificació.
+//  Build PER DEFECTE (sense build_cmd): php -l dels .php tocats; cap fitxer
+//  tocat = tasca no feta; projecte buit (o només README) = error clar;
+//  criteris d'acceptació amb camí: almenys UN ha d'existir o ser escrit.
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn ctx_de_prova() -> TaskContext {
+    TaskContext {
+        cancel: tokio_util::sync::CancellationToken::new(),
+        child_registry: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+        quality: noorbit_jam::QualityLevel::Full,
+        attempt: 1,
+    }
+}
+
+/// Sense build_cmd, un .php tocat amb sintaxi invàlida NO pot passar la
+/// verificació per defecte: l'error real de `php -l` es retorna al bucle.
+#[tokio::test]
+async fn el_verifier_per_defecte_rebutja_php_invalid() {
+    if crate::agent::runtools::php_binary().is_none() {
+        eprintln!("php no disponible en aquesta màquina: test omès");
+        return;
+    }
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("trencat.php"), "<?php function( {\n").unwrap();
+    let v = NoOrbitVerifier::new(dir.path().to_path_buf(), None);
+    let err = v
+        .run_with_files(&task("t01"), &ctx_de_prova(), &["trencat.php".to_string()])
+        .await
+        .expect_err("php invàlid no pot verificar verd");
+    assert!(err.contains("verificació PHP fallida"), "error: {err}");
+    assert!(err.contains("trencat.php"), "error: {err}");
+}
+
+/// El mateix camí amb PHP vàlid: verificació per defecte verda (el lot
+/// escrit passa `php -l` real, no un «èxit» per absència de comprovació).
+#[tokio::test]
+async fn el_verifier_per_defecte_accepta_php_valid() {
+    if crate::agent::runtools::php_binary().is_none() {
+        eprintln!("php no disponible en aquesta màquina: test omès");
+        return;
+    }
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("bo.php"), "<?php echo 1;\n").unwrap();
+    let v = NoOrbitVerifier::new(dir.path().to_path_buf(), None);
+    assert!(v
+        .run_with_files(&task("t01"), &ctx_de_prova(), &["bo.php".to_string()])
+        .await
+        .is_ok());
+}
+
+/// Una tasca que no ha tocat CAP fitxer no és una tasca feta: abans es
+/// commitejava com a «completada» sense haver escrit res.
+#[tokio::test]
+async fn el_verifier_rebutja_tasca_sense_fitxers_tocats() {
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("existent.txt"), "ja hi era\n").unwrap();
+    let v = NoOrbitVerifier::new(dir.path().to_path_buf(), None);
+    let err = v
+        .run_with_files(&task("t01"), &ctx_de_prova(), &[])
+        .await
+        .expect_err("cap fitxer tocat = tasca no feta");
+    assert!(err.contains("cap fitxer modificat"), "error: {err}");
+}
+
+/// Projecte buit (o amb només README.md, que és «sorra»): error clar, mai
+/// verificació verda sobre el no-res.
+#[tokio::test]
+async fn el_verifier_rebutja_projecte_buit_o_nomes_readme() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let v = NoOrbitVerifier::new(dir.path().to_path_buf(), None);
+    let err = v.run(&task("t01"), &ctx_de_prova()).await.unwrap_err();
+    assert!(err.contains("el projecte és buit"), "error: {err}");
+    // Només README.md no compta com a projecte amb feina.
+    std::fs::write(dir.path().join("README.md"), "# Pla\n").unwrap();
+    let err2 = v.run(&task("t01"), &ctx_de_prova()).await.unwrap_err();
+    assert!(err2.contains("el projecte és buit"), "error: {err2}");
+}
+
+/// Criteris d'acceptació que mencionen un CAMÍ: si cap no existeix ni ha
+/// estat escrit, la tasca NO verifica; si almenys un hi és, sí.
+#[tokio::test]
+async fn el_verifier_exigeix_almenys_un_criteri_amb_fitxer() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let root = dir.path().to_path_buf();
+    std::fs::write(root.join("altre.txt"), "feina no demanada\n").unwrap();
+    let mut t = task("t01");
+    t.acceptance = vec!["existeix src/notes.txt amb el resum".into()];
+    let v = NoOrbitVerifier::new(root.clone(), None);
+    // El camí demanat no existeix i no és al lot escrit → error.
+    let err = v
+        .run_with_files(&t, &ctx_de_prova(), &["altre.txt".to_string()])
+        .await
+        .expect_err("cap criteri amb fitxer trobat");
+    assert!(err.contains("cap criteri d'acceptació"), "error: {err}");
+    // Ara el camí demanat ÉS al lot escrit (i existeix al disc) → verd.
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/notes.txt"), "resum\n").unwrap();
+    assert!(v
+        .run_with_files(&t, &ctx_de_prova(), &["src/notes.txt".to_string()])
+        .await
+        .is_ok());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Bucle complet
 // ─────────────────────────────────────────────────────────────────────────────
 

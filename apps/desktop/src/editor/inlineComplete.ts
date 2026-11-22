@@ -80,6 +80,8 @@ export function registerInlineComplete(mon: typeof import("monaco-editor")) {
     "html",
     "ini",
     "yaml",
+    "php",
+    "gdscript",
   ];
   for (const lang of LANGS) {
     try {

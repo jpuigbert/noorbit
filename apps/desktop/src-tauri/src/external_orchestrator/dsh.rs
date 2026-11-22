@@ -88,7 +88,7 @@ pub fn augmented_path() -> std::ffi::OsString {
 
 /// Cerca un binari al PATH (augminat) — com `which`, però tbé als racons
 /// que les apps gràfiques no veuen.
-fn find_bin(name: &str) -> Option<PathBuf> {
+pub fn find_bin(name: &str) -> Option<PathBuf> {
     let path = augmented_path();
     which::which_in(name, Some(path), PathBuf::new()).ok()
 }
@@ -175,7 +175,9 @@ async fn latest_lts_version(http: &reqwest::Client) -> String {
 
 /// Baixar i desempaquetar el Node LTS a la carpeta de dades de NoOrbit.
 /// Tot dins del nostre espai: cap escritura al sistema, cap administrador.
-async fn install_node<F: Fn(&str) + Send + Sync>(
+/// (Obert per al CLI de Copilot, que també es deixa instal·lar al mateix
+/// racó i necessita el mateix Node.js.)
+pub async fn install_node<F: Fn(&str) + Send + Sync>(
     http: &reqwest::Client,
     on_progress: &F,
 ) -> Result<PathBuf> {
@@ -263,7 +265,7 @@ async fn install_node<F: Fn(&str) + Send + Sync>(
 
 /// npm (o npm-cli.js invocada pel nostre node) preparat per a ser executat.
 /// Retorna (programa, args inicials).
-fn npm_command() -> Result<(PathBuf, Vec<String>)> {
+pub fn npm_command() -> Result<(PathBuf, Vec<String>)> {
     let node = node_binary().ok_or_else(|| anyhow!("Node.js no disponible"))?;
     // Ruta de npm-cli.js segons on siga node:
     //  - local NoOrbit unix: <node_dir>/lib/node_modules/npm/bin/npm-cli.js

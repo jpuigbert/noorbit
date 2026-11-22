@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use noorbit_jam::{
     Cache, Checkpointer, JamDeps, Plan, Progress, ProgressSink, QualityLevel, Reporter, SaveInfo,
-    Verifier, Worker,
+    Task, Verifier, Worker,
 };
 use noorbit_planner::{Brief, Engine, LlmClient, Planner};
 
@@ -144,6 +144,29 @@ impl ProgressSink for StdoutProgress {
     }
 }
 
+/// Checkpointer BUIT per quan no hi ha git usable (sense binari, sense
+/// permisos): la Jam corre igualment —genera i verifica cada tasca— però no
+/// hi ha commits ni manera de tornar enrere. Cap mètode falla mai, perquè el
+/// bucle de la Jam atura la tasca si el checkpointer retorna error, i aquí
+/// l'objectiu precisament és continuar sense ell.
+struct NoGitCheckpointer;
+
+#[async_trait::async_trait]
+impl Checkpointer for NoGitCheckpointer {
+    async fn head(&self) -> Result<String, String> {
+        Ok("sense-git".into())
+    }
+    async fn reset_hard(&self, _sha: &str) -> Result<(), String> {
+        Ok(())
+    }
+    async fn commit(&self, task: &Task) -> Result<String, String> {
+        Ok(format!("sense-git:{}", task.id))
+    }
+    async fn tag(&self, _name: &str) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 /// Point d'entrada del mode fill. Retorna el codi de sortida (0 = ok).
 pub fn run_agent_mode(args: &[String]) -> i32 {
     let parsed = match parse_args(args) {
@@ -218,9 +241,57 @@ async fn run_agent(args: AgentArgs) -> i32 {
         eprintln!("noorbit --jam-agent: proveïdor d'IA = {provider}");
     }
     if let Some(model) = &args.model {
-        ai_manager.set_selected_model(Some(model.clone())).await;
+        // El model triat només té sentit per a Ollama: en un proveïdor en
+        // línia el model és el que té configurat el proveïdor, i posar-lo com a
+        // model d'Ollama faria que la CAIGUDA a Ollama intentés baixar un
+        // model que no existeix.
+        let es_ollama = args.provider.as_deref().map(|p| p == "ollama").unwrap_or(true);
+        if es_ollama {
+            ai_manager.set_selected_model(Some(model.clone())).await;
+        }
     }
-    let llm: Arc<dyn LlmClient> = Arc::new(NoOrbitLlm::new(ai_manager));
+    let llm: Arc<dyn LlmClient> = Arc::new(NoOrbitLlm::new(ai_manager.clone()));
+
+    // LA IA ES POT CANVIAR EN MARXA: el pare escriu la tria al fitxer
+    // «ai.json» del directori de la Jam i el fill la va llegint. Sense això,
+    // canviar d'IA obligava a aturar la Jam i tornar-la a començar.
+    let ai_file = args.brief_path.parent().map(|d| crate::jam::jam_ai_path(d));
+    if let Some(ai_file) = ai_file {
+        let watch_manager = ai_manager.clone();
+        let inicial = args
+            .provider
+            .clone()
+            .map(|p| (p, args.model.clone().unwrap_or_default()));
+        tokio::spawn(async move {
+            let mut ultima: Option<(String, String)> = inicial;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                let Some((provider, model)) = crate::jam::read_jam_ai(&ai_file) else {
+                    continue;
+                };
+                if ultima.as_ref() == Some(&(provider.clone(), model.clone())) {
+                    continue;
+                }
+                ultima = Some((provider.clone(), model.clone()));
+                watch_manager.set_active_provider(&provider).await;
+                if provider == "ollama" && !model.is_empty() {
+                    watch_manager.set_selected_model(Some(model.clone())).await;
+                }
+                eprintln!("noorbit --jam-agent: IA canviada a {provider} · {model}");
+                // L'usuari ha de VEURE el canvi al registre de la Jam.
+                println!(
+                    "JAM|{}",
+                    serde_json::json!({
+                        "kind": "note", "task": "",
+                        "detail": format!("IA canviada: {provider} · {model}"),
+                        "ok": true
+                    })
+                );
+                use std::io::Write;
+                let _ = std::io::stdout().flush();
+            }
+        });
+    }
 
     // 3) Pla: el del pare si ve en un fitxer (mateix pla que ve l'usuari i
     //    cap cost extra); si no, el fa el planner ara.
@@ -241,13 +312,37 @@ async fn run_agent(args: AgentArgs) -> i32 {
         }
     };
 
-    // 4) Dependències del bucle.
-    let ckpt: Arc<dyn Checkpointer> = match noorbit_git::GitCheckpointer::new(&args.repo_path) {
-        Ok(g) => Arc::new(g),
-        Err(e) => {
-            eprintln!("noorbit --jam-agent: repo git no utilitzable: {e}");
-            return 1;
-        }
+    // 4) Dependències del bucle. El git és DESEJABLE (cada tasca es desa com
+    //    un commit i es pot tornar enrere) però NO obligatori: si el projecte
+    //    no és un repo amb un commit base, s'inicialitza/arrecla sol (com
+    //    «Fitxer ▸ Nou projecte»); si tampoc és possible, la Jam corre amb el
+    //    checkpointer buit i ho diu al registre perquè l'usuari sàpiga que no
+    //    podrà desfer. El commit base compta tant com el repo: sense HEAD el
+    //    bucle se saltaria totes les tasques en silenci.
+    let mut ckpt_estat = "git";
+    let ckpt: Arc<dyn Checkpointer> = match noorbit_git::GitCheckpointer::new(&args.repo_path)
+        .ok()
+        .filter(|_| crate::commands::workspace::te_base_commit(&args.repo_path))
+    {
+        Some(g) => Arc::new(g),
+        None => match crate::commands::workspace::init_git_repo(&args.repo_path).await {
+            Ok(()) => match noorbit_git::GitCheckpointer::new(&args.repo_path) {
+                Ok(g) => {
+                    ckpt_estat = "auto";
+                    Arc::new(g)
+                }
+                Err(e) => {
+                    eprintln!("noorbit --jam-agent: git no funcional després d'init: {e}");
+                    ckpt_estat = "cap";
+                    Arc::new(NoGitCheckpointer)
+                }
+            },
+            Err(e) => {
+                eprintln!("noorbit --jam-agent: repo git no utilitzable ({e}); Jam sense commits");
+                ckpt_estat = "cap";
+                Arc::new(NoGitCheckpointer)
+            }
+        },
     };
     // Les lliçons (intents fallits) van al directori de dades, MAI dins el
     // repo: a l'arrel les esborrava el `git clean -fd` de cada intent.
@@ -258,6 +353,30 @@ async fn run_agent(args: AgentArgs) -> i32 {
     // Receptor de progrés: ES CREA ABANS del worker perquè aquest pugui
     // emetre «què fa la IA» i el seu pensament (línies `JAM|` per stdout).
     let progress: Arc<dyn ProgressSink> = Arc::new(StdoutProgress);
+    // L'usuari veu a la UI quina modalitat de checkpoints té la Jam: perdre
+    // la capacitat de desfer feina NO pot ser silenciós.
+    match ckpt_estat {
+        "auto" => {
+            progress
+                .on_progress(Progress::Note {
+                    id: String::new(),
+                    text: "he inicialitzat git al projecte automàticament: cada tasca \
+                           es desa com un commit i es pot tornar enrere".into(),
+                })
+                .await;
+        }
+        "cap" => {
+            progress
+                .on_progress(Progress::Note {
+                    id: String::new(),
+                    text: "la Jam corre SENSE git (no instal·lat o sense permisos): les \
+                           tasques es generen i verifiquen, però no es poden desfer. \
+                           Instala git perquè els checkpoints s'activin sols.".into(),
+                })
+                .await;
+        }
+        _ => {}
+    }
     let worker: Arc<dyn Worker> = Arc::new(
         NoOrbitWorker::new(llm, args.repo_path.clone())
             .with_lessons(lessons.clone())

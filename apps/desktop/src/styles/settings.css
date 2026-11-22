@@ -902,7 +902,7 @@
   color: var(--text-2);
   font: inherit;
   font-size: 11px;
-  padding: 3px 9px;
+  padding: var(--space-1) 10px;
   border-radius: 999px;
   cursor: pointer;
   transition:

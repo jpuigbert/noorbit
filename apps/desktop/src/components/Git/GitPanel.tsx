@@ -9,6 +9,7 @@ import {
 import { useT } from "../../i18n";
 import { useUIStore } from "../../stores/uiStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { useGitStatusStore } from "../../stores/gitStatusStore";
 
 interface Change {
   path: string;
@@ -118,11 +119,15 @@ export default function GitPanel() {
   const refresh = useCallback(async () => {
     if (!root) {
       setStatus(null);
+      useGitStatusStore.getState().publish(null);
       return;
     }
     try {
       const st = await invoke<GitStatus>("git_status");
       setStatus(st);
+      // Compartim l'estat amb la StatusBar i els badges (Fase 4): una sola
+      // consulta serveix per al panell i per a la barra.
+      useGitStatusStore.getState().publish(st);
       // El llistat de stash només té sentit dins d'un repositori.
       setStashes(st.repo ? await invoke<StashEntry[]>("git_stash_list") : []);
       if (st.repo) {
@@ -134,6 +139,7 @@ export default function GitPanel() {
       }
     } catch (e) {
       setStatus(null);
+      useGitStatusStore.getState().publish(null);
       setFeedback(String(e));
     }
   }, [root]);

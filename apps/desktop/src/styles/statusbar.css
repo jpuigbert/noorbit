@@ -5,12 +5,12 @@
   display: flex;
   align-items: center;
   height: 24px;
-  padding: 0 10px;
+  padding: 0 var(--space-2);
   background: var(--bg-1);
   border-top: 1px solid var(--border);
   font-size: 11px;
   color: var(--text-2);
-  gap: 14px;
+  gap: var(--space-3);
   flex-shrink: 0;
 }
 .status-item {
@@ -44,12 +44,25 @@
   font: inherit;
   color: inherit;
   cursor: pointer;
-  padding: 0 2px;
-  max-height: 20px;
+  padding: 0 var(--space-1);
+  max-height: 24px;
 }
 .status-item.as-btn:hover {
   background: var(--bg-3);
   color: var(--text-0);
+}
+
+/* Recompte de fitxers canviats al costat de la branca git (Fase 4). */
+.status-git-count {
+  min-width: 14px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-4);
+  color: var(--text-1);
 }
 
 /* ---- Barra d'estat: treball amb filferro d'accent ---- */

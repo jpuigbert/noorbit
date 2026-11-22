@@ -68,8 +68,11 @@ async function diskContent(abs: string): Promise<string | null> {
 /// sobre el contingut definitiu.
 function settleEditor(abs: string, content: string) {
   const ws = useWorkspaceStore.getState();
-  const cur = ws.openFile;
-  if (cur && cur.path === abs && !markForPath(abs)) {
+  // Multi-pestanya: el fitxer pot estar obert en qualsevol pestanya (o al
+  // split), no només a l'activa. `setOpenFile` reemplaça EN LLOC sense robar
+  // el focus quan la pestanya ja existix.
+  const cur = ws.openFiles.find((f) => f.path === abs);
+  if (cur && !markForPath(abs)) {
     ws.setOpenFile({ path: abs, name: cur.name, content, dirty: false });
   }
 }
@@ -188,8 +191,8 @@ export async function resolveMark(path: string, decision: "accept" | "reject") {
     } catch {
       /* si no es pot desfer, almenys traiem el diff de l'editor */
     }
-    const cur = useWorkspaceStore.getState().openFile;
-    if (cur && cur.path === path) {
+    const cur = useWorkspaceStore.getState().openFiles.find((f) => f.path === path);
+    if (cur) {
       ws.setOpenFile({
         path,
         name: cur.name,

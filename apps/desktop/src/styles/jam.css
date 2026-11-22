@@ -55,6 +55,115 @@
   color: #58a6ff;
 }
 
+/* Xip «en marxa» amb POLS: deixa clar d'un cop d'ull que la Jam està
+   treballant ara mateix (i quant fa que ha arribat el darrer esdeveniment).
+   Sense això el panell semblava penjat quan el model trigava a pensar. */
+.jam-pulse {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(88, 166, 255, 0.16);
+  color: #58a6ff;
+  animation: jam-pulse 1.6s ease-in-out infinite;
+}
+
+.jam-pulse em {
+  font-style: normal;
+  font-weight: 500;
+  opacity: 0.75;
+}
+
+@keyframes jam-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Línia d'ACTIVITAT: què està fent la IA ara mateix, en una sola línia
+   (la tasca + el detall + quant fa que no s'ha mogut). */
+.jam-activity {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-2);
+  min-width: 0;
+}
+
+.jam-activity > svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.jam-activity b {
+  color: #58a6ff;
+  white-space: nowrap;
+}
+
+.jam-activity-detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jam-activity em {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--text-3, #6e7681);
+  flex-shrink: 0;
+}
+
+/* Marca de temps de cada línia del registre (hh:mm:ss). */
+.jam-log-time {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: var(--text-3, #6e7681);
+  flex-shrink: 0;
+}
+
+/* Selector d'IA dins del requadre «en marxa» (per canviar-la en marxa). */
+.jam-ai-live {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.jam-ai-live label {
+  display: flex;
+  align-items: center;
+  font-size: 10px;
+  color: var(--text-2);
+}
+
+/* El desplegable d'IA hereta el `lp-select` però sense marge inferior
+   (el contenidor ja fa de separació). */
+.jam-ai-pick {
+  margin-bottom: 0;
+}
+
+/* Botó «Allibera la memòria» + el que ha alliberat. */
+.jam-ram {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.jam-ram-msg {
+  font-size: 11px;
+  color: #3fb950;
+}
+
 .jam-row {
   display: flex;
   gap: 8px;

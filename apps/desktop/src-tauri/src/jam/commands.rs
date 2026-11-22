@@ -15,7 +15,10 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tokio_util::sync::CancellationToken;
 
-use crate::jam::{emit, store_plan, derive_jam_id, jam_data_dir, jam_workdir, JamRequest, JamRunner, JamState};
+use crate::jam::{
+    emit, store_plan, derive_jam_id, jam_ai_path, jam_data_dir, jam_workdir, write_jam_ai,
+    JamRequest, JamRunner, JamState,
+};
 use crate::AppState;
 
 /// Sostre de temps per fer el PLA amb la IA.
@@ -35,6 +38,9 @@ pub struct JamHandle {
     pub cancel: std::sync::Mutex<CancellationToken>,
     pub state: std::sync::Mutex<JamState>,
     pub running: AtomicBool,
+    /// Fitxer on es desa la tria d'IA de la Jam en curs (el fill el llegeix
+    /// per poder canviar d'IA EN MARXA). `None` si no hi ha cap Jam.
+    pub ai_path: std::sync::Mutex<Option<std::path::PathBuf>>,
 }
 
 impl Default for JamHandle {
@@ -43,6 +49,7 @@ impl Default for JamHandle {
             cancel: std::sync::Mutex::new(CancellationToken::new()),
             state: std::sync::Mutex::new(JamState::default()),
             running: AtomicBool::new(false),
+            ai_path: std::sync::Mutex::new(None),
         }
     }
 }
@@ -57,6 +64,19 @@ impl JamHandle {
     fn set(&self, f: impl FnOnce(&mut JamState)) {
         if let Ok(mut s) = self.state.lock() {
             f(&mut s);
+        }
+    }
+    /// On és el fitxer d'IA de la Jam en curs (si n'hi ha).
+    fn ai_path(&self) -> Option<std::path::PathBuf> {
+        self.ai_path
+            .lock()
+            .ok()
+            .and_then(|p| p.clone())
+    }
+    /// Recorda on és el fitxer d'IA (per poder-hi escriure després).
+    fn set_ai_path(&self, path: Option<std::path::PathBuf>) {
+        if let Ok(mut p) = self.ai_path.lock() {
+            *p = path;
         }
     }
 }
@@ -141,15 +161,24 @@ pub async fn jam_start(
         return Err(format!("la carpeta no existeix: {}", root.display()));
     }
 
-    // El projecte ha de ser un repo git: la Jam fa commits i pot tornar enrere.
-    if noorbit_git::GitCheckpointer::new(root.clone()).is_err() {
-        return Err(
-            "el projecte ha de ser un repositori git (la Jam desa cada tasca com \
-             un commit per poder tornar enrere). Crea un projecte nou amb \
-             «Fitxer ▸ Nou projecte» —ja neix amb git— o executa «git init» a \
-             la carpeta del projecte."
-                .into(),
-        );
+    // La Jam desa cada tasca com un commit per poder tornar enrere, però git
+    // NO és una exigència per a l'usuari: si el projecte no és un repo amb un
+    // commit base, NoOrbit el crea/arregla sol (com fa «Fitxer ▸ Nou
+    // projecte»). El commit base és IMPRESCINDIBLE: el bucle arrenca amb
+    // `git rev-parse HEAD` i, si no hi és, se salta totes les tasques en
+    // silenci (la Jam sembla viva però no escriu res). Si ni tan sols això és
+    // possible (git sense instal·lar, permisos), la Jam corre IGUALMENT sense
+    // checkpoints: el fill ho detecta, ho diu al registre i treballa
+    // generant i verificant tasques sense desfer-les.
+    if noorbit_git::GitCheckpointer::new(root.clone()).is_err()
+        || !crate::commands::workspace::te_base_commit(&root)
+    {
+        if let Err(e) = crate::commands::workspace::init_git_repo(&root).await {
+            eprintln!(
+                "jam: git no disponible per a {} ({e}); la Jam correrà sense commits",
+                root.display()
+            );
+        }
     }
 
     // Rellotge de la Jam: el fill rep el `--duration` i s'atura sol.
@@ -259,15 +288,22 @@ pub async fn jam_start(
         return Err(msg);
     }
 
-    // Proveïdor i model ACTIUS de l'app. El fill construeix el seu propi
-    // `AiManager` i aquests dos valors NO es persisteixen: sense passar-los,
-    // la Jam sempre parlava amb Ollama encara que l'usuari tingui un proveïdor
-    // remot seleccionat.
+    // Proveïdor i model de la Jam. Si l'usuari n'ha triat un al panell, es
+    // respecta la seva tria; si no, es fa servir el proveïdor ACTIU de l'app
+    // (amb la caiguda del xat: Ollama aturat → remot → IA integrada).
     //
-    // `active_labels` aplica el mateix criteri que el xat (caiguda a la IA
-    // remota o a la IA integrada si Ollama no està en marxa): el que es
-    // mostra a la UI és EXACTAMENT el que farà servir la Jam.
-    let (provider, model) = state.ai_manager.active_labels().await;
+    // El fill construeix el seu propi `AiManager` i aquests dos valors NO es
+    // persistitzen: sense passar-los, la Jam sempre parlava amb Ollama encara
+    // que l'usuari tingui un proveïdor remot seleccionat.
+    let (provider, model) = crate::jam::resolve_jam_ai(&state.ai_manager, &request).await;
+    // La tria d'IA es desa al fitxer que el fill va llegint: l'usuari la
+    // pot canviar EN MARXA (el fill el rellegeix i la tasca següent ja va amb
+    // la IA nova) sense haver d'aturar la Jam.
+    let ai_file = jam_ai_path(&workdir);
+    if let Err(e) = write_jam_ai(&ai_file, &provider, &model) {
+        eprintln!("jam: no s'ha pogut desar la tria d'IA: {e}");
+    }
+    jam.set_ai_path(Some(ai_file.clone()));
     let ai_manager = state.ai_manager.clone();
     // Ara sí que es sap quina IA hi treballa: la capçal del panell ho diu.
     jam.set(|s| {
@@ -558,6 +594,7 @@ pub async fn jam_start(
         append_memory_summary(&summary_path, &report_path);
         let _ = std::fs::remove_dir_all(&workdir);
 
+        jam_handle.set_ai_path(None);
         jam_handle.set(|s| {
             s.running = false;
             s.stopping = false;
@@ -702,6 +739,56 @@ pub fn request_stop(jam: &JamHandle) {
             s.current_detail = "aturant…".into();
         }
     });
+}
+
+/// CANVIA LA IA de la Jam en marxa (proveïdor + model).
+///
+/// L'usuari pot triar una altra IA des del panell SENSE aturar la Jam: el
+/// pare ho escriu al fitxer d'IA i el fill el rellegeix (la tasca següent ja
+/// va amb la IA nova). Si no hi ha cap Jam en marxa, avisa en comptes de
+/// fer res en silenci.
+#[tauri::command]
+pub async fn jam_set_ai(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    jam: State<'_, Arc<JamHandle>>,
+    provider: String,
+    model: Option<String>,
+) -> Result<(), String> {
+    if !jam.running.load(Ordering::SeqCst) {
+        return Err("no hi ha cap Jam en marxa".into());
+    }
+    // Es resol igual que a l'inici: si l'usuari tria Ollama però el motor
+    // local és aturat, la Jam cau a la IA en línia o a la integrada (mai es
+    // queda penjada esperant un servei que no hi és).
+    let req = JamRequest {
+        brief: String::new(),
+        engine: String::new(),
+        duration_secs: 60,
+        repo_path: None,
+        build_cmd: None,
+        dry_run: false,
+        provider: Some(provider),
+        model,
+    };
+    let (provider, model) = crate::jam::resolve_jam_ai(&state.ai_manager, &req).await;
+    let Some(path) = jam.ai_path() else {
+        return Err("no s'ha pogut trobar la Jam en marxa".into());
+    };
+    write_jam_ai(&path, &provider, &model).map_err(|e| e.to_string())?;
+    jam.set(|s| {
+        s.provider = provider.clone();
+        s.model = model.clone();
+    });
+    let _ = app.emit("jam://state", jam.snapshot());
+    emit(
+        &app,
+        "note",
+        "",
+        &format!("IA canviada: {provider} · {model}"),
+        true,
+    );
+    Ok(())
 }
 
 /// Estat actual.

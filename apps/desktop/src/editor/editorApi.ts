@@ -3,12 +3,25 @@
 /// criden aquestes funcions, com fa VS Code amb els seus comandaments.
 import type { editor as MonacoEditor } from "monaco-editor";
 import { invoke } from "@tauri-apps/api/core";
+import { lspDefinition } from "./lspBridge";
 
 type Monaco = typeof import("monaco-editor");
 
+/// Grups d'editor (divisió vertical): cada grup registra la seua instància;
+/// `_editor` (el que usen menús i dreceres) és sempre el del grup amb focus.
+export type EditorGroup = "main" | "split";
+const _editors: Record<EditorGroup, MonacoEditor.IStandaloneCodeEditor | null> = {
+  main: null,
+  split: null,
+};
+let _focusedGroup: EditorGroup = "main";
 let _editor: MonacoEditor.IStandaloneCodeEditor | null = null;
 let _monaco: Monaco | null = null;
 let _themesDefined = false;
+
+function syncFocused() {
+  _editor = _editors[_focusedGroup] ?? _editors.main;
+}
 
 /// Defineja temes de Monaco que copien els tons de color de NoOrbit.
 function defineNoOrbitThemes(mon: Monaco) {
@@ -29,11 +42,24 @@ function defineNoOrbitThemes(mon: Monaco) {
 
 export function bindEditor(
   ed: MonacoEditor.IStandaloneCodeEditor | null,
-  mon: Monaco | null
+  mon?: Monaco | null,
+  group: EditorGroup = "main"
 ) {
-  _editor = ed;
-  _monaco = mon;
-  if (mon) defineNoOrbitThemes(mon);
+  _editors[group] = ed;
+  // En desmuntar un grup arriba `mon` buit: NO esborrem la instància de
+  // Monaco compartida (l'altre grup la segueix necessitant).
+  if (mon) {
+    _monaco = mon;
+    defineNoOrbitThemes(mon);
+  }
+  syncFocused();
+}
+
+/// El focus canvia de grup (clic a l'editor dividit, ⌘1..9…): les accions
+/// globals passen a actuar sobre l'editor que l'usuari està tocant.
+export function setFocusedEditorGroup(group: EditorGroup) {
+  _focusedGroup = group;
+  syncFocused();
 }
 
 /// Tradueix el tema de la UI al nom de tema de Monaco.
@@ -214,12 +240,30 @@ export interface DefResult {
   error?: string;
 }
 
-/// Demana al backend la definició del símbol sota el cursor. No fa el salt
-/// ell mateix: retorna la pos perquè l'acció carregue el fitxer i hi salte.
-export async function findDefinitionHere(path: string): Promise<DefResult> {
+/// Demana la definició del símbol sota el cursor. Primer el servidor LSP
+/// real (`lsp_definition`, Fase 3); si no hi ha servidor, no troba res o
+/// caduca, fallback a l'heurístic `find_definition` del backend. No fa el
+/// salt ell mateix: retorna la pos perquè l'acció carregue el fitxer.
+export async function findDefinitionHere(
+  path: string,
+  projectRoot?: string | null
+): Promise<DefResult> {
   if (!_editor) return { ok: false, error: "No hi ha editor." };
   const pos = _editor.getPosition();
   if (!pos) return { ok: false, error: "Sense cursor." };
+  // 1) LSP real: coordenades 1-based; la ruta arriba RELATIVA a l'arrel
+  //    (o absoluta si el destí és fora del projecte).
+  if (projectRoot) {
+    const d = await lspDefinition(projectRoot, path, pos.lineNumber, pos.column);
+    if (d && d.path && d.line >= 1) {
+      const abs =
+        d.path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(d.path)
+          ? d.path
+          : `${projectRoot.replace(/\/+$/, "")}/${d.path}`;
+      return { ok: true, path: abs, line: d.line, column: Math.max(1, d.column) };
+    }
+  }
+  // 2) Fallback heurístic (patrons de definició al projecte).
   try {
     const def = await invoke<{ path: string; line: number; column: number }>(
       "find_definition",

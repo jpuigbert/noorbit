@@ -189,6 +189,195 @@ fn question_of(prompt: &str) -> String {
     }
 }
 
+/// Omet línies EXACTAMENT repetides del fragment de context del prompt (tot
+/// allò anterior a «PREGUNTA / TASCA:»), que es conserva sencer. És la
+/// versió text del principi darrere del mode «reproduction» d'HyperQwen
+/// («speculation that drafts out of the prompt»): allò que ja és al context
+/// una vegada no cal tornar-lo a pagar en tokens d'entrada. Només es toquen
+/// línies llargues (≥ 40 caràcters): claus, tanquetes i mots breus es
+/// repeteixen legítimament i es conserven intactes.
+fn dedup_context(prompt: &str) -> String {
+    const MIN_LEN: usize = 40;
+    let Some(pos) = prompt.rfind("PREGUNTA / TASCA:") else {
+        // Sense el marcador estàndard del xat no distingim context de tasca:
+        // millor no arriscar el contingut.
+        return prompt.to_string();
+    };
+    let (ctx, task) = (&prompt[..pos], &prompt[pos..]);
+    let mut vistes: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut omeses = 0usize;
+    let mut net = String::with_capacity(ctx.len());
+    for line in ctx.lines() {
+        let t = line.trim();
+        if t.chars().count() >= MIN_LEN && !vistes.insert(t.to_string()) {
+            omeses += 1;
+            continue;
+        }
+        net.push_str(line);
+        net.push('\n');
+    }
+    if omeses == 0 {
+        return prompt.to_string();
+    }
+    format!(
+        "{}\n… [{} línies duplicades del context omeses per NoOrbit] …\n\n{}",
+        net, omeses, task
+    )
+}
+
+/// Pressupost de tokens de SORTIDA segons la tasca: l'anàleg local del «draft
+/// vocabulary calibrat sobre la distribució de sortida del model»
+/// d'HyperQwen. La majoria de preguntes no necessiten els 900 tokens fixos
+/// d'abans (i un sostre baix evita que el model s'allargui de balons); la
+/// generació de codi sí que manté marge ample, condicionat a la RAM.
+fn output_budget(q: &str) -> u32 {
+    output_budget_amb_ram(q, ram_ok())
+}
+
+/// Versió pura (testable) del pressupost: `ram_ample` és el gate `ram_ok()`.
+/// Amb RAM suficient, la generació de codi fitxer-a-fitxer disposa de 2048
+/// tokens (un fitxer sencer + explicació); amb poca RAM es manté el sostre
+/// baix de sempre (1200) per no allargar la inferència ni la cache KV en una
+/// màquina justa (Intel 8 GB).
+fn output_budget_amb_ram(q: &str, ram_ample: bool) -> u32 {
+    let low = crate::ai::codegen::pla(q);
+    const CODE: &[&str] = &[
+        "crea", "genera", "escriu", "redacta", "implementa", "component", "funcio", "script",
+        "codi", "programa", "fitxer", "plantilla", "joc", "aplicacio", "edita", "modifica",
+    ];
+    const CURT: &[&str] = &[
+        "calcula", "on es", "qui es", "quant", "data de", "significa", "any de", "capital de",
+        "si o no", "veritat o fals", "mesura", "pes de",
+    ];
+    if CODE.iter().any(|h| low.contains(h)) {
+        if ram_ample {
+            2048
+        } else {
+            1200
+        }
+    } else if CURT.iter().any(|h| low.contains(h)) {
+        256
+    } else {
+        512
+    }
+}
+
+/// Finestra de context BASE del servidor neuronal (tokens): la mateixa que
+/// s'usa en engegar-lo (RAM disponible + cache KV q8_0 si el motor la suporta).
+/// La compactació de sessió la fa servir per saber quan el context del xat
+/// s'acosta al límit REAL del GGUF local (no la finestra d'un model de núvol).
+pub fn finestra_base() -> u64 {
+    let base: u64 = if crate::ai::wander::ram_total()
+        .map(|b| b >= 6_000_000_000)
+        .unwrap_or(true)
+    {
+        2048
+    } else {
+        1024
+    };
+    if crate::ai::llamacpp::supports_flag("--cache-type-k") {
+        base * 2
+    } else {
+        base
+    }
+}
+
+/// Rutes de fitxer que la TASCA esmenta explícitament («edita main.gd»,
+/// «genera src/App.tsx»…). Només extensions reals de codi/config: així un
+/// número de versió («v2.3») no es confon amb un fitxer.
+fn fitxers_demanats(q: &str) -> Vec<String> {
+    let Ok(re) = regex::Regex::new(
+        r"(?i)[a-z0-9_][a-z0-9_./-]*\.(?:rs|tsx|ts|jsx|js|py|php|css|scss|html|gd|tscn|godot|json|toml|md|lua|cs|cpp|cc|h|hpp|java|go|rb|sh|yml|yaml|vue|svelte|sql|ini|txt|collection|script|uproject|gltf|blend)\b",
+    ) else {
+        return Vec::new();
+    };
+    let mut v: Vec<String> = Vec::new();
+    for m in re.find_iter(q) {
+        let s = m.as_str().to_lowercase();
+        if !v.contains(&s) {
+            v.push(s);
+        }
+    }
+    v
+}
+
+/// Redueix el context del projecte al NECESSARI per al fitxer demanat: si la
+/// tasca anomena un fitxer concret i el context porta el projecte sencer en
+/// seccions «===== ruta =====» (format de `buildContext`), es conserven només
+/// les seccions d'eixos fitxers (més una capçalera breu amb l'arbre de rutes).
+/// La resta del flux (dedup + compact_prompt) continua igual. Si no hi ha
+/// cap coincidència, el prompt es deixa intacte: mai es perd informació que
+/// el model pugui necessitar per a una pregunta general.
+fn context_per_fitxer(prompt: &str) -> String {
+    let Some(pos) = prompt.rfind("PREGUNTA / TASCA:") else {
+        return prompt.to_string();
+    };
+    let (ctx, task) = (&prompt[..pos], &prompt[pos..]);
+    let demanats = fitxers_demanats(task);
+    if demanats.is_empty() || !ctx.contains("=====") {
+        return prompt.to_string();
+    }
+    // Separa el context en seccions «===== ruta =====» + capçalera prèvia.
+    let mut seccions: Vec<(String, String)> = Vec::new();
+    let mut capcalera = String::new();
+    let mut actual: Option<(String, String)> = None;
+    for line in ctx.lines() {
+        let t = line.trim();
+        if t.starts_with("=====") && t.ends_with("=====") && t.len() > 10 {
+            if let Some(sec) = actual.take() {
+                seccions.push(sec);
+            }
+            let ruta = t.trim_matches('=').trim().to_lowercase();
+            actual = Some((ruta, String::new()));
+        } else if let Some((_, cos)) = actual.as_mut() {
+            cos.push_str(line);
+            cos.push('\n');
+        } else {
+            capcalera.push_str(line);
+            capcalera.push('\n');
+        }
+    }
+    if let Some(sec) = actual.take() {
+        seccions.push(sec);
+    }
+    if seccions.is_empty() {
+        return prompt.to_string();
+    }
+    let base = |r: &str| r.rsplit('/').next().unwrap_or(r).to_string();
+    let coincideix = |ruta: &str| {
+        demanats.iter().any(|d| ruta == d || base(ruta) == base(d))
+    };
+    let conservades: Vec<&(String, String)> =
+        seccions.iter().filter(|(r, _)| coincideix(r)).collect();
+    if conservades.is_empty() || conservades.len() == seccions.len() {
+        return prompt.to_string();
+    }
+    let omeses = seccions.len() - conservades.len();
+    // Capçalera breu (instruccions + arbre de rutes retallat): el model
+    // continua sabent què més hi ha al projecte sense pagar-ne el contingut.
+    let mut out: String = capcalera.chars().take(1600).collect();
+    out.push_str(&format!(
+        "\n… [context reduït per NoOrbit: {} seccions d'altres fitxers omeses; \
+         es conserva el context del fitxer demanat] …\n\n",
+        omeses
+    ));
+    for (r, c) in conservades {
+        out.push_str(&format!("===== {} =====\n{}", r, c));
+    }
+    out.push_str(task);
+    out
+}
+
+/// Retalla un text a `n` caràcters (amb punt suspensiu si cal tallar).
+fn cap(s: &str, n: usize) -> String {
+    if s.chars().count() <= n {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(n).collect();
+    out.push('…');
+    out
+}
+
 /// Resposta del LLM neuronal, o `None` si cap peça no és disponible (aleshores
 /// la nativa usa el seu motor simbòlic). `lessons` és el bloc d'aprenentatge
 /// local (pot ser buit) que s'injecta al sistema perquè el model sàpiga el que
@@ -208,16 +397,39 @@ pub async fn ask(
         return None;
     }
 
-    // 2) Assegura el servidor obert (ctx prudent per a 4 GB).
-    let ctx = if crate::ai::wander::ram_total().map(|b| b >= 6_000_000_000).unwrap_or(true) {
+    // 2) Assegura el servidor obert (ctx prudent per a 4 GB). Anàleg de la
+    //    idea KVarN d'HyperQwen (cache KV quantitzada a pocs bits): si el
+    //    motor instal·lat suporta `--cache-type-k`, la cache KV passa a q8_0
+    //    → ocupa aproximadament la meitat per token i es pot doblar la
+    //    finestra de context amb el mateix pressupost de RAM (menys poda i
+    //    menys reenviaments). Si el binari no ho reconeix, `start_with_args`
+    //    ho intenta igualment i cau sol a l'arrencada sense les opcions.
+    let base_ctx = if crate::ai::wander::ram_total().map(|b| b >= 6_000_000_000).unwrap_or(true) {
         2048
     } else {
         1024
     };
+    let kv8 = crate::ai::llamacpp::supports_flag("--cache-type-k");
+    let mut ctx = if kv8 { base_ctx * 2 } else { base_ctx };
+    // Pressupost de sortida ABANS d'engegar el servidor: si la tasca és de
+    // generació de codi amb RAM suficient (2048 tokens), la finestra ha de
+    // cabre el prompt compactat (≤ ~1.750 tokens) + sistema (~600) + sortida
+    // + marge. Amb un 0.5B la KV extra ocupa desenes de MB, molt per sota del
+    // llindar de `ram_ok` (900 MB lliures): no es trenca cap límit de RAM.
+    let budget = output_budget(&question_of(prompt));
+    if budget > 1200 {
+        ctx = ctx.max(1750 + 600 + budget + 256);
+    }
+    let opts: &[&str] = if kv8 {
+        &["--cache-type-k", "q8_0", "--cache-type-v", "q8_0"]
+    } else {
+        &[]
+    };
     let model_str = model.to_string_lossy().to_string();
-    let (_id, _name, base) = crate::ai::llamacpp::start(http, &model_str, NATIVE_PORT, ctx)
-        .await
-        .ok()?;
+    let (_id, _name, base) =
+        crate::ai::llamacpp::start_with_args(http, &model_str, NATIVE_PORT, ctx, opts)
+            .await
+            .ok()?;
 
     // 3) Recerca web sota demanda (només si la pregunta ho demana).
     let web = if needs_web(prompt) {
@@ -236,30 +448,41 @@ pub async fn ask(
          Quan t'ajunten resultat d'internet, fonamenta-hi la resposta.",
     );
     if let Some(s) = system {
-        let extra = s.trim();
+        let extra = cap(s.trim(), 600);
         if !extra.is_empty() {
             sys.push_str("\n\nCONSIGNA ADDICIONAL:\n");
-            sys.push_str(extra);
+            sys.push_str(&extra);
         }
     }
-    if !lessons.trim().is_empty() {
+    // Cada bloc injectat té un sostre propi: el sistema NO pot superar el
+    // pressupost total (≈ sistema-base + 600 + 700 + 600 + 1200 caràcters),
+    // perquè amb un ctx de 2048–4096 cal deixar lloc per a la tasca i la
+    // sortida. El que cau fora es retalla per rellevància decreixent.
+    let les = cap(lessons.trim(), 700);
+    if !les.is_empty() {
         sys.push_str("\n\n");
-        sys.push_str(lessons.trim());
+        sys.push_str(&les);
     }
     // Aprenentatge del vagueig: el coneixement que la nativa ha après (del
     // diari i les millores silencioses) es desa al cervell après. L'injectem
     // perquè el model neuronal també el profiti, no només la reserva simbòlica.
     let after = crate::ai::native::learned_digest(12);
-    if !after.trim().is_empty() {
+    let after = cap(after.trim(), 600);
+    if !after.is_empty() {
         sys.push_str("\n\n");
-        sys.push_str(after.trim());
+        sys.push_str(&after);
     }
     if !web.trim().is_empty() {
+        let w = cap(web.trim(), 1200);
         sys.push_str("\n\n");
-        sys.push_str(web.trim());
+        sys.push_str(&w);
     }
 
-    let user = crate::ai::compact_prompt(prompt);
+    // Si la tasca demana un fitxer concret, el context del projecte sencer es
+    // redueix al necessari per a eixe fitxer; després s'ometen les repeticions
+    // (no es paga dues vegades el mateix fragment) i `compact_prompt` fa la
+    // poda segura si continua massa gran.
+    let user = crate::ai::compact_prompt(&dedup_context(&context_per_fitxer(prompt)));
 
     // 5) CRIDA al /chat/completions compatible OpenAI del servidor local.
     let url = format!("{}/chat/completions", base);
@@ -269,7 +492,7 @@ pub async fn ask(
             { "role": "system", "content": sys },
             { "role": "user", "content": user },
         ],
-        "max_tokens": 900,
+        "max_tokens": budget,
         "temperature": 0.4,
         "stream": false,
     });
@@ -453,5 +676,99 @@ mod proves {
     fn question_of_isola_la_tasca() {
         let p = format!("context molt llarg\n\n---\nPREGUNTA / TASCA:\n{}", "què és X?");
         assert_eq!(question_of(&p).trim(), "què és X?");
+    }
+
+    #[test]
+    fn dedup_context_omet_duplicats_i_conserva_tasca() {
+        let llarg = "aquest fragment de fitxer és prou llarg per considerar-se únic";
+        let p = format!(
+            "{}\ncapa curta sense repetir\n{}\n\nPREGUNTA / TASCA:\nquè fa?",
+            llarg, llarg
+        );
+        let out = dedup_context(&p);
+        assert_eq!(out.matches(llarg).count(), 1);
+        assert!(out.contains("1 línies duplicades"));
+        assert!(out.ends_with("què fa?"));
+    }
+
+    #[test]
+    fn dedup_context_sense_marcador_no_toca_res() {
+        let p = "text lliure sense el marcador estàndard que munta el xat de NoOrbit\nrepetit\nrepetit";
+        assert_eq!(dedup_context(p), p);
+    }
+
+    #[test]
+    fn dedup_context_conserva_línies_curtes() {
+        let p = "}\n}\n}\ncap\n\nPREGUNTA / TASCA:\ndigue'm";
+        let out = dedup_context(&p);
+        assert!(!out.contains("duplicades"));
+        assert_eq!(out.matches('}').count(), 3);
+    }
+
+    #[test]
+    fn output_budget_segons_la_tasca() {
+        // Amb RAM suficient: marge ample per a generació fitxer-a-fitxer.
+        assert_eq!(output_budget_amb_ram("crea un component react", true), 2048);
+        assert_eq!(output_budget_amb_ram("calcula 12*34", true), 256);
+        assert_eq!(output_budget_amb_ram("explica'm com es forma la pluja", true), 512);
+    }
+
+    #[test]
+    fn output_budget_condicionat_a_la_ram() {
+        // Poca RAM (gate ram_ok fals): el sostre de codi es manté baix, com
+        // abans; la resta de pressupostos no depenen de la RAM.
+        assert_eq!(output_budget_amb_ram("crea un component react", false), 1200);
+        assert_eq!(output_budget_amb_ram("edita el fitxer main.gd", false), 1200);
+        assert_eq!(output_budget_amb_ram("edita el fitxer main.gd", true), 2048);
+        assert_eq!(output_budget_amb_ram("calcula 12*34", false), 256);
+        assert_eq!(output_budget_amb_ram("explica'm com es forma la pluja", false), 512);
+        // El wrapper públic delega al gate real (sigui quin sigui l'estat de
+        // la màquina, el valor és un dels dos sostres de codi).
+        let b = output_budget("crea un component react");
+        assert!(b == 1200 || b == 2048, "budget inesperat: {}", b);
+    }
+
+    #[test]
+    fn fitxers_demanats_detecta_rutes_reals() {
+        assert_eq!(fitxers_demanats("edita el fitxer main.gd"), vec!["main.gd"]);
+        assert_eq!(fitxers_demanats("genera src/App.tsx i prou"), vec!["src/app.tsx"]);
+        // Un número de versió o una extensió inventada no són fitxers.
+        assert!(fitxers_demanats("puja a la versió v2.3").is_empty());
+        assert!(fitxers_demanats("explica'm la pluja").is_empty());
+    }
+
+    #[test]
+    fn context_per_fitxer_redueix_al_demanat() {
+        let p = format!(
+            "RUTES:\nmain.gd\naltre.rs\n\nCONTINGUT:\n===== main.gd =====\nextends Node2D\n\n===== altre.rs =====\nfn main() {{}}\n\n---\nPREGUNTA / TASCA:\nedita el fitxer main.gd per fer que la pilota boti"
+        );
+        let out = context_per_fitxer(&p);
+        assert!(out.contains("===== main.gd ====="), "{}", out);
+        assert!(out.contains("extends Node2D"), "{}", out);
+        assert!(!out.contains("fn main()"), "{}", out);
+        assert!(out.contains("1 seccions d'altres fitxers omeses"), "{}", out);
+        // La tasca es conserva SENCERA al final.
+        assert!(out.ends_with("edita el fitxer main.gd per fer que la pilota boti"), "{}", out);
+    }
+
+    #[test]
+    fn context_per_fitxer_no_toca_preguntes_generals() {
+        // Sense fitxer demanat: el context es deixa intacte.
+        let p = "===== main.gd =====\nextends Node2D\n\n===== altre.rs =====\nfn main() {}\n\n---\nPREGUNTA / TASCA:\nquè fa aquest projecte?";
+        assert_eq!(context_per_fitxer(p), p);
+        // Sense seccions de fitxers o sense marcador: intacte.
+        let p2 = "context pla sense seccions\n\nPREGUNTA / TASCA:\nedita main.gd";
+        assert_eq!(context_per_fitxer(p2), p2);
+        let p3 = "text lliure sense marcador que esmenta main.gd";
+        assert_eq!(context_per_fitxer(p3), p3);
+        // Si el fitxer demanat no és al context, tampoc es retalla res.
+        let p4 = "===== altre.rs =====\nfn main() {}\n\n---\nPREGUNTA / TASCA:\nedita main.gd";
+        assert_eq!(context_per_fitxer(p4), p4);
+    }
+
+    #[test]
+    fn cap_retalla_amb_elipsis() {
+        assert_eq!(cap("hola", 10), "hola");
+        assert_eq!(cap("0123456789x", 5), "01234…");
     }
 }

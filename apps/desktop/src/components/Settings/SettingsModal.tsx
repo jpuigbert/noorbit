@@ -8,6 +8,7 @@ import { useUIStore } from "../../stores/uiStore";
 import { useUpdateStore } from "../../stores/updateStore";
 import { FUN_PREVIEW } from "../../utils/funCursors";
 import { playFunDone } from "../../utils/funSound";
+import { useEscapeToClose } from "../../utils/useEscapeToClose";
 import LanguagePanel from "../Language/LanguagePanel";
 import IntegrationsPanel from "./IntegrationsPanel";
 import PortablePanel from "./PortablePanel";
@@ -79,6 +80,8 @@ export default function SettingsModal() {
   const setFunCursor = useUIStore((s) => s.setFunCursor);
   const funSound = useUIStore((s) => s.funSound);
   const setFunSound = useUIStore((s) => s.setFunSound);
+  const professionalMode = useUIStore((s) => s.professionalMode);
+  const setProfessionalMode = useUIStore((s) => s.setProfessionalMode);
   const { t } = useT();
   const [tab, setTab] = useState<Tab>("general");
   // Versió real de l'app (tauri.conf.json): ja no cal tocar-la en cada bump.
@@ -95,6 +98,9 @@ export default function SettingsModal() {
     { key: "gold", label: t("settings.themeGold"), swatch: "#17231e" },
     { key: "yellow", label: t("settings.themeYellow"), swatch: "#302810" },
   ];
+
+  // Esc tanca el modal mentre és obert (com la X i el clic a l'overlay).
+  useEscapeToClose(show, () => setShow(false));
 
   if (!show) return null;
 
@@ -206,14 +212,33 @@ export default function SettingsModal() {
                 </div>
               </div>
 
+              {/* Mode professional: silencia els elements lúdics (cursor,
+                  confeti, sons) sense esborrar les preferències de sota. */}
+              <div className="setting-row">
+                <label className="setting-check">
+                  <input
+                    type="checkbox"
+                    checked={professionalMode}
+                    onChange={(e) => setProfessionalMode(e.target.checked)}
+                  />
+                  {t("settings.professionalMode")}
+                </label>
+                <div className="lp-hint">{t("settings.professionalModeHint")}</div>
+              </div>
+
               {/* Diversió: cursor disfressat + so de tasca acabada. Les
-                  miniatures mostren les disfresses reals (SVG de 32 px). */}
+                  miniatures mostren les disfresses reals (SVG de 32 px).
+                  Amb el mode professional actiu queden silenciades. */}
               <div className="setting-row setting-row-col">
                 <span>{t("settings.funSection")}</span>
+                {professionalMode && (
+                  <div className="lp-hint">{t("settings.funMutedHint")}</div>
+                )}
                 <label className="setting-check">
                   <input
                     type="checkbox"
                     checked={funCursor}
+                    disabled={professionalMode}
                     onChange={(e) => setFunCursor(e.target.checked)}
                   />
                   {t("settings.funCursor")}
@@ -228,13 +253,18 @@ export default function SettingsModal() {
                   <input
                     type="checkbox"
                     checked={funSound}
+                    disabled={professionalMode}
                     onChange={(e) => setFunSound(e.target.checked)}
                   />
                   {t("settings.funSound")}
                 </label>
                 <div className="lp-hint">{t("settings.funSoundHint")}</div>
                 <div>
-                  <button className="btn sm" onClick={() => playFunDone(true)}>
+                  <button
+                    className="btn sm"
+                    disabled={professionalMode}
+                    onClick={() => playFunDone(true)}
+                  >
                     <Volume2 size={12} /> {t("settings.funSoundTest")}
                   </button>
                 </div>

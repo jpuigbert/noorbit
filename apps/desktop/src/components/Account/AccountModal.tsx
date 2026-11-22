@@ -16,6 +16,7 @@ import {
 import { useT } from "../../i18n";
 import { useUIStore } from "../../stores/uiStore";
 import { useAuthStore, avatarColor, initialOf } from "../../stores/authStore";
+import { useEscapeToClose } from "../../utils/useEscapeToClose";
 
 /// Finestra de COMPTE de NoOrbit (estil dels IDEs amb compte, p. ex. Qoder):
 ///
@@ -75,8 +76,6 @@ export default function AccountModal() {
     }
   }, [show, user]);
 
-  if (!show) return null;
-
   const close = () => {
     setShow(false);
     setName("");
@@ -86,6 +85,11 @@ export default function AccountModal() {
     setError(null);
     setForcePane(null);
   };
+
+  // Esc tanca el modal mentre és obert (com la X i el clic a l'overlay).
+  useEscapeToClose(show, close);
+
+  if (!show) return null;
 
   const errKeyToText = (key: string): string => t(key as never);
 

@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ClipboardEvent, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ClipboardEvent, type DragEvent } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { ListChecks, Zap, CheckCircle2, XCircle, Server, Download, RefreshCw, Cpu, UserCog, Send, Square, Brain, Boxes, X, Plus, Trash2, FolderPlus, FileDown, FolderTree, GitFork, Smartphone, Apple, Monitor, Copy, FolderOpen, ImageOff, Paperclip, ExternalLink, ChevronDown, Users, Gauge } from "lucide-react";
+import { ListChecks, Zap, CheckCircle2, XCircle, Server, Download, RefreshCw, Cpu, UserCog, Send, Square, Brain, Boxes, X, Plus, Trash2, FolderPlus, FileDown, FolderTree, GitFork, Smartphone, Apple, Monitor, Copy, FolderOpen, ImageOff, Paperclip, ExternalLink, ChevronDown, Users, Gauge, Undo2, Cloud } from "lucide-react";
 import { useT } from "../../i18n";
 import { useAgentStore, useActiveChat, extractRecommendedPaths, extractChatImagePaths } from "../../stores/agentStore";
 import { useAIStore, allCloudModels } from "../../stores/aiStore";
@@ -15,7 +15,10 @@ import {
 } from "../../stores/providerStore";
 import { usePreviewStore } from "../../stores/previewStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { useSnapshotStore } from "../../stores/snapshotStore";
 import { useSystemStatsStore, memPercent, formatBytes } from "../../stores/systemStatsStore";
+import { useUIStore, type EngineMode } from "../../stores/uiStore";
+import { formatDuration } from "../../utils/workTime";
 import { useProcessStore } from "../../stores/processStore";
 import TaskChecklist from "./TaskChecklist";
 import ChatVote from "./ChatVote";
@@ -25,6 +28,17 @@ import ChatMarkdown from "./ChatMarkdown";
 import { useWebAiStore } from "../../stores/webAiStore";
 import ChatThought from "./ChatThought";
 import LocalAIStatus from "../AI/LocalAIStatus";
+
+/// COST REAL d'un torn, en dòlars, amb la precisió que toca: un torn petit
+/// pot costar cincimès de cèntim i un de gran, alguns cèntims.
+function costText(usd: number, t: (k: string, vars?: Record<string, string | number>) => string): string {
+  if (usd <= 0) return t("agent.usageFree");
+  const dec = usd < 0.01 ? 5 : usd < 1 ? 4 : 2;
+  return `${usd.toLocaleString("ca", {
+    minimumFractionDigits: dec,
+    maximumFractionDigits: dec,
+  })} $`;
+}
 
 export default function AgentPanel() {
   const { t } = useT();
@@ -135,6 +149,24 @@ export default function AgentPanel() {
     queue,
   } = sess;
 
+  // ── «Desfés el pas» (snapshot git shadow, Fase 1d) ───────────────────────
+  // El comptador es refresca en acabar cada torn (running → false) i quan
+  // el projecte canvia: el backend apila un snapshot ABANS de cada torn
+  // amb escriptures. El botó només es mostra quan hi ha passos per desfer.
+  const snapCount = useSnapshotStore((s) => s.count);
+  const snapBusy = useSnapshotStore((s) => s.busy);
+  useEffect(() => {
+    void useSnapshotStore.getState().refresh(bucket);
+  }, [bucket, running, messages.length]);
+  const onUndoStep = async () => {
+    const root = useWorkspaceStore.getState().root;
+    if (!root) return;
+    // Confirmació breu (mateix patró que la resta de l'app): el desfer
+    // esborra els fitxers que l'agent havia creat aquest pas.
+    if (!window.confirm(t("agent.undoStepConfirm"))) return;
+    await useSnapshotStore.getState().undoStep(root);
+  };
+
   // El codi del projecte és SEMPRE context (per norma). Al composer només
   // cal una etiqueta curta; el detall complet viu al tooltip del badge.
   const ctxCount = contextInfo?.match(/(\d+)\s+fitxers/)?.[1];
@@ -160,6 +192,12 @@ export default function AgentPanel() {
   // l'expert (rol + model propis). Cada xat pot treballar amb un d'diferent.
   const experts = useExpertStore((s) => s.experts);
   const loadExperts = useExpertStore((s) => s.load);
+  // Experts que es poden vincular al xat (mode ≠ «subagent»: aquests només
+  // treballen com a obrers delegats o en equip — model OpenCode/Qoder).
+  const linkableExperts = useMemo(
+    () => experts.filter((e) => e.mode !== "subagent"),
+    [experts]
+  );
   // MODE EQUIP (per xat): el text que envies es reparteix entre TOTS els
   // especialistes (plurals/àrbitre del backend) i veus el progrés de cadascun.
   const [teamMode, setTeamMode] = useState(false);
@@ -175,6 +213,23 @@ export default function AgentPanel() {
   const activeProvider = useProviderStore((s) => s.active);
   const loadProviders = useProviderStore((s) => s.load);
   const updateProvider = useProviderStore((s) => s.update);
+
+  // MOTOR DE LA IA (Fase 2): «Auto» (local + núvol per al codi multi-fitxer
+  // si hi ha clau), «Local natiu» (mai núvol) o «Cloud <proveïdor>». La
+  // preferència és persistent (uiStore) i se sincronitza amb el backend,
+  // que és qui routeja de veritat cada torn.
+  const engineMode = useUIStore((s) => s.engineMode);
+  const setEngineMode = useUIStore((s) => s.setEngineMode);
+  const engineCloudProvider = providers.find(
+    (p) => p.enabled && p.has_token && p.kind !== "native"
+  );
+  useEffect(() => {
+    // A l'arrencada el backend sempre comença en «auto»: li apliquem la
+    // preferència desada perquè el routing del primer torn ja la respecti.
+    void invoke("ai_engine_mode_set", { mode: useUIStore.getState().engineMode }).catch(
+      () => undefined
+    );
+  }, []);
 
   // RAM en temps real: es mostra junt al cronòmetre «Treballant…» perquè
   // l'usuari veja si el model està omplint la memòria (causa de bucles/lentitud).
@@ -276,6 +331,50 @@ export default function AgentPanel() {
       </span>
     );
 
+  // ── TEMPS ESTIMAT DE LA RESPOSTA (ETA) ─────────────────────────────────
+  // No hi ha cap servidor que ho diga: es dedueix del ritme REAL d'aquest
+  // xat. Primer, la mediana de longitud i velocitat de les respostes ja
+  // acabades; quan l'IA ja està escrivint, el cabal de caràcters que estan
+  // arribant ara mateix (més fidel que qualsevol dada antiga).
+  const histRates = useMemo(() => {
+    const lens: number[] = [];
+    const rates: number[] = []; // caràcters per segon
+    for (const m of messages) {
+      if (m.role !== "assistant" || m.error || m.elapsedMs == null || m.elapsedMs < 500) continue;
+      const len = (m.text ?? "").length;
+      if (len < 40) continue;
+      lens.push(len);
+      rates.push((len * 1000) / m.elapsedMs);
+    }
+    const median = (a: number[]) => {
+      if (!a.length) return null;
+      const s = [...a].sort((x, y) => x - y);
+      return s[Math.floor(s.length / 2)];
+    };
+    return { len: median(lens), rate: median(rates) };
+  }, [messages]);
+  const etaText = (() => {
+    if (!running) return null;
+    // Un model local en CPU no té res a veure amb un de núvol: els valors
+    // per defecte (quan el xat encara no té històric) en tenen compte.
+    const local = /ollama|nativa|llama|local/i.test(procSnap?.provider ?? "");
+    const rate = histRates.rate ?? (local ? 14 : 60);
+    const expected = Math.min(9000, Math.max(240, histRates.len ?? 1500));
+    const secs = liveSeconds ?? 0;
+    if (stream && stream.length > 40 && secs > 0) {
+      // Ja escriu: barrem el cabal en viu amb l'historial (l'estona inicial
+      // del primer token és enganyosa i distorsionaria la mitjana).
+      const live = stream.length / secs;
+      const blend = histRates.rate ? (live + histRates.rate) / 2 : live;
+      const remaining = Math.max(expected - stream.length, 120);
+      return formatDuration((remaining / Math.max(blend, 0.5)) * 1000);
+    }
+    // Encara pensa: torn complet estimat, descomptant el que ja porta.
+    const totalMs = (expected / rate) * 1000 + (local ? 4000 : 1500);
+    const left = totalMs - (startedAt ? Date.now() - startedAt : 0);
+    return left > 3000 ? formatDuration(left) : null;
+  })();
+
   // El xat s'autodesplaça al final quan arriben missatges o passos nous.
   const bodyRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -315,7 +414,12 @@ export default function AgentPanel() {
     if (teamMode && experts.length > 0) {
       setPendingImgs([]);
       setPendingFiles([]);
-      void useExpertStore.getState().runTeam(text, experts.map((e) => e.id));
+      // L'equip per defecte són els obrers (mode ≠ primary); si totes les
+      // especialitats fossen caps, no ens quedem sense treball.
+      const workers = experts.filter((e) => e.mode !== "primary");
+      void useExpertStore
+        .getState()
+        .runTeam(text, (workers.length > 0 ? workers : experts).map((e) => e.id));
       usePreviewStore.getState().setRightTab("agent");
       usePreviewStore.getState().setAgentSub("experts");
       return;
@@ -639,6 +743,8 @@ export default function AgentPanel() {
           >
             <option value="">{t("agent.providerGlobal")}</option>
             <option value="ollama">{t("agent.ollamaLocal")}</option>
+            {/* MOTOR ACP: l'agent del CLI de GitHub Copilot (no és una API). */}
+            <option value="copilot">{t("agent.copilotEngine")}</option>
             {providers
               .filter((p) => p.enabled && p.id !== "ollama")
               .map((p) => (
@@ -752,13 +858,13 @@ export default function AgentPanel() {
               title={t("agent.expertDirect")}
             >
               <option value="">{t("agent.expertDirect")}</option>
-              {experts.map((e) => (
+              {linkableExperts.map((e) => (
                 <option key={e.id} value={e.id}>
                   {e.name} · {e.role}
                 </option>
               ))}
             </select>
-            <span className="ap-expert-count">({experts.length})</span>
+            <span className="ap-expert-count">({linkableExperts.length})</span>
           </div>
 
           <div
@@ -790,6 +896,46 @@ export default function AgentPanel() {
               <Apple size={12} /> {t("agent.platIos")}
             </button>
           </div>
+
+          {/* MOTOR (local/núvol/auto): indicador visible + selector petit.
+              «Cloud» només es pot triar si hi ha un proveïdor amb clau. */}
+          <div className="ap-inline-group ap-engine" title={t("agent.engineHint")}>
+            {engineMode === "cloud" && engineCloudProvider ? (
+              <Cloud size={13} className="ap-model-icon" />
+            ) : engineMode === "local" ? (
+              <Cpu size={13} className="ap-model-icon" />
+            ) : (
+              <Gauge size={13} className="ap-model-icon" />
+            )}
+            <select
+              className="ap-model-select ap-engine-select"
+              value={engineMode}
+              onChange={(e) => setEngineMode(e.target.value as EngineMode)}
+              aria-label={t("agent.engineHint")}
+            >
+              <option value="auto">{t("agent.engineAuto")}</option>
+              <option value="local">{t("agent.engineLocal")}</option>
+              <option value="cloud" disabled={!engineCloudProvider}>
+                {engineCloudProvider
+                  ? t("agent.engineCloud", { name: engineCloudProvider.name })
+                  : t("agent.engineNoCloud")}
+              </option>
+            </select>
+          </div>
+
+          {/* DESFÉS EL PAS: visible només quan hi ha snapshots (torns que
+              han escrit fitxers). Mai durant una generació: el desfer no
+              pot barallar-se amb les escriptures en viu del torn. */}
+          {bucket && snapCount > 0 && !running && (
+            <button
+              className="btn sm ap-undo-step"
+              disabled={snapBusy}
+              title={t("agent.undoStepHint")}
+              onClick={() => void onUndoStep()}
+            >
+              <Undo2 size={12} /> {t("agent.undoStep")}
+            </button>
+          )}
         </div>
       </div>
 
@@ -1177,9 +1323,21 @@ export default function AgentPanel() {
                 <div
                   className="chat-usage"
                   title={
-                    m.usage.contextWindow > 0
-                      ? t("agent.usageContextWindow", { n: m.usage.contextWindow.toLocaleString("ca") })
-                      : undefined
+                    [
+                      m.usage.contextWindow > 0
+                        ? t("agent.usageContextWindow", {
+                            n: m.usage.contextWindow.toLocaleString("ca"),
+                          })
+                        : null,
+                      m.usage.cacheRead
+                        ? t("agent.usageCacheHint", {
+                            cache: m.usage.cacheRead.toLocaleString("ca"),
+                            paid: (m.usage.paidInput ?? m.usage.input).toLocaleString("ca"),
+                          })
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join("\n") || undefined
                   }
                 >
                   <Gauge size={11} />
@@ -1187,6 +1345,26 @@ export default function AgentPanel() {
                     {m.usage.input.toLocaleString("ca")} {t("agent.usageInput")} ·{" "}
                     {m.usage.output.toLocaleString("ca")} {t("agent.usageOutput")}
                   </span>
+                  {/* MEMÒRIA CAU: aquests tokens es consumeixen, però NO es
+                      paguen al preu sencer. És la diferència entre el que
+                      consumeix el model i el que costa de veritat. */}
+                  {m.usage.cacheRead ? (
+                    <>
+                      <span className="chat-usage-sep">·</span>
+                      <span className="chat-usage-cache">
+                        {m.usage.cacheRead.toLocaleString("ca")} {t("agent.usageCache")}
+                      </span>
+                    </>
+                  ) : null}
+                  {/* COST REAL del torn (preu de llista del model). */}
+                  {m.usage.costUsd != null && (
+                    <>
+                      <span className="chat-usage-sep">·</span>
+                      <span className="chat-usage-cost">
+                        {costText(m.usage.costUsd, t)}
+                      </span>
+                    </>
+                  )}
                   {m.usage.contextWindow > 0 && (
                     <>
                       <span className="chat-usage-sep">·</span>
@@ -1297,6 +1475,7 @@ export default function AgentPanel() {
                   <div className="stream-meta">
                     <RefreshCw size={11} className="spin" /> {t("agent.running")}
                     {liveSeconds !== null && ` · ${liveSeconds} s`}
+                    {etaText && ` · ${t("agent.etaLeft", { d: etaText })}`}
                     {ramChip}
                     {/* El text ja generat es pot copiar AL MOMENT (no cal
                         esperar que acabi la resposta). */}
@@ -1314,6 +1493,7 @@ export default function AgentPanel() {
                 <div className="chat-bubble assistant pending">
                   <RefreshCw size={12} className="spin" /> {t("agent.running")}
                   {liveSeconds !== null && ` · ${liveSeconds} s`}
+                  {etaText && ` · ${t("agent.etaLeft", { d: etaText })}`}
                   {ramChip}
                   {liveWhatShort && (
                     <div className="stream-what" title={liveWhat}>
@@ -1436,9 +1616,14 @@ function useImageDataUrl(path: string): string | null {
 
 /** Imatge dins del xat: previsualització + copiar al porta-retalls + mostrar
     al Finder/explorador. Els models amb visió la reben si l'usuari l'adjunta. */
-function ChatImage({ path }: { path: string }) {
+export function ChatImage({ path }: { path: string }) {
   const { t } = useT();
   const url = useImageDataUrl(path);
+  // Si la webview no pot DECODIFICAR el data-URL (p. ex. text pla dins d'un
+  // .png), onError degrada al mateix placeholder que els errors d'invoke:
+  // ImageOff + nom, sense deixar l'error pujar cap al vigilà d'arrencada.
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [path]);
   const name = path.split(/[\\/]/).pop() ?? path;
 
   // Copiar la imatge (no només el text): si el format no és PNG es converteix
@@ -1463,11 +1648,12 @@ function ChatImage({ path }: { path: string }) {
 
   return (
     <figure className="chat-img" title={path}>
-      {url ? (
-        <img src={url} alt={name} loading="lazy" />
+      {url && !broken ? (
+        <img src={url} alt={name} loading="lazy" onError={() => setBroken(true)} />
       ) : (
         <span className="chat-img-broken">
           <ImageOff size={14} /> {name}
+          {broken ? ` · ${t("agent.imageInvalid")}` : ""}
         </span>
       )}
       <figcaption className="chat-img-actions">

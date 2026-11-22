@@ -2,7 +2,7 @@
 /// esborrat «@delete:», edicions «@edit:», rescat de codi en prosa i arbres
 /// de projecte. Sense Tauri ni stores: es poden testejar sols (Vitest).
 
-import type { EditBlock } from "./types";
+import type { EditBlock, EditSection } from "./types";
 
 /// Extreu el contingut d'UN fitxer de la resposta del model: si ve en
 /// «@file: ruta» agafem el bloc; si ve en codi «```» agafem el codi; si no,
@@ -22,6 +22,13 @@ export function extractSingleFileContent(raw: string): string {
   return r;
 }
 
+/// Detecta el placeholder que abans s'escrivia quan el model no retornava
+/// contingut («(Pendent: el model no ha retornat contingut…)"). PROHIBIT a
+/// disc: qui genera fitxers ha de regenerar-los o deixar-los sense escriure.
+export function esContingutPlaceholder(content: string): boolean {
+  return /\(pendent:\s*el model no ha retornat contingut/i.test(content);
+}
+
 /// Els fitxers «bloc_N.md» són fragments de documentació que els models locals
 /// inventen en lloc de codi: NO són codi del projecte i no s'han de crear.
 export function esBlocDeDocumentacio(path: string): boolean {
@@ -33,6 +40,59 @@ export function nomesDocumentacio(text: string): boolean {
   const blocs = parseFileBlocks(text);
   if (blocs.length === 0) return false;
   return blocs.every((b) => /\.(md|markdown|txt|rst)$/i.test(b.path));
+}
+
+/// Normalitza UNA vegada la ruta que un fitxer ha d'ocupar AL DISC.
+///
+/// La IA copia el «Projecte (cwd)» del seu system prompt i reemet rutes
+/// ABSOLUTES («/Volumes/Toshi/programes/forestin the sky/main.py»); abans
+/// només se'ls treia la barra inicial, així que acabaven enganxades sota
+/// l'arrel i el projecte s'omplia de carpetes falses («Volumes/Toshi/…»
+/// dins del propi projecte). Ara: si la ruta absoluta ÉS dins de l'arrel,
+/// se'n treu l'arrel (queda relativa, que és el que el protocol demana); si
+/// és realment FORA, retorna null — NoOrbit no escriu fora del projecte.
+///
+/// És el punt ÚNIC de normalització d'escriptura (frontend): tots els
+/// consumidors (fitxers, carpetes, esborrats, edicions) l'han d'usar abans
+/// de muntar la ruta absoluta. PUR: sense Tauri ni stores.
+export function relForWrite(root: string, rawPath: string): string | null {
+  let t = (rawPath || "").trim().replace(/\\/g, "/");
+  if (!t) return null;
+  const segs = t.split("/").filter((s) => s !== "");
+  if (segs.some((s) => s === "..")) return null;
+  if (t.startsWith("/")) {
+    const r = (root || "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
+    if (!r.startsWith("/")) return null;
+    const rsegs = r.split("/").filter((s) => s !== "");
+    // L'arrel pot aparèixer duplicada dins la mateixa ruta (la IA repeteix el
+    // cwd abans del nom del fitxer, i pot tornar-ho a fer): es descarta
+    // tantes vegades com apareixi al capdamunt, mai a l'inrevés.
+    let i = 0;
+    for (;;) {
+      let cops = 0;
+      // Avança l'arrel (`cops`) sobre la ruta a partir del punt `i`.
+      while (
+        cops < rsegs.length &&
+        i + cops < segs.length &&
+        rsegs[cops].toLowerCase() === segs[i + cops].toLowerCase()
+      )
+        cops++;
+      // Cal que l'arrel sigui REALMENT un prefix de la ruta i que en quedi res.
+      if (cops < rsegs.length || i + cops >= segs.length) break;
+      i += cops;
+    }
+    if (i === 0) return null; // fora del projecte obert
+    return segs.slice(i).join("/") || null;
+  }
+  return t.replace(/^\/+/, "") || null;
+}
+
+/// RUTA ABSOLUTA FORA del projecte: només serveix per avisar l'usuari (el
+/// fitxer existeix, però NoOrbit no hi pot escriure). Les rutes relatives
+/// mai es marquen: són la forma correcta del protocol.
+export function esRutaForaDeRelatiu(root: string, rawPath: string): boolean {
+  const t = (rawPath || "").trim().replace(/\\/g, "/");
+  return t.startsWith("/") && relForWrite(root, t) === null;
 }
 
 /// Converteix una llista de rutes (del pla de reserva) en camins nets.
@@ -84,13 +144,21 @@ export function stripUiArtifacts(content: string): string {
   return lines.slice(i).join("\n");
 }
 
-export function parseFileBlocks(raw: string): { path: string; content: string }[] {
+export function parseFileBlocks(
+  raw: string,
+  opts?: { onlyClosed?: boolean },
+): { path: string; content: string }[] {
   const lines = raw.split(/\r?\n/);
-  type Cur = { path: string; fenced: string[]; bare: string[]; inFence: boolean; hadFence: boolean };
+  type Cur = { path: string; fenced: string[]; bare: string[]; inFence: boolean; hadFence: boolean; closed: boolean };
   const acc: Cur[] = [];
   let cur: Cur | null = null;
-  const flush = () => {
+  // `closed`: el bloc ja no pot créixer (una directriu posterior l'ha tallat
+  // o la seva tanca ``` s'ha tancat). Durant l'STREAMING només s'escriuen al
+  // disc els blocs TANCATS: un fence obert és una preview parcial i no es
+  // materialitza fins que el model el tanca (opció `onlyClosed`).
+  const flush = (closed: boolean) => {
     if (cur) {
+      cur.closed = closed;
       acc.push(cur);
       cur = null;
     }
@@ -98,13 +166,14 @@ export function parseFileBlocks(raw: string): { path: string; content: string }[
   for (const line of lines) {
     const m = line.match(/^[ \t>#*-]*(?:\d+[.)]\s+)?@?file:\s*(.+?)\s*$/i);
     if (m) {
-      flush();
+      flush(true);
       cur = {
         path: m[1].replace(/^[`'"*«]+|[`'"*»;:.,\s]+$/g, "").trim(),
         fenced: [],
         bare: [],
         inFence: false,
         hadFence: false,
+        closed: false,
       };
       continue;
     }
@@ -122,15 +191,18 @@ export function parseFileBlocks(raw: string): { path: string; content: string }[
       /^[ \t>#*-]*(?:\d+[.)]\s+)?@?(edit|modifica|substitueix|reemplaça)\w*:/i.test(line) ||
       /^[ \t>#*-]*(RUN|IMG|NB)\|/i.test(line)
     ) {
-      flush();
+      flush(true);
       continue;
     }
     if (cur.inFence) cur.fenced.push(line);
     else cur.bare.push(line);
   }
-  flush();
+  // Al final del text: un bloc amb tanca TANCADA és definitiu; un de sense
+  // tanca (o amb la tanca oberta) encara pot créixer → no tancat.
+  flush(cur ? cur.hadFence && !cur.inFence : false);
   return acc
     .filter((f) => f.path.length > 0)
+    .filter((f) => !opts?.onlyClosed || f.closed)
     .map((f) => {
       // Amb tanques: només el codi de dins. Sense tanques: les línies nues
       // (com abans), però tallades a la primera directriu.
@@ -158,7 +230,6 @@ export function parseDirDirectives(raw: string): string[] {
     let d = m[1]
       .replace(/^[`'"]+|[`'"]+$/g, "")
       .trim()
-      .replace(/^\/+/, "")
       .replace(/\\/g, "/");
     if (!d) continue;
     // Si té extensió de fitxer coneguda NO pot ser una carpeta (ni tan sols
@@ -171,13 +242,32 @@ export function parseDirDirectives(raw: string): string[] {
   return Array.from(new Set(out));
 }
 
+/// Bloc de codi en prosa que NO s'ha materialitzat: la ruta no s'ha pogut
+/// deduir (o era ambigua). Es reporta al xat amb avís visible — MAI s'escriu
+/// a una ruta inventada tipus «bloc_N.ext».
+export interface ProseSkip {
+  lang: string;
+  /// Primera línia útil del bloc (perquè l'usuari sàpiga quin codi és).
+  preview: string;
+  reason: "sense-nom" | "ambigu";
+}
+
 /// Rescata els blocs de codi (``` ...) d'una resposta en prosa i en dedueix
 /// el nom de fitxer. És el camí de RESCAT quan la IA no usa el format
 /// estricte @file: — i ha de ser TOLERANT perquè els models no responen tots
 /// igual: tanques CRLF, `~~~`, bloc sense tancar (resposta tallada), nom del
 /// fitxer escrit DESPRÉS del bloc o com a comentari a la primera línia…
 /// Així un tutorial explicat es pot convertir en fitxers reals amb codi.
-export function extractFromProse(raw: string): { path: string; content: string }[] {
+///
+/// REGLES DE RUTES (important):
+///  • Si hi ha MANIFEST (llista de rutes del pla), les rutes del manifest
+///    manen: un bloc «style.css» va a «tema-x/style.css» si el pla ho diu.
+///  • Si la ruta no es pot deduir (o és ambigua), el bloc S'OMET i es
+///    registra a `opts.skipped` — mai s'inventa «bloc_N.ext».
+export function extractFromProse(
+  raw: string,
+  opts?: { manifest?: string[]; skipped?: ProseSkip[] },
+): { path: string; content: string }[] {
   const LANG_EXT: Record<string, string> = {
     python: "py", py: "py", javascript: "js", js: "js", typescript: "ts", ts: "ts",
     json: "json", html: "html", css: "css", markdown: "md", md: "md",
@@ -199,7 +289,7 @@ export function extractFromProse(raw: string): { path: string; content: string }
     .replace(/^([ \t]*)~~~[ \t]*([A-Za-z0-9]*)[ \t]*$/gm, "$1```$2");
 
   const dedupe = (path: string, content: string) => {
-    let p = path.replace(/^\/+/, "").replace(/\\/g, "/");
+    let p = path.replace(/\\/g, "/");
     if (p.split("/").some((s) => s === "..")) return;
     // Si el model REPETEIX el mateix fitxer (bucle genseratiu), NO en creem
     // còpies «_2», «_3»…: ens quedem amb l'última versió (la més completa).
@@ -222,50 +312,87 @@ export function extractFromProse(raw: string): { path: string; content: string }
   /// Dedueix el nom del fitxer d'un bloc: 1) un comentari a la PRIMERA línia
   /// del codi («// src/App.tsx», «# main.py», «<!-- index.html -->»); 2) el
   /// text JUST ABANS del bloc; 3) el text JUST DESPRÉS; 4) l'ARBRE del
-  /// projecte (si el fitxer hi apareix, va a la seva carpeta); 5) nom
-  /// automàtic pel llenguatge. Els models barregen totes les maneres.
-  const inferPath = (lang: string, content: string, before: string, after: string, i: number): string => {
+  /// projecte (si el fitxer hi apareix, va a la seva carpeta); 5) el MANIFEST
+  /// del pla. Si res no és clar, torna NULL: el bloc s'omet amb avís (abans
+  /// s'inventava «bloc_N.ext» i s'escrivia brossa al projecte).
+  const manifest = opts?.manifest ?? [];
+  const inferPath = (lang: string, content: string, before: string, after: string): string | null => {
+    let inferred: string | null = null;
     const first = content.split("\n", 1)[0] ?? "";
     const cm = first.match(/^\s*(?:\/\/|#|--|<!--|\*|\/\*)\s*([\w][\w./\\-]*\.[A-Za-z0-9]{1,6})\s*(?:-->)?$/);
     if (cm) {
       const ext = cm[1].split(".").pop()!.toLowerCase();
-      if (knownExts.has(ext)) return cm[1];
+      if (knownExts.has(ext)) inferred = cm[1];
     }
-    for (const side of [before, after]) {
-      const named = side.match(/[A-Za-z0-9_./\\-]+\.[A-Za-z0-9]{1,6}/g);
-      if (!named) continue;
-      // Candidat amb extensió RECONEGUDA (evita «e.g», «3.4»), el més proper.
-      const cand = [...named].reverse().find((c) => {
-        const ext = c.includes(".") ? c.split(".").pop()!.toLowerCase() : "";
-        return knownExts.has(ext) && !/^[\d.]+$/.test(c);
-      });
-      if (cand) return cand;
+    if (!inferred) {
+      for (const side of [before, after]) {
+        const named = side.match(/[A-Za-z0-9_./\\-]+\.[A-Za-z0-9]{1,6}/g);
+        if (!named) continue;
+        // Candidat amb extensió RECONEGUDA (evita «e.g», «3.4»), el més proper.
+        const cand = [...named].reverse().find((c) => {
+          const ext = c.includes(".") ? c.split(".").pop()!.toLowerCase() : "";
+          return knownExts.has(ext) && !/^[\d.]+$/.test(c);
+        });
+        if (cand) {
+          inferred = cand;
+          break;
+        }
+      }
     }
     // L'arbre del projecte: «style.css» → «store-wp-one/style.css» (el lloc
     // on la IA ha dit que ha de ser). sense això tot acaba a l'arrel.
-    const basic = `${before} ${after}`.match(/[A-Za-z0-9_.\-]+\.[A-Za-z0-9]{1,6}/g);
-    if (basic) {
-      for (const c of [...basic].reverse()) {
-        const ruta = treeMap.get(c.toLowerCase());
-        if (ruta) return ruta;
+    if (!inferred) {
+      const basic = `${before} ${after}`.match(/[A-Za-z0-9_.\-]+\.[A-Za-z0-9]{1,6}/g);
+      if (basic) {
+        for (const c of [...basic].reverse()) {
+          const ruta = treeMap.get(c.toLowerCase());
+          if (ruta) {
+            inferred = ruta;
+            break;
+          }
+        }
       }
     }
-    return `bloc_${i}.${LANG_EXT[lang] || "txt"}`;
+    // MANIFEST: si el pla dona la ruta completa del mateix fitxer, mana.
+    if (manifest.length > 0) {
+      if (inferred) {
+        const base = inferred.split("/").pop()!.toLowerCase();
+        const delPla = manifest.find((p) => p.split("/").pop()!.toLowerCase() === base);
+        if (delPla) return delPla;
+        return inferred;
+      }
+      // Sense nom: només acceptem el manifest si hi ha UN ÚNIC candidat
+      // amb l'extensió del llenguatge del bloc (si n'hi ha dos, és ambigu).
+      const ext = LANG_EXT[lang];
+      if (ext) {
+        const cands = manifest.filter((p) => p.toLowerCase().endsWith(`.${ext}`));
+        if (cands.length === 1) return cands[0];
+      }
+      return null;
+    }
+    return inferred;
+  };
+
+  const skip = (lang: string, content: string, ambiguous: boolean) => {
+    const preview = (content.split("\n").find((l) => l.trim()) ?? "").trim().slice(0, 80);
+    opts?.skipped?.push({ lang, preview, reason: ambiguous ? "ambigu" : "sense-nom" });
   };
 
   // Blocs TANCATS: obertura ```lang + contingut + tancament ``` (tolerant a
   // espais/trailers a la línia de tancament).
   const fenceRe = /```([A-Za-z0-9_-]*)\n([\s\S]*?)\n?[ \t]*```/g;
   let m: RegExpExecArray | null;
-  let i = 0;
   while ((m = fenceRe.exec(norm)) !== null) {
-    i++;
     const lang = (m[1] || "").toLowerCase();
     const content = stripUiArtifacts(m[2].replace(/\s+$/, "")) + "\n";
     if (!content.trim()) continue;
     const before = norm.slice(Math.max(0, m.index - 320), m.index);
     const after = norm.slice(m.index + m[0].length, m.index + m[0].length + 320);
-    const path = inferPath(lang, content, before, after, i);
+    const path = inferPath(lang, content, before, after);
+    if (!path) {
+      skip(lang, content, manifest.length > 0);
+      continue;
+    }
     dedupe(path, content);
   }
   // ÚLTIM bloc SENSE TANCAR: respostes tallades a mitja generació. Sense
@@ -281,7 +408,9 @@ export function extractFromProse(raw: string): { path: string; content: string }
       const lang = (lastOp[0].match(/```([A-Za-z0-9_-]*)/)?.[1] ?? "").toLowerCase();
       const content = stripUiArtifacts(after.replace(/\s+$/, "")) + "\n";
       const before = norm.slice(0, lastOp.index ?? 0).slice(-320);
-      dedupe(inferPath(lang, content, before, "", fences.length + 1), content);
+      const path = inferPath(lang, content, before, "");
+      if (path) dedupe(path, content);
+      else skip(lang, content, manifest.length > 0);
     }
   }
   return out;
@@ -360,7 +489,6 @@ export function parseDeleteDirectives(raw: string): string[] {
     let d = m[1]
       .replace(/^[`'"]+|[`'"]+$/g, "")
       .trim()
-      .replace(/^\/+/, "")
       .replace(/\\/g, "/");
     if (!d || d.split("/").includes("..")) continue;
     if (!out.includes(d)) out.push(d);
@@ -469,4 +597,107 @@ export function parseEditBlocks(raw: string): EditBlock[] {
   flushSec();
   if (cur) out.push(cur);
   return out.filter((b) => b.path && b.edits.length > 0);
+}
+
+/// Fragment REAL del fitxer més semblant al text CERCA d'una edició que no
+/// ha coincidit: finestra de línies (de la mida del CERCA) amb la màxima
+/// coincidència normalitzada (espais i majúscules ignorats). Es mostra al
+/// xat amb números de línia perquè l'usuari/model corregeixi el CERCA en un
+/// reintent. PUR: sense Tauri ni stores.
+export function fragmentMesSemblant(
+  contingut: string,
+  cerca: string,
+): { startLine: number; endLine: number; lines: string[]; score: number } | null {
+  const norm = (l: string) => l.trim().replace(/\s+/g, " ").toLowerCase();
+  const findLines = cerca.split("\n").map(norm);
+  const contentLines = contingut.split("\n");
+  if (findLines.length === 0 || contentLines.length === 0 || !cerca.trim()) return null;
+  const win = Math.min(findLines.length, contentLines.length);
+  let best = -1;
+  let bestScore = 0;
+  for (let i = 0; i + win <= contentLines.length; i++) {
+    let hits = 0;
+    for (let k = 0; k < win; k++) {
+      if (norm(contentLines[i + k]) === findLines[k] && findLines[k] !== "") hits++;
+    }
+    const score = hits / findLines.length;
+    if (score > bestScore) {
+      bestScore = score;
+      best = i;
+    }
+  }
+  if (best < 0 || bestScore === 0) return null;
+  // Màxim 16 línies al missatge del xat (un CERCA de 200 línies no hi cap).
+  const shown = Math.min(win, 16);
+  return {
+    startLine: best + 1,
+    endLine: best + shown,
+    lines: contentLines.slice(best, best + shown),
+    score: bestScore,
+  };
+}
+
+/// Una edició CERCA/NOU que no ha coincidit: el fragment real més semblant
+/// (null si no n'hi ha cap) perquè el cridaner el mostri al xat.
+export interface EditFailure {
+  fragment: { startLine: number; endLine: number; lines: string[]; score: number } | null;
+}
+
+export interface EditApplyOutcome {
+  updated: string;
+  ok: number;
+  fail: number;
+  noop: number;
+  failures: EditFailure[];
+}
+
+/// Aplica les seccions CERCA/NOU al contingut d'un fitxer (PUR: la lectura/
+/// escriptura i les marques de revisió les fa el store). Coincidència exacta
+/// o per línies retallades (tolera indentació). Els no-ops (CERCA == NOU) es
+/// REBUTGEN. Quan un CERCA no coincideix, calcula el fragment real més
+/// semblant amb números de línia (feedback per al reintent).
+export function applyEditsToContent(old: string, edits: EditSection[]): EditApplyOutcome {
+  let updated = old;
+  let ok = 0;
+  let fail = 0;
+  let noop = 0;
+  const failures: EditFailure[] = [];
+  for (const ed of edits) {
+    // CERCA i NOU idèntics: no cal tocar el fitxer (ni obrir un diff fals).
+    if (ed.find.trimEnd() === (ed.replace ?? "").trimEnd()) {
+      noop++;
+      continue;
+    }
+    if (updated.includes(ed.find)) {
+      // Substitució LITERAL per índex: String.replace interpretaria $&/$'/$`
+      // del text NOU (corrupció de codi JS/regex) i un replace absent eixiria
+      // com a «undefined». Alineat amb el backend Rust.
+      const at = updated.indexOf(ed.find);
+      updated =
+        updated.slice(0, at) + (ed.replace ?? "") + updated.slice(at + ed.find.length);
+      ok++;
+      continue;
+    }
+    // Coincidència per línies retallades (models que canvien indentació):
+    const findLines = ed.find.split("\n").map((l) => l.trim());
+    const contentLines = updated.split("\n");
+    let hit = -1;
+    outer: for (let i = 0; i + findLines.length <= contentLines.length; i++) {
+      for (let k = 0; k < findLines.length; k++) {
+        if (contentLines[i + k].trim() !== findLines[k]) continue outer;
+      }
+      hit = i;
+      break;
+    }
+    if (hit >= 0) {
+      const replLines = ed.replace ? ed.replace.split("\n") : [];
+      contentLines.splice(hit, findLines.length, ...replLines);
+      updated = contentLines.join("\n");
+      ok++;
+    } else {
+      fail++;
+      failures.push({ fragment: fragmentMesSemblant(updated, ed.find) });
+    }
+  }
+  return { updated, ok, fail, noop, failures };
 }

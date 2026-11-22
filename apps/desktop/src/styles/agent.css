@@ -500,6 +500,38 @@
   font-size: 11px;
   color: var(--text-1);
 }
+/* Barra de gestió: seleccionar tots/cap, filtre per nom i recompte. */
+.ex-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 2px 0 6px;
+}
+.ex-count {
+  font-size: 11px;
+  color: var(--text-2);
+  margin-left: auto;
+}
+.ex-filter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-0);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  padding: 3px 7px;
+  color: var(--text-2);
+}
+.ex-filter input {
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--text-0);
+  font-size: 11.5px;
+  font-family: var(--font-ui);
+  width: 110px;
+}
 /* EN DIRECTE: mini-chats per especialista (el mateix format del xat). */
 .ex-live {
   display: grid;
@@ -1125,6 +1157,21 @@
   flex: 1 1 120px;
   min-width: 0;
 }
+/* Selector del MOTOR (local/núvol/auto): petit, al costat de «Desfés el
+   pas»; mateix llenguatge visual que la resta de la barra (tokens). */
+.ap-engine {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.ap-engine .ap-engine-select {
+  max-width: 150px;
+  flex: 0 1 auto;
+  font-size: 11px;
+  color: var(--text-3) !important;
+}
+.ap-engine .ap-engine-select:hover {
+  color: var(--text-0) !important;
+}
 .ap-tool-note {
   font-size: 11px;
   color: var(--text-3);
@@ -1165,6 +1212,29 @@
 .ap-plat:hover {
   color: var(--text-0);
   background: var(--bg-3);
+}
+/* «Desfés el pas» (snapshot git shadow): peça discreta a la fila de rol,
+   només visible quan hi ha passos per desfer. Tokens del tema, mai literals. */
+.ap-undo-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  color: var(--text-1);
+  border: 1px solid var(--border-2);
+  background: var(--bg-2);
+  transition: color var(--speed-fast) var(--ease-out),
+    border-color var(--speed-fast) var(--ease-out),
+    background var(--speed-fast) var(--ease-out);
+}
+.ap-undo-step:hover:not(:disabled) {
+  color: var(--accent-hover);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.ap-undo-step:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 .ap-plat.active {
   background: var(--accent);
@@ -1280,4 +1350,24 @@
 }
 .agent-prompt textarea {
   min-height: 52px;
+}
+
+/* Permís de l'agent ACP (GitHub Copilot): caixa amb l'operació que l'agent
+   vol fer i els botons d'aprovar o rebutjar. Mai s'aprova en silenci. */
+.acp-permission {
+  width: 460px;
+}
+.acp-permission-what {
+  background: var(--bg-0);
+  border: 1px solid var(--border-2);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.acp-permission-what code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-0);
+  word-break: break-word;
 }

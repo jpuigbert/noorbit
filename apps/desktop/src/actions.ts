@@ -5,6 +5,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import * as ed from "./editor/editorApi";
+import { lspReferences } from "./editor/lspBridge";
+import { useReferencesStore } from "./stores/referencesStore";
+import { t } from "./i18n";
 import { saveCurrentFile, useWorkspaceStore } from "./stores/workspaceStore";
 import { useUIStore } from "./stores/uiStore";
 import { toastSuccess, toastError, toastInfo } from "./stores/toastStore";
@@ -43,7 +46,13 @@ const rawActions = {
   "file.save": () => void saveCurrentFile(),
   "file.saveAs": () => void useWorkspaceStore.getState().saveAs(),
   "file.saveAll": () => void useWorkspaceStore.getState().saveAll(),
-  "file.close": () => useWorkspaceStore.getState().closeFile(),
+  // ⌘W: tanca la pestanya del grup amb focus; si el focus és al split,
+  // ⌘W tanca la DIVISIÓ (com VS Code) i les pestanyes es conserven.
+  "file.close": () => {
+    const ws = useWorkspaceStore.getState();
+    if (ws.focusedGroup === "split" && ws.splitPath) ws.toggleSplit();
+    else ws.closeFile();
+  },
   "file.exit": () => void getCurrentWindow().close(),
 
   // Edició
@@ -67,6 +76,8 @@ const rawActions = {
   "view.searchProject": () => useUIStore.getState().setShowSearch(true),
   "view.sidebar": () => useUIStore.getState().toggleSidebar(),
   "view.rightPanel": () => useUIStore.getState().toggleRightPanel(),
+  // ⌘\: divideix l'editor en dos grups verticals (o tanca la divisió).
+  "view.splitEditor": () => useWorkspaceStore.getState().toggleSplit(),
   // Xat en FINESTRA SEPARADA (posable a qualsevol pantalla); si ja hi és,
   // el torna a enganxar al programa.
   "view.detachChat": () =>
@@ -90,15 +101,41 @@ const rawActions = {
   "goto.file": () => useUIStore.getState().setShowQuickOpen(true),
   "goto.line": ed.gotoLine,
   "goto.symbol": ed.goToSymbol,
-  // F12: «Ves a la definició» heurístic (busca patrons de definició al projecte).
+  // F12: «Ves a la definició» — primer el servidor LSP real (lsp_definition)
+  // i, si no hi ha servidor o no troba res, l'heurístic del backend.
   "goto.definition": async () => {
-    const f = useWorkspaceStore.getState().openFile;
+    const ws = useWorkspaceStore.getState();
+    // El grup amb focus decideix sobre quin fitxer saltem (split inclòs).
+    const f =
+      ws.focusedGroup === "split" && ws.splitPath
+        ? ws.openFiles.find((x) => x.path === ws.splitPath)
+        : ws.openFile;
     if (!f) return;
-    const r = await ed.findDefinitionHere(f.path);
+    const r = await ed.findDefinitionHere(f.path, ws.root);
     if (!r.ok || !r.path || r.line == null) return;
     const same = r.path === f.path;
     if (!same) await useWorkspaceStore.getState().loadFile(r.path);
     setTimeout(() => ed.revealAt(r.line!, r.column ?? 1, 0), same ? 0 : 350);
+  },
+  // ⌥F12: «Ves a referències» amb el servidor LSP real (llista navegable).
+  // Sense servidor o sense resultats: avís honest, mai un error silenciós.
+  "goto.references": async () => {
+    const ws = useWorkspaceStore.getState();
+    const f =
+      ws.focusedGroup === "split" && ws.splitPath
+        ? ws.openFiles.find((x) => x.path === ws.splitPath)
+        : ws.openFile;
+    if (!f || !ws.root) return;
+    const editor = ed.getEditor();
+    const pos = editor?.getPosition();
+    if (!pos) return;
+    const symbol = editor?.getModel()?.getWordAtPosition(pos)?.word ?? "";
+    const refs = await lspReferences(ws.root, f.path, pos.lineNumber, pos.column);
+    if (refs.length === 0) {
+      toastInfo(t("editor.referencesEmpty"));
+      return;
+    }
+    useReferencesStore.getState().show(symbol, refs);
   },
 
   // Cerca global: navegació entre coincidències (F3 / ⇧F3).
@@ -128,7 +165,7 @@ const rawActions = {
   // Git (obre la pestanya de control de canvis del panell dret)
   "git.open": () => {
     useUIStore.getState().setRightPanelOpen(true);
-    usePreviewStore.getState().setRightTab("dev");
+    usePreviewStore.getState().setRightTab("git");
   },
 
   // IA (pròpi de NoOrbit, com el xat de Qoder)
@@ -180,6 +217,22 @@ const rawActions = {
     useUIStore.getState().setRightPanelOpen(true);
     usePreviewStore.getState().setRightTab("agent");
     usePreviewStore.getState().setAgentSub("experts");
+  },
+  // Paleta (⇧⌘P) estil VS Code: arribar als especialistes des de qualsevol
+  // lloc, sense navegar primer pel panell right.
+  "experts.new": () => {
+    useUIStore.getState().setRightPanelOpen(true);
+    usePreviewStore.getState().setRightTab("agent");
+    usePreviewStore.getState().setAgentSub("experts");
+    void import("./stores/expertStore").then((m) => m.useExpertStore.getState().requestCreate());
+  },
+  "experts.importMd": async () => {
+    const m = await import("./stores/expertStore");
+    useUIStore.getState().setRightPanelOpen(true);
+    usePreviewStore.getState().setRightTab("agent");
+    usePreviewStore.getState().setAgentSub("experts");
+    const n = await m.useExpertStore.getState().importMarkdown();
+    if (n > 0) toastSuccess(`Especialistes importats: ${n}`);
   },
   "ai.unreal": () => {
     usePreviewStore.getState().setRightTab("agent");
@@ -260,6 +313,7 @@ export const commandList: CommandDef[] = [
   { id: "file.saveAs", labelKey: "menu.saveAs", kbd: "⇧⌘S" },
   { id: "file.saveAll", labelKey: "menu.saveAll" },
   { id: "file.close", labelKey: "menu.closeEditor", kbd: "⌘W" },
+  { id: "view.splitEditor", labelKey: "menu.splitEditor", kbd: "⌘\\" },
   { id: "edit.undo", labelKey: "menu.undo", kbd: "⌘Z" },
   { id: "edit.redo", labelKey: "menu.redo", kbd: "⇧⌘Z" },
   { id: "edit.cut", labelKey: "menu.cut", kbd: "⌘X" },
@@ -286,6 +340,7 @@ export const commandList: CommandDef[] = [
   { id: "goto.line", labelKey: "menu.gotoLine", kbd: "⌃G" },
   { id: "goto.symbol", labelKey: "menu.gotoSymbol", kbd: "⇧⌘O" },
   { id: "goto.definition", labelKey: "menu.gotoDefinition", kbd: "F12" },
+  { id: "goto.references", labelKey: "menu.gotoReferences", kbd: "⌥F12" },
   { id: "search.nextMatch", labelKey: "menu.nextMatch", kbd: "F3" },
   { id: "search.prevMatch", labelKey: "menu.prevMatch", kbd: "⇧F3" },
   { id: "run.preview", labelKey: "menu.runPreview" },
@@ -309,6 +364,8 @@ export const commandList: CommandDef[] = [
   { id: "ai.agent", labelKey: "rightPanel.agent" },
   { id: "ai.computer", labelKey: "rightPanel.computer" },
   { id: "ai.experts", labelKey: "rightPanel.experts" },
+  { id: "experts.new", labelKey: "experts.paletteNew" },
+  { id: "experts.importMd", labelKey: "experts.paletteImport" },
   { id: "ai.unreal", labelKey: "menu.unreal" },
   { id: "ai.blender", labelKey: "menu.blender" },
   { id: "video.panel", labelKey: "menu.videoPanel" },

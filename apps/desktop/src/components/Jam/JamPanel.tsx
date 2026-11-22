@@ -1,12 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Gamepad2, Play, Square, ListChecks, AlertTriangle, CheckCircle2, Loader2, X, Trophy, Rocket, Sparkles, Folder, MonitorPlay, Brain, Bot } from "lucide-react";
+import { Gamepad2, Square, ListChecks, AlertTriangle, CheckCircle2, Loader2, X, Trophy, Rocket, Folder, MonitorPlay, Brain, Bot, MemoryStick, Activity } from "lucide-react";
 import { useT } from "../../i18n";
 import WorkProgress from "../WorkProgress";
 import { obrirEstalvi } from "../../screensaver/window";
 import { customMinutes, formatDuration, type TimeUnit } from "../../utils/workTime";
-import { useProviderStore } from "../../stores/providerStore";
+import { useProviderStore, type ProviderPublic } from "../../stores/providerStore";
+import type { OllamaModel } from "../../stores/aiStore";
+import { LOCAL, NATIVE, NATIVE_ID, PROV, resolAi } from "./jamAi";
 
 interface JamTask {
   id: string;
@@ -52,11 +54,28 @@ interface JamState {
   stopping: boolean;
 }
 
-interface JamEvent {
+/// Payload que envia el backend per l'esdeveniment `jam://event`.
+interface JamEventPayload {
   kind: string;
   task: string;
   detail: string;
   ok: boolean;
+}
+
+/// Esdeveniment + moment en què ha arribat (ms). L'hora permet pintar una
+/// marca de temps a cada línia del registre i dir «fa X s» del darrer.
+interface JamEvent extends JamEventPayload {
+  at: number;
+}
+
+/// Resultat de `ai_free_ram`: quants models d'Ollama s'han descarregat,
+/// quants motors locals s'aturat i quanta memòria s'ha recuperat (bytes).
+interface RamFreed {
+  models: number;
+  engines: number;
+  usedBefore: number;
+  usedAfter: number;
+  freed: number;
 }
 
 /// Presets de jocs per a nens (un clic i a jugar).
@@ -108,6 +127,64 @@ const KIND_LABEL: Record<string, string> = {
   error: "error",
 };
 
+/// SELECTOR D'IA: un sol desplegable amb tres grups — IA integrada (sempre
+/// hi és, sense token ni descàrrega), IA local d'Ollama (els models que
+/// tinguis baixats) i proveïdors en línia.
+function AiPicker({
+  value,
+  onChange,
+  models,
+  providers,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  models: OllamaModel[];
+  providers: ProviderPublic[];
+  disabled?: boolean;
+}) {
+  const { t } = useT();
+  const cloud = providers.filter((p) => p.kind !== "native");
+  return (
+    <select
+      className="lp-select jam-ai-pick"
+      value={value}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <optgroup label={t("jam.aiNativeGroup")}>
+        <option value={NATIVE + NATIVE_ID}>{t("jam.aiNativeOption")}</option>
+      </optgroup>
+      {models.length > 0 && (
+        <optgroup label={t("jam.aiLocalGroup")}>
+          {models.map((m) => (
+            <option key={m.name} value={LOCAL + m.name}>
+              {m.name}
+            </option>
+          ))}
+        </optgroup>
+      )}
+      {cloud.length > 0 && (
+        <optgroup label={t("jam.aiCloudGroup")}>
+          {cloud.map((p) => (
+            <option key={p.id} value={PROV + p.id}>
+              {p.name} · {p.model}
+              {p.has_token ? "" : ` (${t("jam.aiNoToken")})`}
+            </option>
+          ))}
+        </optgroup>
+      )}
+    </select>
+  );
+}
+
+/// Hora curta (hh:mm:ss) d'un esdeveniment: marca de temps del registre.
+function timeText(at: number): string {
+  const d = new Date(at);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 /// Registre VIU compartit entre muntatges del panell: si l'usuari canvia de
 /// sub-pestanya (Agent ▸ xat/Jam/integracions) mentre la Jam treballa, el
 /// panell es desmunta i tornava buit, fent pensar que «no fa res». Viure
@@ -133,18 +210,43 @@ export default function JamPanel() {
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [reportText, setReportText] = useState<string | null>(null);
+  // IA triada per a la Jam (model local, proveïdor en línia o IA integrada).
+  const [ai, setAi] = useState("");
+  // Els models d'Ollama ja s'han carregat? Ho cal per triar la IA per
+  // defecte SENSE ficar la integrada quan en realitat hi ha un model local
+  // a l'espera.
+  const [modelsCarregats, setModelsCarregats] = useState(false);
+  // Estat del botó «Allibera la memòria» + el que ha alliberat.
+  const [ramBusy, setRamBusy] = useState(false);
+  const [ramMsg, setRamMsg] = useState<string | null>(null);
+  // Rellotge (ms): serveix per dir «fa X s» del darrer esdeveniment.
+  const [ara, setAra] = useState(() => Date.now());
+  // Referència al registre: hi fem autoscroll a cada esdeveniment nou.
+  const logRef = useRef<HTMLDivElement | null>(null);
+  // La Jam està treballant? (el backend ho diu; «stopping» és l'aturada
+  // demanada que encara no s'ha completat).
+  const running = state?.running ?? false;
+  const stopping = state?.stopping ?? false;
   // Proveïdors configurats: només en volem el nom llegible del que fa
   // servir la Jam («OpenAI» en lloc de «openai»).
   const providers = useProviderStore((s) => s.providers);
   const loadProviders = useProviderStore((s) => s.load);
+  // Models locals d'Ollama: la Jam pot fer servir el que l'usuari tingui.
+  // Es llisten DIRECTAMENT (no es crida el store, que a més canviaria el
+  // model actiu global de l'app i tocaria el xat de l'usuari sense que
+  // ell ho demani).
+  const [models, setModels] = useState<OllamaModel[]>([]);
 
   // Estat inicial + esdeveniments en viu.
   useEffect(() => {
     void invoke<JamState>("jam_state").then(setState).catch(() => undefined);
     const un1 = listen<JamState>("jam://state", (e) => setState(e.payload));
-    const un2 = listen<JamEvent>("jam://event", (e) => {
-      registreCompartit = [...registreCompartit.slice(-200), e.payload];
-      setEvents((prev) => [...prev.slice(-200), e.payload]);
+    const un2 = listen<JamEventPayload>("jam://event", (e) => {
+      // Marca de temps: quan ha arribat l'esdeveniment (per pintar l'hora
+      // de cada línia del registre i dir «fa X s» del darrer).
+      const ev: JamEvent = { ...e.payload, at: Date.now() };
+      registreCompartit = [...registreCompartit.slice(-200), ev];
+      setEvents((prev) => [...prev.slice(-200), ev]);
     });
     return () => {
       void un1.then((u) => u());
@@ -156,6 +258,52 @@ export default function JamPanel() {
   useEffect(() => {
     if (providers.length === 0) void loadProviders();
   }, [providers.length, loadProviders]);
+
+  // Models locals d'Ollama: es llisten un sol cop (per oferir-los com a
+  // opció de la Jam).
+  useEffect(() => {
+    let viu = true;
+    void invoke<OllamaModel[]>("ollama_list_models")
+      .then((m) => {
+        if (viu) setModels(m ?? []);
+      })
+      .catch(() => {
+        if (viu) setModels([]);
+      })
+      .finally(() => {
+        if (viu) setModelsCarregats(true);
+      });
+    return () => {
+      viu = false;
+    };
+  }, []);
+
+  // IA per defecte: el model local si n'hi ha; si no, la IA INTEGRADA
+  // (sempre funciona, sense token ni descàrrega). Només es tria quan
+  // l'usuari no ha triat res: un cop triada, la seva tria mana.
+  useEffect(() => {
+    if (ai || !modelsCarregats) return;
+    setAi(models.length > 0 ? LOCAL + models[0].name : NATIVE + NATIVE_ID);
+  }, [ai, models, modelsCarregats]);
+
+  // Autoscroll del registre: sense això l'usuari ha de fer scroll a mà per
+  // veure què està fent la IA (el registre creix per baix).
+  useEffect(() => {
+    const el = logRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [events]);
+
+  // Rellotge: un tic per segon mentre la Jam treballa (per «fa X s»).
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setAra(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [running]);
+
+  // La tria d'IA es resol en (proveïdor, model) per als arguments del
+  // backend i per pintar l'etiqueta de la capçalera.
+  const tria = useMemo(() => resolAi(ai, providers), [ai, providers]);
 
   /// Temps efectiu en minuts: el preset triat o el valor personalitzat (retallat
   /// a 1 minut..7 dies, igual que el backend).
@@ -170,7 +318,14 @@ export default function JamPanel() {
     setErr(null);
     try {
       const p = await invoke<JamPlan>("jam_plan", {
-        request: { brief, engine, durationSecs: effectiveMins * 60, buildCmd: buildCmd || null },
+        request: {
+          brief,
+          engine,
+          durationSecs: effectiveMins * 60,
+          buildCmd: buildCmd || null,
+          provider: tria.provider,
+          model: tria.model,
+        },
       });
       setPlan(p);
     } catch (e) {
@@ -188,7 +343,14 @@ export default function JamPanel() {
     setReportText(null);
     try {
       await invoke("jam_start", {
-        request: { brief, engine, durationSecs: effectiveMins * 60, buildCmd: buildCmd || null },
+        request: {
+          brief,
+          engine,
+          durationSecs: effectiveMins * 60,
+          buildCmd: buildCmd || null,
+          provider: tria.provider,
+          model: tria.model,
+        },
       });
       setPlan(null);
     } catch (e) {
@@ -223,10 +385,44 @@ export default function JamPanel() {
     }
   };
 
-  const running = state?.running ?? false;
-  // L'aturada ja s'ha demanat? (el botó ho diu i es desactiva: prémer-lo
-  // dos cops no fa res i abans semblava que el botó no funcionava).
-  const stopping = state?.stopping ?? false;
+  /// Canvia la IA de la Jam. Si la Jam ja corre, el canvi s'aplica AL
+  /// MOMENT (el backend el desa i el procés fill el recull i el canvia
+  /// sense aturar la Jam); si encara no ha començat, només es queda
+  /// escollida per a la propera arrencada.
+  const canviaIA = async (v: string) => {
+    setAi(v);
+    if (!running) return;
+    const { provider, model } = resolAi(v, providers);
+    if (!provider) return;
+    try {
+      await invoke("jam_set_ai", { provider, model });
+      setNotice(t("jam.aiChanged"));
+    } catch (e) {
+      setErr(String(e));
+    }
+  };
+
+  /// Allibera la memòria que el programa ja no necessita: descarrega els
+  /// models d'Ollama que estan residents a la RAM i atura els motors locals
+  /// (llama.cpp), que entre tots poden ocupar gigabytes.
+  const lliuraRam = async () => {
+    setRamBusy(true);
+    setRamMsg(null);
+    try {
+      const r = await invoke<RamFreed>("ai_free_ram");
+      if (r.models === 0 && r.engines === 0 && r.freed <= 0) {
+        setRamMsg(t("jam.ramNone"));
+        return;
+      }
+      const mb = Math.round((r.freed / (1024 * 1024)) * 10) / 10;
+      setRamMsg(t("jam.ramFreed", { mb, models: r.models, engines: r.engines }));
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setRamBusy(false);
+    }
+  };
+
   // Nom llegible del proveïdor: el backend dona l'id («ollama»,
   // «noorbit_native»…) i el store el nom de veritat («OpenAI», «Claude…»).
   // Ollama i la IA integrada NO són al store (no són proveïdors
@@ -239,9 +435,20 @@ export default function JamPanel() {
         ? t("jam.aiOllama")
         : id);
   // Etiqueta de la IA que fa servir la Jam: «OpenAI · gpt-4o-mini».
-  const aiLabel = state?.provider
-    ? [providerLabel(state.provider), state.model].filter(Boolean).join(" · ")
+  // Mentre la Jam corre, la que fa servir DE VERITAT (l'envia el backend);
+  // abans de començar, la que l'usuari ha triat al desplegable.
+  const aiTriada = tria.provider
+    ? [providerLabel(tria.provider), tria.model].filter(Boolean).join(" · ")
     : "";
+  const aiLabel = running
+    ? state?.provider
+      ? [providerLabel(state.provider), state.model].filter(Boolean).join(" · ")
+      : ""
+    : aiTriada;
+  // Quant fa (en segons) que ha arribat el darrer esdeveniment: sense això
+  // no es pot saber si la IA s'ha quedat encallada o continua treballant.
+  const darrer = events.length > 0 ? events[events.length - 1] : null;
+  const fa = darrer ? Math.max(0, Math.round((ara - darrer.at) / 1000)) : null;
   // Nom de la carpeta del projecte (l'últim segment del camí): és el que
   // l'usuari reconeix de la barra lateral, no tot el camí absolut.
   const projectName = (state?.projectPath ?? "")
@@ -298,7 +505,12 @@ export default function JamPanel() {
               <Bot size={12} /> {aiLabel}
             </span>
           )}
-          {running && <span className="jam-live">{t("jam.live")}</span>}
+          {running && (
+            <span className="jam-pulse" title={t("jam.pulseHint")}>
+              <Activity size={11} /> {t("jam.live")}
+              {fa != null && <em>{t("jam.ago", { n: fa })}</em>}
+            </span>
+          )}
         </span>
       </div>
 
@@ -389,6 +601,23 @@ export default function JamPanel() {
               placeholder={t("jam.buildCmdPh")}
               onChange={(e) => setBuildCmd(e.target.value)}
             />
+          </div>
+
+          {/* ── IA QUE FARÀ LA JAM ── */}
+          <div className="field">
+            <label>
+              <Brain size={12} style={{ marginRight: 4, verticalAlign: -2 }} />
+              {t("jam.aiPick")}
+            </label>
+            <AiPicker
+              value={ai}
+              onChange={(v) => void canviaIA(v)}
+              models={models}
+              providers={providers}
+            />
+            <div className="lp-hint" style={{ marginTop: 4 }}>
+              {t("jam.aiPickHint")}
+            </div>
           </div>
 
           <div className="jam-actions">
@@ -484,8 +713,28 @@ export default function JamPanel() {
             </div>
           )}
           {running && (
-            <div className="jam-current">
-              <Sparkles size={11} /> <b>{state.currentTask || t("jam.workingNow")}</b> {state.currentDetail}
+            <div className="jam-activity">
+              <Activity size={11} />
+              <b>{state.currentTask || t("jam.workingNow")}</b>
+              <span className="jam-activity-detail">{state.currentDetail}</span>
+              {fa != null && <em>{t("jam.ago", { n: fa })}</em>}
+            </div>
+          )}
+          {/* Canvi d'IA EN MARXA: el backend el desa i el procés fill el
+              recull, de manera que la Jam continua amb la IA nova sense
+              aturar-se ni perdre la feina feta. */}
+          {running && (
+            <div className="jam-ai-live">
+              <label>
+                <Bot size={11} style={{ marginRight: 4, verticalAlign: -2 }} />
+                {t("jam.aiChange")}
+              </label>
+              <AiPicker
+                value={ai}
+                onChange={(v) => void canviaIA(v)}
+                models={models}
+                providers={providers}
+              />
             </div>
           )}
           {running && (
@@ -508,11 +757,29 @@ export default function JamPanel() {
         </div>
       )}
 
+      {/* ── ALLIBERA LA MEMÒRIA: els models d'Ollama residents i els motors
+           locals ocupen gigabytes que, quan no s'usen, no serveixen de res.
+           Amb la Jam en marxa es desactiva (ara la memòria S'ESTÀ fent
+           servir). ── */}
+      <div className="jam-ram">
+        <button
+          className="btn sm"
+          disabled={ramBusy || running}
+          onClick={() => void lliuraRam()}
+          title={running ? t("jam.ramRunning") : t("jam.ramHint")}
+        >
+          {ramBusy ? <Loader2 size={12} className="spin" /> : <MemoryStick size={12} />}
+          {t("jam.freeRam")}
+        </button>
+        {ramMsg && <span className="jam-ram-msg">{ramMsg}</span>}
+      </div>
+
       {/* ── REGISTRE ── */}
       {events.length > 0 && (
-        <div className="jam-log">
+        <div className="jam-log" ref={logRef}>
           {events.map((e, i) => (
             <div key={i} className={"jam-log-row" + (e.ok ? "" : " bad") + (e.kind === "thinking" ? " thought" : "")}>
+              <span className="jam-log-time">{timeText(e.at)}</span>
               {e.kind === "task_done" ? (
                 <CheckCircle2 size={11} />
               ) : e.kind === "task_error" || e.kind === "error" ? (

@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { create } from "zustand";
 
@@ -9,8 +10,25 @@ const LS_RIGHT_W = "noorbit.ui.rightW";
 const LS_TERM_H = "noorbit.ui.termH";
 const LS_FUN_CURSOR = "noorbit.fun.cursor";
 const LS_FUN_SOUND = "noorbit.fun.sound";
+const LS_PRO_MODE = "noorbit.professionalMode";
+const LS_ENGINE_MODE = "noorbit.engineMode";
 
 export type Theme = "dark" | "light" | "gray" | "green" | "yellow" | "gold";
+
+/// Mode del motor de la IA (Fase 2): «auto» (per defecte: local, i núvol
+/// per al codi multi-fitxer si hi ha clau), «local» (mai núvol) o «cloud»
+/// (núvol quan hi ha clau). Es recorda entre sessions.
+export type EngineMode = "auto" | "local" | "cloud";
+
+export function loadEngineMode(): EngineMode {
+  try {
+    const v = localStorage.getItem(LS_ENGINE_MODE);
+    if (v === "auto" || v === "local" || v === "cloud") return v;
+  } catch {
+    /* sense persistència */
+  }
+  return "auto";
+}
 
 function loadBool(key: string, fallback: boolean): boolean {
   try {
@@ -97,6 +115,14 @@ interface UIState {
   funCursor: boolean;
   funSound: boolean;
 
+  /** Mode professional (per defecte ACTIU): silencia TOTS els elements
+   *  lúdics (cursor disfressat, confeti, sons) sense esborrar-ne el codi.
+   *  Les animacions funcionals (transicions, hover) es mantenen sempre. */
+  professionalMode: boolean;
+
+  // Motor de la IA (local/núvol/auto): preferència persistent de l'usuari.
+  engineMode: EngineMode;
+
   toggleSidebar: () => void;
   toggleRightPanel: () => void;
   setRightPanelOpen: (v: boolean) => void;
@@ -143,6 +169,8 @@ interface UIState {
   setTheme: (t: Theme) => void;
   setFunCursor: (v: boolean) => void;
   setFunSound: (v: boolean) => void;
+  setProfessionalMode: (v: boolean) => void;
+  setEngineMode: (m: EngineMode) => void;
 }
 
 /// Tema desat (el llegim directament a les finestres de panells separats,
@@ -169,6 +197,12 @@ export function applyTheme(theme: Theme) {
 /// quan l'usuari el canvia des del menú Vista del programa principal.
 export function loadFunCursor(): boolean {
   return loadBool(LS_FUN_CURSOR, true);
+}
+
+/// Mode professional desat (per defecte ACTIU): el rellegeixen també les
+/// finestres de panells separats, que no passen per l'arrencada completa.
+export function loadProfessionalMode(): boolean {
+  return loadBool(LS_PRO_MODE, true);
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
@@ -213,6 +247,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   theme: loadTheme(),
   funCursor: loadFunCursor(),
   funSound: loadBool(LS_FUN_SOUND, true),
+  professionalMode: loadProfessionalMode(),
+  engineMode: loadEngineMode(),
 
   toggleSidebar: () => set({ sidebarOpen: !get().sidebarOpen }),
   toggleRightPanel: () => set({ rightPanelOpen: !get().rightPanelOpen }),
@@ -336,5 +372,29 @@ export const useUIStore = create<UIState>((set, get) => ({
       /* sense persistència */
     }
     set({ funSound: v });
+  },
+  setProfessionalMode: (v) => {
+    try {
+      localStorage.setItem(LS_PRO_MODE, v ? "1" : "0");
+    } catch {
+      /* sense persistència */
+    }
+    set({ professionalMode: v });
+    // Com amb el tema i el cursor: les finestres separades són webviews
+    // independents; el mode professional ha de valdre a TOT arreu.
+    void emit("professional-mode://changed", { on: v }).catch(() => undefined);
+  },
+
+  // Motor de la IA: es desa i se sincronitza amb el backend (que és qui
+  // routeja de veritat). Si el backend no respon (tests, panells separats),
+  // la preferència queda igualment desada i s'aplicarà a l'arrencada.
+  setEngineMode: (m) => {
+    try {
+      localStorage.setItem(LS_ENGINE_MODE, m);
+    } catch {
+      /* sense persistència */
+    }
+    set({ engineMode: m });
+    void invoke("ai_engine_mode_set", { mode: m }).catch(() => undefined);
   },
 }));

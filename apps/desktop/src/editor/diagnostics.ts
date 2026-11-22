@@ -15,7 +15,12 @@
 /// compartixen la mateixa font de veritat.
 import { getMonaco, getEditor } from "./editorApi";
 import type { Uri } from "monaco-editor";
+import type { LspDiag } from "./lspBridge";
 import { useProblemsStore, type Problem } from "../stores/problemsStore";
+import { lintPaths } from "../stores/agent/lintPaths";
+import { parsePhpLintOutput } from "./phpLint";
+import { toastInfo } from "../stores/toastStore";
+import { t } from "../i18n";
 
 /// Llenguatges que Monaco ja valid nativament (no cal duplicar-los).
 const NATIVE = new Set([
@@ -46,6 +51,9 @@ const CFG: Record<string, LangCfg> = {
   c: { lineComment: ["//"], blockComment: ["/*", "*/"], tripleQuotes: [], charLiteral: true, stringsMultiline: false },
   h: { lineComment: ["//"], blockComment: ["/*", "*/"], tripleQuotes: [], charLiteral: true, stringsMultiline: false },
   cpp: { lineComment: ["//"], blockComment: ["/*", "*/"], tripleQuotes: [], charLiteral: true, stringsMultiline: false },
+  // PHP: fallback lleuger mentre el lint real (php -l) no ha respost encara.
+  php: { lineComment: ["//", "#"], blockComment: ["/*", "*/"], tripleQuotes: [], charLiteral: false, stringsMultiline: false },
+  gd: { lineComment: ["#"], blockComment: null, tripleQuotes: ['"""', "'''"], charLiteral: false, stringsMultiline: false },
 };
 
 /// Config per a la família JS/TS usada NOMÉS en revisió «offline» (fitxers que
@@ -247,17 +255,160 @@ function ensureListener() {
   monaco.editor.onDidChangeMarkers((uris) => syncProblems(monaco, uris));
 }
 
+/// Model de Monaco per ruta ABSOLUTA (els dos grups de l'editor dividit
+/// tenen models propis). Sense ruta: el de l'editor amb focus.
+function modelForPath(
+  monaco: NonNullable<ReturnType<typeof getMonaco>>,
+  path?: string
+) {
+  if (!path) return getEditor()?.getModel() ?? null;
+  return (
+    monaco.editor.getModels().find((m) => m.uri.path === path || m.uri.toString() === path) ??
+    getEditor()?.getModel() ??
+    null
+  );
+}
+
+// ---- PHP DE PRIMA CLASSE: lint real «php -l» via lint_paths ----------------
+// En desar, obrir o activar un .php del projecte es demana el lint REAL al
+// backend (wrapper tolerant stores/agent/lintPaths). Els errors de parseig
+// es pinten com a markers de Monaco (squiggle + panell Problemes) i es
+// netegen quan el lint passa. Si el lint no està disponible, degradació
+// honesta: avís únic + el balanceig lleuger continua fent la feina.
+const phpTimers = new Map<string, ReturnType<typeof setTimeout>>();
+/// Fitxers on el lint real ja ha respost: el balanceig no els toca més.
+const phpLintActive = new Set<string>();
+let phpUnavailableNoted = false;
+const PHP_LINT_DEBOUNCE_MS = 500;
+
+export function schedulePhpLint(projectPath: string, path: string) {
+  if (!/\.php$/i.test(path)) return;
+  const prev = phpTimers.get(path);
+  if (prev) clearTimeout(prev);
+  phpTimers.set(
+    path,
+    setTimeout(() => {
+      phpTimers.delete(path);
+      void runPhpLint(projectPath, path);
+    }, PHP_LINT_DEBOUNCE_MS)
+  );
+}
+
+async function runPhpLint(projectPath: string, path: string) {
+  // El backend valida les rutes RELATIVES al projecte: una ruta absoluta
+  // de pestanya era rebutjada («ruta fora del projecte») i eixia un warning
+  // fals a la línia 1 de TOTS els .php sense executar el «php -l» real.
+  const rel = path.startsWith(projectPath + "/") ? path.slice(projectPath.length + 1) : path;
+  const outcome = await lintPaths(projectPath, [rel]);
+  if (!outcome.available) {
+    if (!phpUnavailableNoted) {
+      phpUnavailableNoted = true;
+      toastInfo(t("editor.phpLintUnavailable"));
+    }
+    return; // el balanceig de delimiters segueix com a fallback
+  }
+  const r =
+    outcome.results.find(
+      (x) => x.path === rel || x.path === path || path.endsWith(x.path)
+    ) ?? outcome.results[0];
+  if (!r) return;
+  // «verificació omesa» (php no instal·lat): ok:true NO és un verd real.
+  // No desactivem el balanceig heurístic i avisem una sola vegada.
+  if (/verificació omesa/i.test(r.output)) {
+    if (!phpUnavailableNoted) {
+      phpUnavailableNoted = true;
+      toastInfo(t("editor.phpLintUnavailable"));
+    }
+    return;
+  }
+  const issues = r.ok ? [] : parsePhpLintOutput(r.output);
+  phpLintActive.add(path);
+
+  const monaco = getMonaco();
+  const model = monaco ? modelForPath(monaco, path) : null;
+  if (monaco && model && model.uri.path === path) {
+    // Fitxer obert: markers reals → squiggle a la línia + panell sincronitzat.
+    ensureListener();
+    const markers = issues.map((it) => ({
+      startLineNumber: it.line,
+      startColumn: 1,
+      endLineNumber: it.line,
+      endColumn: 2,
+      message: it.message,
+      severity:
+        it.severity === "error" ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning,
+      source: "php -l",
+    }));
+    monaco.editor.setModelMarkers(model, "noorbit-lint", markers);
+    syncProblems(monaco, [model.uri]);
+  } else {
+    // Sense model (fitxer no obert): directament al panell Problemes.
+    const problems: Problem[] = issues.map((it) => ({
+      path,
+      name: path.split(/[/\\]/).pop() ?? path,
+      line: it.line,
+      column: 1,
+      endLine: it.line,
+      endColumn: 2,
+      message: it.message,
+      severity: it.severity,
+      source: "php -l",
+    }));
+    useProblemsStore.getState().setFileProblems(path, problems);
+  }
+}
+
+// ---- LSP PERSISTENT (Fase 3c): diagnòstics REALS del servidor ----------------
+// Owner PROPI («noorbit-lsp»): conviu amb els workers natius de Monaco (TS/JS/
+// JSON/CSS/HTML) i amb el «php -l» («noorbit-lint»): cap no s'aixafa. El panell
+// Problemes es sincronitza amb TOTS els markers del model (font única).
+export function applyLspMarkers(path: string, diags: LspDiag[]) {
+  const monaco = getMonaco();
+  if (!monaco) return;
+  const model = modelForPath(monaco, path);
+  // Només fitxers OBERTS de debò (el fallback de modelForPath no val ací:
+  // pintaríem els diagnòstics d'un fitxer sobre el model d'un altre).
+  if (!model || model.uri.path !== path) return;
+  ensureListener();
+  const markers = diags.map((d) => {
+    const line = Math.max(1, d.line);
+    const col = Math.max(1, d.col);
+    return {
+      startLineNumber: line,
+      startColumn: col,
+      endLineNumber: line,
+      endColumn: col + 1,
+      message: d.message,
+      severity:
+        d.severity === "error"
+          ? monaco.MarkerSeverity.Error
+          : d.severity === "warning"
+          ? monaco.MarkerSeverity.Warning
+          : monaco.MarkerSeverity.Info,
+      source: d.source,
+    };
+  });
+  monaco.editor.setModelMarkers(model, "noorbit-lsp", markers);
+  syncProblems(monaco, [model.uri]);
+}
+
 /// Valida el contingut del fitxer obert i pinta/esvaeix marcadors propis.
 /// S'anomena amb cada edició (EditorPane) i munta l'escolta de markers.
-export function validateCurrentFile(name: string, content: string) {
+/// Amb `path` explícit valida el model d'AQUELL fitxer (editor dividit: hi
+/// ha dos editors vius i el global no sempre és el que s'està escrivint).
+export function validateCurrentFile(name: string, content: string, path?: string) {
   const monaco = getMonaco();
   const editor = getEditor();
   if (!monaco || !editor) return;
   ensureListener();
 
-  const model = editor.getModel();
+  const model = modelForPath(monaco, path);
   if (!model) return;
   const ext = extOf(name);
+
+  // PHP amb lint real ja respost: el «php -l» mana (marcadors seus); el
+  // balanceig lleuger no els pot aixafar amb cada pulsació.
+  if (ext === "php" && phpLintActive.has(model.uri.path)) return;
 
   // Nadius: Monaco ja genera els marcadors sols. Neteja només els nostres.
   if (NATIVE.has(ext)) {

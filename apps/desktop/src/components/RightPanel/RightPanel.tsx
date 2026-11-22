@@ -1,12 +1,14 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   Eye, Bot, Play, Square, Globe, Users, Monitor, Boxes, Clapperboard, ExternalLink,
-  Smartphone, Wrench, Brain, Activity, GitBranch, AlertTriangle, Terminal, Gamepad2,
+  Smartphone, Brain, Activity, GitBranch, AlertTriangle, Terminal, Gamepad2,
 } from "lucide-react";
 import { useT } from "../../i18n";
 import { usePreviewStore, type AgentSub, type RightTab } from "../../stores/previewStore";
 import { useUIStore } from "../../stores/uiStore";
+import { useProblemsStore } from "../../stores/problemsStore";
+import { useGitStatusStore } from "../../stores/gitStatusStore";
 import { detachChat, reattachChat } from "../../windowing";
 import { useExpertStore } from "../../stores/expertStore";
 import AgentPanel from "../Agent/AgentPanel";
@@ -25,10 +27,13 @@ import ProblemsPanel from "../Problems/ProblemsPanel";
 import DebugConsole from "../Console/DebugConsole";
 import WorkLive from "../WorkLive";
 
-/// PESTANYES: des de la v0.71 les «Integracions» NO són una pestanya a part:
-/// viuen DINS de la pestanya Agent com a sub-pestanyes (així veus sempre, al
-/// costat del xat, si l'equip d'especialistes està treballant i què fa).
-/// Exterior: «Agent» · «IA de web» · «Vista prèvia» · «Treball».
+/// PESTANYES (Fase 4): Git, Problemes i Consola són de PRIMER NIVELL —
+/// l'usuari no ha de plegar «Treball» per veure què passa al projecte.
+/// Mapa final: Agent (sub-pestanyes chat/experts/jam/learning/computer/
+/// unreal/blender/mobile intactes) · Procés IA · Git · Problemes · Consola ·
+/// IA web · Vista prèvia. «Procés IA» es manté com a pestanya pròpia: és
+/// activitat de la IA, no de l'equip, i les sub-pestanyes d'Agent no es toquen.
+/// Pestanyes compactes: icona + tooltip; l'activa mostra també l'etiqueta.
 const SUB_AGENT = [
   "chat",
   "experts",
@@ -39,9 +44,7 @@ const SUB_AGENT = [
   "blender",
   "mobile",
 ] as const;
-const SUB_DEV = ["process", "git", "problems", "console"] as const;
 type SubKeyAgent = (typeof SUB_AGENT)[number];
-type SubKeyDev = (typeof SUB_DEV)[number];
 
 const SUB_ICONS: Record<SubKeyAgent, ReactNode> = {
   chat: <Bot size={12} />,
@@ -52,12 +55,6 @@ const SUB_ICONS: Record<SubKeyAgent, ReactNode> = {
   unreal: <Boxes size={12} />,
   blender: <Clapperboard size={12} />,
   mobile: <Smartphone size={12} />,
-};
-const SUB_DEV_ICONS: Record<SubKeyDev, ReactNode> = {
-  process: <Activity size={12} />,
-  git: <GitBranch size={12} />,
-  problems: <AlertTriangle size={12} />,
-  console: <Terminal size={12} />,
 };
 
 export default function RightPanel() {
@@ -76,24 +73,33 @@ export default function RightPanel() {
         stopPreview: st.stopPreview,
       }))
     );
-  // Record de la sub-pestanya de Treball (local al panell, no cal persistir).
-  const [subDev, setSubDev] = useSubDev();
-  const teamRunning = useExpertStore((s) => s.teamRunning);
-  const teamProgress = useExpertStore((s) => s.teamProgress);
   // El xat pot estar en FINESTRA SEPARADA (per posar-lo a una altra pantalla):
   // mentre ho sigui, aquí només es mostra un marc amb el botó de reenganxar
   // (un sol lloc edita els xats: el calaix de localStorage no es baralla).
   const chatDetached = useUIStore((s) => s.chatDetached);
+  const teamRunning = useExpertStore((s) => s.teamRunning);
+  const teamProgress = useExpertStore((s) => s.teamProgress);
+  // Badges BARATS de primer nivell: errors de Problemes (store local) i
+  // fitxers canviats de Git (store compartit, sense consulta extra).
+  const byFile = useProblemsStore((s) => s.byFile);
+  const gitChanges = useGitStatusStore((s) => s.status?.changes.length ?? 0);
+  let errorCount = 0;
+  for (const list of Object.values(byFile)) {
+    for (const p of list) if (p.severity === "error") errorCount++;
+  }
 
   useEffect(() => {
     init();
   }, [init]);
 
-  const tabs: { key: RightTab; label: string; icon: ReactNode }[] = [
-    { key: "agent", label: t("rightPanel.agent"), icon: <Bot size={13} /> },
-    { key: "web", label: t("webAi.title"), icon: <Globe size={13} /> },
-    { key: "preview", label: t("rightPanel.preview"), icon: <Eye size={13} /> },
-    { key: "dev", label: t("rightPanel.dev"), icon: <Wrench size={13} /> },
+  const tabs: { key: RightTab; label: string; icon: ReactNode; badge?: number }[] = [
+    { key: "agent", label: t("rightPanel.agent"), icon: <Bot size={14} /> },
+    { key: "process", label: t("rightPanel.process"), icon: <Activity size={14} /> },
+    { key: "git", label: t("rightPanel.git"), icon: <GitBranch size={14} />, badge: gitChanges },
+    { key: "problems", label: t("rightPanel.problems"), icon: <AlertTriangle size={14} />, badge: errorCount },
+    { key: "console", label: t("rightPanel.console"), icon: <Terminal size={14} /> },
+    { key: "web", label: t("webAi.title"), icon: <Globe size={14} /> },
+    { key: "preview", label: t("rightPanel.preview"), icon: <Eye size={14} /> },
   ];
 
   const subAgentLabels: Record<SubKeyAgent, string> = {
@@ -106,30 +112,35 @@ export default function RightPanel() {
     blender: t("menu.blender"),
     mobile: t("menu.mobile"),
   };
-  const subDevLabels: Record<SubKeyDev, string> = {
-    process: t("rightPanel.process"),
-    git: t("rightPanel.git"),
-    problems: t("rightPanel.problems"),
-    console: t("rightPanel.console"),
-  };
   // Últim pas broadcast per l'equip (per la franja «equip en marxa»).
   const lastStep = teamProgress[teamProgress.length - 1];
 
   return (
     <div className="rightpanel">
-      <div className="rp-tabs">
+      <div className="rp-tabs" role="tablist">
         {tabs.map((tb) => (
           <button
             key={tb.key}
+            role="tab"
+            aria-selected={rightTab === tb.key}
             className={"rp-tab" + (rightTab === tb.key ? " active" : "")}
+            title={tb.label}
             onClick={() => setRightTab(tb.key)}
           >
-            {tb.icon} {tb.label}
+            {tb.icon}
+            <span className="rp-tab-label">{tb.label}</span>
+            {!!tb.badge && <span className="rp-badge">{tb.badge > 99 ? "99+" : tb.badge}</span>}
             {tb.key === "agent" && teamRunning && <i className="rp-team-dot" title={t("agent.teamOn")} />}
           </button>
         ))}
       </div>
       <div className="rp-body">
+        {/* Feina autònoma en marxa (Jam / treball autopilotat): franja viva
+            a les pestanyes de treball, com abans a «Treball». Es plega sola
+            (null) quan no hi ha res en marxa. */}
+        {(rightTab === "process" || rightTab === "git" || rightTab === "problems" || rightTab === "console") && (
+          <WorkLive />
+        )}
         {rightTab === "agent" && (
           <div className="rp-group">
             {/* Franja viva: l'equip d'especialistes treballant — sempre
@@ -252,57 +263,30 @@ export default function RightPanel() {
           </div>
         )}
 
-        {/* ── TREBALL: activitat IA, Git, problemes i consola en UN lloc ──
-            AÇÍ és on viu «què està fent la IA ara mateix», TOT en un sol
-            registre — el xat només queda amb les respostes. */}
-        {rightTab === "dev" && (
-          <div className="rp-group">
-            {/* Feina autònoma en marxa (Jam / treball autopilotat): franja
-                viva amb tasca actual, progrés i cronòmetre, sense haver de
-                canviar de pestanya. */}
-            <WorkLive />
-            <div className="rp-subtabs">
-              {SUB_DEV.map((k) => (
-                <button
-                  key={k}
-                  className={"rp-subtab" + (subDev === k ? " active" : "")}
-                  onClick={() => setSubDev(k)}
-                >
-                  {SUB_DEV_ICONS[k]} {subDevLabels[k]}
-                </button>
-              ))}
-            </div>
-            <div className="rp-group-body">
-              {subDev === "process" && (
-                <PanelErrorBoundary label={t("rightPanel.errProcess")}>
-                  <AIProcessViewer />
-                </PanelErrorBoundary>
-              )}
-              {subDev === "git" && (
-                <PanelErrorBoundary label={t("rightPanel.errGit")}>
-                  <GitPanel />
-                </PanelErrorBoundary>
-              )}
-              {subDev === "problems" && (
-                <PanelErrorBoundary label={t("rightPanel.errProblems")}>
-                  <ProblemsPanel />
-                </PanelErrorBoundary>
-              )}
-              {subDev === "console" && (
-                <PanelErrorBoundary label={t("rightPanel.errConsole")}>
-                  <DebugConsole />
-                </PanelErrorBoundary>
-              )}
-            </div>
-          </div>
+        {/* ── PESTANYES DE TREBALL DE PRIMER NIVELL (Fase 4) ──
+            «Què està fent la IA ara mateix» (Procés), Git, Problemes i
+            Consola: un clic des de qualsevol lloc, sense sub-pestanyes. */}
+        {rightTab === "process" && (
+          <PanelErrorBoundary label={t("rightPanel.errProcess")}>
+            <AIProcessViewer />
+          </PanelErrorBoundary>
+        )}
+        {rightTab === "git" && (
+          <PanelErrorBoundary label={t("rightPanel.errGit")}>
+            <GitPanel />
+          </PanelErrorBoundary>
+        )}
+        {rightTab === "problems" && (
+          <PanelErrorBoundary label={t("rightPanel.errProblems")}>
+            <ProblemsPanel />
+          </PanelErrorBoundary>
+        )}
+        {rightTab === "console" && (
+          <PanelErrorBoundary label={t("rightPanel.errConsole")}>
+            <DebugConsole />
+          </PanelErrorBoundary>
         )}
       </div>
     </div>
   );
-}
-
-/// (hook mínim per poder canviar-ho a estat compartit després)
-function useSubDev(): [SubKeyDev, (k: SubKeyDev) => void] {
-  const [k, setK] = useState<SubKeyDev>("process");
-  return [k, setK];
 }

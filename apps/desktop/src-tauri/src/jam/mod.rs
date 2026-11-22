@@ -37,6 +37,21 @@ use noorbit_planner::{Brief, Engine, LlmClient, Planner};
 
 use crate::ai::{AiManager, ChatOpts};
 
+/// NOTES DE VERIFICACIÓ OMESES: quan una comprovació de build no es pot fer
+/// (eina absent, spawn fallit, temps exhaurit) NO pot quedar un fals verd
+/// silenciós: la nota s'acumula ací i el REPORT.md la llista al final. La
+/// Jam corre en un subprocés propi, així que el registre és per-execució.
+static VERIFY_NOTES: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> =
+    std::sync::OnceLock::new();
+
+fn nota_verificacio_omesa(msg: String) {
+    eprintln!("JAM| verificació de build omesa: {msg}");
+    let m = VERIFY_NOTES.get_or_init(|| std::sync::Mutex::new(Vec::new()));
+    if let Ok(mut g) = m.lock() {
+        g.push(msg);
+    }
+}
+
 /// Durada MÀXIMA d'una Jam: 7 dies. Les feines multi-dia (un joc complex que
 /// es construeix al llarg de dies) necessiten un sostre molt per damunt de les
 /// 24 h antigues. El planner, el pare i el fill fan servir EL MATEIX límit
@@ -132,11 +147,31 @@ pub fn emit(app: &AppHandle, kind: &str, task: &str, detail: &str, ok: bool) {
 /// Client que usa l'`AiManager` de NoOrbit (proveïdor actiu de l'app).
 pub struct NoOrbitLlm {
     ai: Arc<AiManager>,
+    /// Proveïdor triat per l'usuari per a aquesta Jam (opcional).
+    ///
+    /// `None` = el proveïdor ACTIU del procés. El PARE hi posa el que ha
+    /// triat l'usuari al panell; el FILL es deixa amb l'actiu perquè el
+    /// pot canviar en marxa (l'usuari tria una altra IA sense aturar la Jam).
+    provider: Option<String>,
+    /// Model triat per l'usuari (opcional). `None` = l'actual del procés.
+    model: Option<String>,
 }
 
 impl NoOrbitLlm {
     pub fn new(ai: Arc<AiManager>) -> Self {
-        Self { ai }
+        Self {
+            ai,
+            provider: None,
+            model: None,
+        }
+    }
+
+    /// Fixa la IA d'aquesta Jam (proveïdor + model). Els valors buits es
+    /// tracten com a «no triat» (es fa servir l'actiu del procés).
+    pub fn with_ai(mut self, provider: Option<String>, model: Option<String>) -> Self {
+        self.provider = provider.filter(|p| !p.trim().is_empty());
+        self.model = model.filter(|m| !m.trim().is_empty());
+        self
     }
 }
 
@@ -146,11 +181,17 @@ impl LlmClient for NoOrbitLlm {
         // `long_run`: som en segon pla, ningú mira la pantalla. Els clients
         // d'120–240 s del xat humà tallaven la generació d'un fitxer sencer
         // amb un model local i la Jam mai arribava a escriure res.
+        //
+        // `provider`/`model`: la IA triada per l'usuari al panell de la Jam.
+        // Sense això la Jam parlava sempre amb el proveïdor actiu de l'app i
+        // l'usuari no podia triar amb qui treballava el seu joc.
         self.ai
             .chat_opts(
                 prompt,
                 None,
                 &ChatOpts {
+                    provider: self.provider.clone(),
+                    model: self.model.clone(),
                     long_run: true,
                     ..Default::default()
                 },
@@ -200,7 +241,9 @@ fn worker_prompt(task: &Task, root: &Path, lessons: &str, quality: noorbit_jam::
          4. Per MODIFICAR un fitxer que ja existeix, si surt més curt que\n\
             reescriure'l sencer: una línia «@edit: ruta», i per cada canvi\n\
             una línia «<<<<<<< CERCA», el codi antic exacte, una línia\n\
-            «=======», el codi nou (buit = esborrar) i una línia «>>>>>>>».\n\
+            «=======», el codi nou DISTINT del CERCA (buit = esborrar) i una \
+            línia «>>>>>>>». MAI edicions buides: si el fitxer ja és \
+            correcte, NO emetis res d'ell (no cal tocar el que ja funciona).\n\
          5. Si la tasca no es pot fer, explica-ho en 3 línies i no escriguis fitxers.\n\
          6. Al final, escriu una línia «RESUM: …» amb què has fet.\n\
          {lessons}",
@@ -326,6 +369,47 @@ fn thinking_excerpt(response: &str) -> String {
     out
 }
 
+/// Cada quant temps el fill avisa que continua treballant (en segons).
+pub const HEARTBEAT_SECS: u64 = 20;
+
+/// Avisa periòdicament que la IA continua treballant mentre espera.
+///
+/// Sense això el panell pot quedar MUT MINUTS sense dir res (un model local
+/// trigui minuts a escriure un fitxer sencer) i l'usuari no sap si la Jam
+/// s'ha penjat o si encara treballa. El cor batent només sona mentre hi ha
+/// una operació llarga en marxa i porta el temps que fa que espera.
+async fn with_heartbeat<T, F>(
+    sink: Option<Arc<dyn ProgressSink>>,
+    id: String,
+    what: &str,
+    fut: F,
+) -> T
+where
+    F: std::future::Future<Output = T>,
+{
+    let Some(sink) = sink else {
+        return fut.await;
+    };
+    let mut fut = Box::pin(fut);
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(HEARTBEAT_SECS));
+    // El primer tick és immediat: el saltem (el pas ja s'ha anunciat abans).
+    tick.tick().await;
+    let start = std::time::Instant::now();
+    loop {
+        tokio::select! {
+            out = &mut fut => return out,
+            _ = tick.tick() => {
+                let s = start.elapsed().as_secs();
+                sink.on_progress(Progress::Note {
+                    id: id.clone(),
+                    text: format!("{what}… (fa {s} s)"),
+                })
+                .await;
+            }
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl Worker for NoOrbitWorker {
     async fn run(&self, task: &Task, ctx: &TaskContext) -> Result<Diff, String> {
@@ -379,7 +463,14 @@ impl Worker for NoOrbitWorker {
             text: format!("generant codi per «{}»…", task.title),
         })
         .await;
-        let mut response = self.llm.complete(&prompt).await.map_err(|e| e.to_string())?;
+        let mut response = with_heartbeat(
+            self.progress.clone(),
+            task.id.clone(),
+            "la IA genera el codi",
+            self.llm.complete(&prompt),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
 
         // PROCÉS DE PENSAMENT: es mostra a la UI el raonament del model
         // (prosa + RESUM, sense blocs de codi) perquè l'usuari vegi QUÈ
@@ -435,7 +526,14 @@ impl Worker for NoOrbitWorker {
 Ara COMPLETA la tasca: escriu els fitxers que calgui amb «@file:» o «@edit:» i acaba amb «RESUM: …». \
 Si et calen més eines de motor, emet més directrius."
                 );
-                response = match self.llm.complete(&follow).await {
+                response = match with_heartbeat(
+                    self.progress.clone(),
+                    task.id.clone(),
+                    "la IA continua amb les eines de motor",
+                    self.llm.complete(&follow),
+                )
+                .await
+                {
                     Ok(r) => r,
                     Err(e) => {
                         self.emit(Progress::Note {
@@ -464,7 +562,10 @@ Si et calen més eines de motor, emet més directrius."
             let edits = crate::agent::runtools::extract_edit_blocks(&response);
             if !edits.is_empty() {
                 let report = crate::agent::runtools::apply_edit_blocks_at(&self.root, &response);
-                if !report.is_empty() {
+                // Només compta si ALGUNA secció ha canviat de veritat: un
+                // bloc CERCA == NOU (no-op) és prosa, no feina.
+                let applied = report.iter().filter(|r| r.contains("aplicades")).count();
+                if applied > 0 {
                     let touched: Vec<String> = edits
                         .iter()
                         .filter_map(|b| safe_rel(&b.path))
@@ -531,14 +632,182 @@ Si et calen més eines de motor, emet més directrius."
 
 pub struct NoOrbitVerifier {
     root: PathBuf,
-    /// Ordre de build opcional (p. ex. «npm run build»). Si és buit, no es
-    /// comprova res i només es validen els fitxers.
+    /// Ordre de build opcional (p. ex. «npm run build»). Si és None/buit,
+    /// s'aplica la VERIFICACIÓ PER DEFECTE segons el perfil del projecte
+    /// (PHP → php -l; Rust/Bevy → cargo check; Godot → check headless).
     build_cmd: Option<String>,
 }
 
 impl NoOrbitVerifier {
     pub fn new(root: PathBuf, build_cmd: Option<String>) -> Self {
         Self { root, build_cmd }
+    }
+
+    /// Nucli comú de la verificació: projecte no buit + build explícit o,
+    /// si no n'hi ha, verificació per defecte segons el perfil.
+    async fn run_inner(&self, task: &Task, files: &[String]) -> Result<(), String> {
+        // 1) El projecte ha de tenir ALMENYS un fitxer (a qualsevol nivell).
+        if !project_has_files(&self.root) {
+            return Err("el projecte és buit".into());
+        }
+
+        // 2) Build explícit o verificació per defecte.
+        let cmd = self.build_cmd.as_deref().map(str::trim).unwrap_or("");
+        if !cmd.is_empty() {
+            let out = tokio::process::Command::new("sh")
+                .arg("-c")
+                .arg(cmd)
+                .current_dir(&self.root)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true)
+                .output()
+                .await
+                .map_err(|e| format!("build: {e}"))?;
+            if !out.status.success() {
+                return Err(format!(
+                    "build fallà: {}",
+                    crate::agent::runtools::clip_head_tail(
+                        String::from_utf8_lossy(&out.stderr).trim(),
+                        400,
+                        1200,
+                    )
+                ));
+            }
+        } else {
+            self.default_verification(files).await?;
+        }
+        let _ = task;
+        Ok(())
+    }
+
+    /// VERIFICACIÓ PER DEFECTE (sense build_cmd), segons el perfil del
+    /// projecte i els fitxers REALMENT tocats. No spawna processos cars
+    /// innecessàriament: només el que toca al perfil detectat.
+    async fn default_verification(&self, files: &[String]) -> Result<(), String> {
+        // WP / PHP: `php -l` dels fitxers .php tocats (barat, sense arrencar
+        // cap servidor). Si el PHP no és instal·lat, el motor ja omet amb nota.
+        let php: Vec<String> = files
+            .iter()
+            .filter(|f| f.to_ascii_lowercase().ends_with(".php"))
+            .cloned()
+            .collect();
+        if !php.is_empty() {
+            let root = self.root.clone();
+            let results = tokio::task::spawn_blocking(move || {
+                crate::agent::runtools::lint_paths_blocking(&root, &php)
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+            let errors: Vec<&crate::agent::runtools::LintResult> =
+                results.iter().filter(|r| !r.ok).collect();
+            if !errors.is_empty() {
+                let mut msg = format!("verificació PHP fallida ({} fitxer(s)):", errors.len());
+                for e in errors.iter().take(5) {
+                    msg.push_str(&format!(
+                        "\n— {}: {}",
+                        e.path,
+                        crate::agent::runtools::clip_head_tail(&e.output, 200, 400)
+                    ));
+                }
+                return Err(msg);
+            }
+        }
+        // Bevy / Rust: `cargo check` NOMÉS si hi ha un Cargo.toml al projecte.
+        if self.root.join("Cargo.toml").is_file() {
+            let check = tokio::time::timeout(
+                Duration::from_secs(600),
+                tokio::process::Command::new("cargo")
+                    .arg("check")
+                    .arg("--quiet")
+                    .current_dir(&self.root)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .kill_on_drop(true)
+                    .output(),
+            )
+            .await;
+            match check {
+                Ok(Ok(out)) if !out.status.success() => {
+                    return Err(format!(
+                        "cargo check fallà: {}",
+                        crate::agent::runtools::clip_head_tail(
+                            String::from_utf8_lossy(&out.stderr).trim(),
+                            400,
+                            1200,
+                        )
+                    ));
+                }
+                Ok(Err(e)) => {
+                    nota_verificacio_omesa(format!("cargo no disponible ({e})"));
+                }
+                Err(_) => return Err("cargo check: temps exhaurit (10 min)".into()),
+                _ => {}
+            }
+        }
+        // Godot: check headless dels .gd tocats NOMÉS si el binari es detecta
+        // barata (detecció de disc/PATH, sense spawnar res per detectar-lo).
+        if self.root.join(crate::godot::PROJECT_FILE).is_file() {
+            let gd: Vec<&String> = files.iter().filter(|f| f.ends_with(".gd")).take(10).collect();
+            if !gd.is_empty() {
+                match crate::godot::detect_binary() {
+                    None => {
+                        nota_verificacio_omesa("godot no instal·lat".to_string());
+                    }
+                    Some(bin) => {
+                        for rel in gd {
+                            let script = self.root.join(rel);
+                            let out = tokio::time::timeout(
+                                Duration::from_secs(60),
+                                tokio::process::Command::new(&bin)
+                                    .arg("--headless")
+                                    .arg("--path")
+                                    .arg(&self.root)
+                                    .arg("--check-only")
+                                    .arg("--script")
+                                    .arg(&script)
+                                    .stdin(std::process::Stdio::null())
+                                    .stdout(std::process::Stdio::piped())
+                                    .stderr(std::process::Stdio::piped())
+                                    .kill_on_drop(true)
+                                    .output(),
+                            )
+                            .await;
+                            match out {
+                                Ok(Ok(o)) => {
+                                    if !o.status.success() {
+                                        return Err(format!(
+                                            "godot check fallà a {rel}: {}",
+                                            crate::agent::runtools::clip_head_tail(
+                                                String::from_utf8_lossy(&o.stderr).trim(),
+                                                200,
+                                                600,
+                                            )
+                                        ));
+                                    }
+                                }
+                                // Spawn fallit o temps exhaurit: NO és un fals
+                                // verd silenciós — queda nota explícita que la
+                                // verificació d'este script no s'ha fet.
+                                Ok(Err(e)) => {
+                                    nota_verificacio_omesa(format!(
+                                        "godot no s'ha pogut executar per a {rel} ({e})"
+                                    ));
+                                }
+                                Err(_) => {
+                                    nota_verificacio_omesa(format!(
+                                        "godot check de {rel} ha exhaurit el temps (60 s)"
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -595,7 +864,7 @@ impl Verifier for NoOrbitVerifier {
     async fn run_with_files(
         &self,
         task: &Task,
-        ctx: &TaskContext,
+        _ctx: &TaskContext,
         files: &[String],
     ) -> Result<(), String> {
         // Cap fitxer tocat = la tasca no ha fet res. Abans, tot i així, es
@@ -625,39 +894,11 @@ impl Verifier for NoOrbitVerifier {
                 "cap criteri d'acceptació amb fitxer trobat ({demanats} camins mencionats)"
             ));
         }
-        self.run(task, ctx).await
+        self.run_inner(task, files).await
     }
 
     async fn run(&self, task: &Task, _ctx: &TaskContext) -> Result<(), String> {
-        // 1) El projecte ha de tenir ALMENYS un fitxer (a qualsevol nivell).
-        if !project_has_files(&self.root) {
-            return Err("el projecte és buit".into());
-        }
-
-        // 2) Build opcional.
-        if let Some(cmd) = &self.build_cmd {
-            if !cmd.trim().is_empty() {
-                let out = tokio::process::Command::new("sh")
-                    .arg("-c")
-                    .arg(cmd)
-                    .current_dir(&self.root)
-                    .stdin(std::process::Stdio::null())
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .kill_on_drop(true)
-                    .output()
-                    .await
-                    .map_err(|e| format!("build: {e}"))?;
-                if !out.status.success() {
-                    return Err(format!(
-                        "build fallà: {}",
-                        String::from_utf8_lossy(&out.stderr).trim()
-                    ));
-                }
-            }
-        }
-        let _ = task;
-        Ok(())
+        self.run_inner(task, &[]).await
     }
 }
 
@@ -708,6 +949,18 @@ impl Reporter for NoOrbitReporter {
                 t.acceptance.join("; ")
             ));
         }
+        // Verificacions que NO s'han pogut fer: l'informe les declara
+        // explícitament perquè «completada» no es confonga amb «verificada».
+        if let Some(m) = VERIFY_NOTES.get() {
+            if let Ok(g) = m.lock() {
+                if !g.is_empty() {
+                    md.push_str("\n## Verificacions omeses\n\n");
+                    for n in g.iter() {
+                        md.push_str(&format!("- {n}\n"));
+                    }
+                }
+            }
+        }
         if let Some(par) = self.path.parent() {
             let _ = std::fs::create_dir_all(par);
         }
@@ -738,6 +991,94 @@ pub struct JamRequest {
     /// Què fer si el model no pot (o no vol) escriure fitxers.
     #[serde(default)]
     pub dry_run: bool,
+    /// Proveïdor d'IA triat per l'usuari al panell de la Jam (opcional).
+    ///
+    /// `None` = el proveïdor actiu de l'app (amb la caiguda de sempre:
+    /// Ollama aturat → proveïdor en línia → IA integrada).
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// Model d'IA triat per l'usuari (opcional). `None` = el model del
+    /// proveïdor triat.
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+/// Sessió PROPRIA de la Jam per fer el pla.
+///
+/// El proveïdor i el model triats per a la Jam es fixen en el `ChatOpts`, i
+/// això S'ANCORA al xat que fa la crida: si el pla es fes des del xat de
+/// l'usuari, la Jam li canviaria la IA sota els peus (i a l'inrevés, el xat
+/// heretaria la IA de la Jam). Amb una sessió pròpia, la Jam és aïllada.
+pub const JAM_SESSION: &str = "jam-plan";
+
+/// Resol la IA que farà servir la Jam: la triada per l'usuari al panell o,
+/// si no n'ha triat cap, l'ACTIVA de l'app (amb la mateixa caiguda que el
+/// xat: Ollama aturat → proveïdor en línia → IA integrada).
+///
+/// Retorna (proveïdor, model).
+pub async fn resolve_jam_ai(ai: &AiManager, req: &JamRequest) -> (String, String) {
+    let triat = req
+        .provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty());
+    let (provider, model_per_defecte) = match triat {
+        // Ollama triat a mà: es manté la CAIGUDA del xat. Si el motor local
+        // no és en marxa, la Jam no es queda penjada esperant-lo.
+        Some("ollama") => ai.active_labels().await,
+        Some(p) => (p.to_string(), ai.model_for_provider(p).await),
+        None => ai.active_labels().await,
+    };
+    // El model triat només val si la IA final és la mateixa que l'ha triat
+    // l'usuari: si Ollama ha caigut a un proveïdor en línia, el model triat
+    // (que és d'Ollama) seria incorrecte.
+    let model = match triat {
+        Some(p) if p == provider => req
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .map(|m| m.to_string())
+            .unwrap_or(model_per_defecte),
+        _ => model_per_defecte,
+    };
+    (provider, model)
+}
+
+/// Fitxer on es desa la tria d'IA de la Jam (al directori de treball).
+///
+/// El PARE l'escriu i el FILL el va llegint: això permet CANVIAR LA IA EN
+/// MARXA (l'usuari tria una altra IA al panell sense aturar la Jam).
+pub fn jam_ai_path(workdir: &Path) -> PathBuf {
+    workdir.join("ai.json")
+}
+
+/// Escriu la tria d'IA de la Jam al fitxer que engega el fill.
+///
+/// L'escriptura és ATÒMICA (fitxer temporal + renombrament): el fill ho llegeix
+/// en qualsevol moment i no ha de veure un JSON a mitges.
+pub fn write_jam_ai(path: &Path, provider: &str, model: &str) -> std::io::Result<()> {
+    let json = serde_json::json!({ "provider": provider, "model": model });
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(&json).unwrap_or_default())?;
+    std::fs::rename(&tmp, path)
+}
+
+/// Llegeix la tria d'IA de la Jam (si n'hi ha). Retorna (proveïdor, model).
+pub fn read_jam_ai(path: &Path) -> Option<(String, String)> {
+    let txt = std::fs::read_to_string(path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&txt).ok()?;
+    let provider = v.get("provider")?.as_str()?.trim().to_string();
+    if provider.is_empty() {
+        return None;
+    }
+    let model = v
+        .get("model")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    Some((provider, model))
 }
 
 pub struct JamRunner {
@@ -897,8 +1238,14 @@ impl JamRunner {
             duration: Duration::from_secs(req.duration_secs.clamp(60, MAX_JAM_DURATION_SECS)),
             budget: None,
         };
-        let llm: Arc<dyn LlmClient> = Arc::new(NoOrbitLlm::new(ai));
+        let llm: Arc<dyn LlmClient> = Arc::new(
+            NoOrbitLlm::new(ai).with_ai(req.provider.clone(), req.model.clone()),
+        );
         let planner = Planner::new(llm);
-        planner.plan(&brief).await.map_err(|e| e.to_string())
+        // Sessió AÏLLADA: la IA triada per a la Jam no toca el xat de
+        // l'usuari (que pot ser una altra IA) ni al revés.
+        crate::ai::in_session(JAM_SESSION, planner.plan(&brief))
+            .await
+            .map_err(|e| e.to_string())
     }
 }

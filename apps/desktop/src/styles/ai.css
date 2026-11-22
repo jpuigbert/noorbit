@@ -469,6 +469,16 @@
   white-space: nowrap;
   max-width: 140px;
 }
+/* Tokens de MEMÒRIA CAU: es consumeixen, però no es paguen al preu sencer.
+   Es destaquen amb el color d'èxit perquè són «els que no t'han costat res». */
+.chat-usage-cache {
+  color: var(--success);
+}
+/* COST REAL del torn (estimació amb el preu de llista del model). */
+.chat-usage-cost {
+  color: var(--accent);
+  font-weight: 600;
+}
 /* Barreta del context ocupat: es veu d'un cop d'ull si el torn s'acosta al
    límit (i és el que avisa abans de que el model talli la resposta). */
 .chat-usage-bar {

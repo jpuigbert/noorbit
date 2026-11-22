@@ -8,6 +8,7 @@ import { useTaskStore, type TaskInfo } from "../stores/taskStore";
 import { useAgentStore } from "../stores/agentStore";
 import { useTaskListStore } from "../stores/taskListStore";
 import { useWorkspaceStore } from "../stores/workspaceStore";
+import { useUIStore } from "../stores/uiStore";
 import { playFunDone, playFunError, playFunPop, unlockFunSound } from "./funSound";
 
 /// Darrer punt del ratolí (el passa useFunCursor): el confeti surt d'ací.
@@ -81,7 +82,10 @@ function confettiBurst(x: number, y: number) {
 }
 
 /// Tasca acabada amb èxit: so + cursor de festa + confeti.
+/// Mode professional: cap celebració (ni confeti ni cursor de festa);
+/// el so ja queda gatejat dins de funSound.
 export function celebrateFun() {
+  if (useUIStore.getState().professionalMode) return;
   const now = Date.now();
   celebrateUntil = now + 2600;
   if (now - lastChime > 1200) {

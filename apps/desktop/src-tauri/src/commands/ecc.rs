@@ -229,6 +229,9 @@ pub fn import_ecc_agents(
                 role,
                 system_prompt: body,
                 model: None,
+                // Els agents .md d'ECC són subagents per definició: els crida
+                // un orquestrador, no són el cap d'un xat (model OpenCode).
+                mode: Some("subagent".to_string()),
             };
             match experts.add(input) {
                 Ok(_) => agents += 1,

@@ -11,6 +11,10 @@
       /// Aquest script, inline i sense dependències, pinta l'error en pantalla.
       (function () {
         var bootErrors = [];
+        // Un cop React ha pintat, l'arrencada ha anat bé: el vigilà es retira
+        // del tot. Si no, un error trivial de sessió (p. ex. una <img> amb
+        // contingut invàlid) segrestaria la UI amb la pantalla de pànic.
+        var booted = false;
 
         function panel() {
           var el = document.getElementById("boot-error");
@@ -39,35 +43,37 @@
         }
 
         function note(text) {
+          if (booted) return;
           bootErrors.push(text);
           if (bootErrors.length <= 4) panel();
         }
 
         // Error de script o de càrrega d'un mòdul (capturem també els de recursos).
-        window.addEventListener(
-          "error",
-          function (e) {
-            if (e && e.message) {
-              note(e.message + "\n  " + (e.filename || "?") + ":" + (e.lineno || 0) + ":" + (e.colno || 0));
-            } else if (e && e.target && e.target.tagName) {
-              note("No s'ha pogut carregar el recurs: " + (e.target.src || e.target.href));
-            }
-          },
-          true
-        );
+        function onBootError(e) {
+          if (e && e.message) {
+            note(e.message + "\n  " + (e.filename || "?") + ":" + (e.lineno || 0) + ":" + (e.colno || 0));
+          } else if (e && e.target && e.target.tagName) {
+            note("No s'ha pogut carregar el recurs: " + (e.target.src || e.target.href));
+          }
+        }
+        window.addEventListener("error", onBootError, true);
 
         // Si als 6 segons l'arbre de React encara és buit, ho diem ben clar.
         setTimeout(function () {
+          if (booted) return;
           var root = document.getElementById("root");
           if (!root || root.childNodes.length === 0) {
             note("L'element #root segueix buit després de 6 s: el mòdul d'entrada no s'ha executat.");
           }
         }, 6000);
 
-        // Si finalment React aconsegueix pintar, esborrem l'avís.
+        // Si finalment React aconsegueix pintar, esborrem l'avís i DESACTIVEM
+        // el vigilà: listener d'errors fora i note() innocu per sempre.
         new MutationObserver(function (records, obs) {
           var root = document.getElementById("root");
           if (root && root.childNodes.length > 0) {
+            booted = true;
+            window.removeEventListener("error", onBootError, true);
             var el = document.getElementById("boot-error");
             if (el) el.remove();
             obs.disconnect();

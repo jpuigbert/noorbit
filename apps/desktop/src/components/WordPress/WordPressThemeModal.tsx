@@ -30,6 +30,7 @@ import {
   WP_THEME_MANIFEST_SYSTEM,
 } from "../../stores/agent/prompts";
 import { extractSingleFileContent, parseManifest } from "../../stores/agent/fileBlocks";
+import { lintPaths } from "../../stores/agent/lintPaths";
 import "./WordPressThemeModal.css";
 
 /**
@@ -127,6 +128,12 @@ export default function WordPressThemeModal() {
   const [msg, setMsg] = useState<string | null>(null);
   const [files, setFiles] = useState<string[]>([]);
   const [themePath, setThemePath] = useState<string | null>(null);
+  // Estat REAL de la generació (Fase 1): fitxers amb errors de sintaxi
+  // després dels reintents, fitxers no generats (mai placeholders) i nota
+  // de degradació si el backend no té el comandament lint_paths.
+  const [lintIssues, setLintIssues] = useState<{ path: string; output: string }[]>([]);
+  const [missingFiles, setMissingFiles] = useState<string[]>([]);
+  const [lintNote, setLintNote] = useState<string | null>(null);
   const [workMins, setWorkMins] = useState(0);
   const [workCustomVal, setWorkCustomVal] = useState(2);
   const [workCustomUnit, setWorkCustomUnit] = useState<TimeUnit>("h");
@@ -185,6 +192,9 @@ export default function WordPressThemeModal() {
     setMsg(null);
     setFiles([]);
     setThemePath(null);
+    setLintIssues([]);
+    setMissingFiles([]);
+    setLintNote(null);
     setApiForm(emptyApiForm());
     setDlModel("");
     setWorkMins(0);
@@ -256,6 +266,9 @@ export default function WordPressThemeModal() {
     setErr(null);
     setMsg(null);
     setFiles([]);
+    setLintIssues([]);
+    setMissingFiles([]);
+    setLintNote(null);
     try {
       // 1) Carpeta del tema.
       const path = await invoke<string>("create_project", {
@@ -291,26 +304,38 @@ export default function WordPressThemeModal() {
       );
 
       // 3) Fitxer a fitxer: un model dèbil no escriu vint fitxers d'un cop.
-      const made: string[] = [];
-      for (const rel of ordered) {
-        setBusy(rel);
-        setMsg(t("wpTheme.generating", { file: rel }));
-        let content = "";
+      //    MAI placeholders ni fitxers «fingits»: si el model no retorna
+      //    contingut, es regenera UN cop; si torna a fallar, el fitxer queda
+      //    SENSE escriure i es reporta com a no generat (estat real).
+      const askFile = async (rel: string, extra = ""): Promise<string> => {
         try {
           const raw = await invoke<string>("ai_chat_plain", {
-            prompt: wpPrompt(rel, name.trim(), idea.trim(), author.trim()),
+            prompt: wpPrompt(rel, name.trim(), idea.trim(), author.trim()) + extra,
             system: WP_THEME_FILE_SYSTEM,
             provider: provider ?? undefined,
             model: model ?? undefined,
           });
-          content = extractSingleFileContent(raw);
+          return extractSingleFileContent(raw);
         } catch {
-          content = "";
+          return "";
+        }
+      };
+      const made: string[] = [];
+      const missing: string[] = [];
+      const writtenPhp: string[] = [];
+      for (const rel of ordered) {
+        setBusy(rel);
+        setMsg(t("wpTheme.generating", { file: rel }));
+        let content = await askFile(rel);
+        if (!content.trim()) {
+          setMsg(t("wpTheme.regenerating", { file: rel }));
+          content = await askFile(rel);
         }
         if (!content.trim()) {
-          // L'usuari ha de saber què ha quedat pendent (no li diem mentida).
-          made.push(rel);
-          setFiles([...made]);
+          // L'usuari ha de saber què ha quedat sense generar (no li diem
+          // mentida: abans es comptava com a «fet» sense escriure res).
+          missing.push(rel);
+          setMissingFiles([...missing]);
           continue;
         }
         // write_file crea la carpeta de destinació si no hi és (create_dir
@@ -318,17 +343,63 @@ export default function WordPressThemeModal() {
         const abs = `${path.replace(/\/+$/, "")}/${rel}`;
         await invoke("write_file", { path: abs, content });
         made.push(rel);
+        if (/\.php$/i.test(rel)) writtenPhp.push(rel);
         setFiles([...made]);
       }
 
+      // 4) LINT del PHP escrit (php -l via lint_paths): si hi ha errors, es
+      //    regeneruen els fitxers fallants amb l'error com a context (màx. 3
+      //    intents). Mai es diu «tema creat» sense lint verd: si el backend
+      //    no té el comandament, es degrada amb nota visible.
+      let lintErrors: { path: string; output: string }[] = [];
+      let lintAvailable = true;
+      if (writtenPhp.length > 0) {
+        setBusy("lint");
+        setMsg(t("wpTheme.lintChecking"));
+        const first = await lintPaths(path, writtenPhp);
+        lintAvailable = first.available;
+        let bad = first.results.filter((r) => !r.ok);
+        for (let attempt = 1; attempt <= 3 && lintAvailable && bad.length > 0; attempt++) {
+          for (const b of bad) {
+            setMsg(t("wpTheme.lintFixing", { file: b.path, attempt }));
+            const content = await askFile(
+              b.path,
+              `\n\nL'INTENT ANTERIOR TENIA AQUEST ERROR DE SINTAXI (php -l):\n${b.output}\n\n` +
+                `Reescriu el fitxer COMPLET corregint-lo. Cap text fora del codi.`,
+            );
+            if (content.trim()) {
+              const abs = `${path.replace(/\/+$/, "")}/${b.path}`;
+              await invoke("write_file", { path: abs, content });
+            }
+          }
+          const re = await lintPaths(path, bad.map((b) => b.path));
+          if (!re.available) {
+            lintAvailable = false;
+            break;
+          }
+          bad = re.results.filter((r) => !r.ok);
+        }
+        lintErrors = bad.map((b) => ({ path: b.path, output: b.output }));
+      }
+      setLintIssues(lintErrors);
+      if (!lintAvailable && writtenPhp.length > 0) setLintNote(t("wpTheme.lintUnavailable"));
+
       setBusy(null);
-      setMsg(t("wpTheme.created", { path, n: made.length }));
+      // Estat REAL: «creat» només si tot ha anat bé; si falten fitxers o
+      // queden errors de sintaxi, el missatge ho diu clarament.
+      const teProblemes = lintErrors.length > 0 || missing.length > 0;
+      setMsg(
+        teProblemes
+          ? t("wpTheme.createdWithErrors", { path, n: made.length })
+          : t("wpTheme.created", { path, n: made.length }),
+      );
       // Obre el tema com a projecte perquè l'usuari hi treballi de seguida.
       await useWorkspaceStore.getState().openWorkspace(path);
       // MILLORA AUTOPILOTADA: si l'usuari ha triat un temps de treball extra,
       // la IA continua millorant el tema (bugs, rendiment, SEO, noves
       // funcionalitats…) durant eixe temps, sense que l'usuari toque res.
-      if (effectiveWorkMins > 0) {
+      // NO s'arrenca sobre un tema amb errors de sintaxi coneguts.
+      if (effectiveWorkMins > 0 && lintErrors.length === 0) {
         setMsg(t("wpTheme.workStarting"));
         await startWork(path);
       }
@@ -632,6 +703,26 @@ export default function WordPressThemeModal() {
                 </div>
               )}
 
+              {/* ESTAT REAL: fitxers no generats i errors de sintaxi que han
+                  sobreviscut als 3 intents de regeneració. */}
+              {missingFiles.length > 0 && (
+                <div className="wp-msg err">
+                  <AlertTriangle size={13} />{" "}
+                  {t("wpTheme.missingFiles", { n: missingFiles.length, files: missingFiles.join(", ") })}
+                </div>
+              )}
+              {lintNote && <div className="wp-msg">{lintNote}</div>}
+              {lintIssues.length > 0 && (
+                <div className="wp-msg err">
+                  <AlertTriangle size={13} /> {t("wpTheme.lintFailedTitle", { n: lintIssues.length })}
+                  {lintIssues.map((li) => (
+                    <pre key={li.path} style={{ whiteSpace: "pre-wrap", margin: "4px 0 0" }}>
+                      {`${li.path}\n${li.output}`}
+                    </pre>
+                  ))}
+                </div>
+              )}
+
               {/* TEMPS DE TREBALL EXTRA (millora autopilotada): la IA treballa
                   eixe temps buscant millores i bugs i implementant-los sola. */}
               <div className="field">
@@ -688,7 +779,7 @@ export default function WordPressThemeModal() {
                 )}
               </div>
 
-              {themePath && effectiveWorkMins > 0 && !wpState?.running && busy === null && (
+              {themePath && effectiveWorkMins > 0 && !wpState?.running && busy === null && lintIssues.length === 0 && (
                 <button className="btn sm primary" onClick={() => void startWork(themePath)}>
                   <Sparkles size={12} /> {t("wpTheme.workStart")}
                 </button>

@@ -13,6 +13,8 @@ import { useT } from "../../i18n";
 /// primer: botó d'instal·lació AUTOMÀTICA que baixa també el Node.js LTS si
 /// falta, tot dins de les dades de NoOrbit (mode portàtil inclòs) i sense
 /// permisos d'administrador.
+/// GitHub Copilot hi joins: el seu CLI (runtime en Rust) parla ACP, i NoOrbit
+/// li parla com a client (streaming, eines dins del projecte i permisos).
 export default function HarnessSection() {
   const { t } = useT();
   const [installed, setInstalled] = useState(false);
@@ -21,6 +23,12 @@ export default function HarnessSection() {
   const [progress, setProgress] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [copilotOn, setCopilotOn] = useState(false);
+  const [copilotVer, setCopilotVer] = useState<string | null>(null);
+  const [copilotBusy, setCopilotBusy] = useState(false);
+  const [copilotProgress, setCopilotProgress] = useState<string | null>(null);
+  const [copilotMsg, setCopilotMsg] = useState<string | null>(null);
+  const [copilotErr, setCopilotErr] = useState<string | null>(null);
 
   const refresh = async () => {
     try {
@@ -35,8 +43,23 @@ export default function HarnessSection() {
     }
   };
 
+  /// Estat del CLI de Copilot: si és instal·lat i quina versió té.
+  const refreshCopilot = async () => {
+    try {
+      const [inst, ver] = await Promise.all([
+        invoke<boolean>("copilot_installed"),
+        invoke<string | null>("copilot_version"),
+      ]);
+      setCopilotOn(inst);
+      setCopilotVer(ver);
+    } catch {
+      /* backend no preparat: deixem l'últim estat */
+    }
+  };
+
   useEffect(() => {
     void refresh();
+    void refreshCopilot();
   }, []);
 
   /// Progrés de la instal·lació: el backend emet «agent://progress» amb la
@@ -48,6 +71,9 @@ export default function HarnessSection() {
       (e) => {
         if (e.payload?.label === "DeepSeek Harness") {
           setProgress(e.payload.detail ?? null);
+        }
+        if (e.payload?.label === "GitHub Copilot") {
+          setCopilotProgress(e.payload.detail ?? null);
         }
       }
     )
@@ -94,6 +120,22 @@ export default function HarnessSection() {
       await invoke("web_ia_open", { name: "dsh" });
     } catch (e) {
       setErr(String(e));
+    }
+  };
+
+  /// Instal·lació del CLI de GitHub Copilot (amb el seu Node.js si cal).
+  const installCopilot = async () => {
+    setCopilotBusy(true);
+    setCopilotErr(null);
+    setCopilotMsg(null);
+    try {
+      setCopilotMsg(await invoke<string>("install_copilot"));
+    } catch (e) {
+      setCopilotErr(String(e));
+    } finally {
+      setCopilotBusy(false);
+      setCopilotProgress(null);
+      void refreshCopilot();
     }
   };
 
@@ -147,6 +189,55 @@ export default function HarnessSection() {
       {err && <div className="settings-msg err">{err}</div>}
 
       <p className="lp-hint">{t("providers.harnessDeepSeekNote")}</p>
+
+      {/* ── GitHub Copilot: motor ACP (streaming, eines i permisos) ─────── */}
+      <div className="prov-row">
+        <div className="prov-main">
+          <div className="prov-title">{t("providers.harnessCopilotName")}</div>
+          <div className="prov-url">{t("providers.harnessCopilotDesc")}</div>
+          <div className="prov-token">
+            {copilotOn
+              ? t("providers.harnessCopilotInstalled", { version: copilotVer ?? "—" })
+              : t("providers.harnessCopilotNotInstalled")}
+          </div>
+        </div>
+        <div className="prov-actions">
+          {!copilotOn ? (
+            <button
+              className="btn sm primary"
+              disabled={copilotBusy}
+              onClick={() => void installCopilot()}
+            >
+              {copilotBusy ? (
+                <RefreshCw size={12} className="spin" />
+              ) : (
+                <Download size={12} />
+              )}{" "}
+              {copilotBusy
+                ? t("providers.installingCopilot")
+                : t("providers.installCopilot")}
+            </button>
+          ) : (
+            <button
+              className="icon-btn"
+              onClick={() => void refreshCopilot()}
+              title={t("common.refresh")}
+            >
+              <RefreshCw size={13} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {copilotBusy && copilotProgress && (
+        <div className="lp-hint">
+          <RefreshCw size={12} className="spin" /> {copilotProgress}
+        </div>
+      )}
+      {copilotMsg && <div className="settings-msg ok">{copilotMsg}</div>}
+      {copilotErr && <div className="settings-msg err">{copilotErr}</div>}
+
+      <p className="lp-hint">{t("providers.harnessCopilotNote")}</p>
     </div>
   );
 }

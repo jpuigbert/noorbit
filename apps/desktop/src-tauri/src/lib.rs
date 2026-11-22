@@ -3,6 +3,7 @@
 pub mod agent;
 pub mod ai;
 pub mod api;
+pub mod acp;
 pub mod autonomous;
 pub mod bevy;
 pub mod blender;
@@ -149,9 +150,17 @@ pub fn run() {
         .manage(agent_state)
         .manage(blender_state)
         .setup(move |app| {
+            use tauri::Manager;
             // «Arrenquen soles»: en obrir NoOrbit es reempren les feines
             // autònomes actives (amb espera per deixar pujar Ollama).
             let handle = app.handle().clone();
+            // Enganxa l'aplicació al gestor d'IA: els camins que no la reben
+            // com a paràmetre (el xat sense streaming, que usen els agents i
+            // els planificadors) necessiten poder emetre la comptabilització
+            // de tokens del torn.
+            app.state::<AppState>()
+                .ai_manager
+                .set_app(handle.clone());
             autonomous::commands::resume_all(&handle);
             // Registres de servidors locals orfes (l'app anterior va morir
             // de cop): es netejen abans d'arrencar res, sinó el port del
@@ -161,6 +170,19 @@ pub fn run() {
             // el motor, si n'hi ha) perquè la nativa tinga un LLM real de
             // ple dret sense dependre de la ruta de l'instal·lador.
             crate::ai::native_llm::init(&handle);
+
+            // SNAPSHOTS GIT SHADOW: el git-dir ocult viu a les dades de
+            // l'app (app_data_dir), MAI dins del projecte ni del seu .git.
+            // Si Tauri no pot resoldre app_data_dir, es degrada al
+            // data_dir de config (mode portàtil inclòs).
+            let snap_dir = app
+                .path()
+                .app_data_dir()
+                .unwrap_or_else(|_| {
+                    config::AppConfig::data_dir()
+                        .unwrap_or_else(|| std::env::temp_dir().join("no-orbit"))
+                });
+            crate::agent::snapshot::init(snap_dir);
 
             // MUNTATGE DE VÍDEO: els bucles d'IA (Jam, treball autopilotat, xat
             // amb eines de motor) no reben `State<'_, …>`, així que els handles
@@ -304,6 +326,10 @@ pub fn run() {
                     // tancar un panell separat (xat o terminal) mataria la IA
                     // mentre l'app segueix oberta.
                     crate::ai::llamacpp::stop_all();
+                    // Sessions PTY del terminal: cap shell òrfena en sortir.
+                    crate::commands::term::kill_all();
+                    // Sessió LSP persistent (Fase 3c): cap servidor orfe.
+                    crate::lsp::session::kill_all();
                 } else if label == "noorbit-chat" || label == "noorbit-terminal" {
                     // Xarxa de seguretat: si una finestra separada mor sense
                     // passar pel seu tancament JS (crash del webview, tancament
@@ -342,14 +368,26 @@ pub fn run() {
             commands::git::git_stash_list,
             commands::git::git_stash_pop,
             commands::git::git_log,
+            // Snapshots git shadow per pas d'agent (desfer fiable, Fase 1d).
+            commands::snapshot::snapshot_count,
+            commands::snapshot::snapshot_undo,
             commands::term::run_command,
             commands::term::kill_command,
+            // Terminal PTY real multi-sessió (Fase 3b).
+            commands::term::term_start,
+            commands::term::term_write,
+            commands::term::term_resize,
+            commands::term::term_kill,
+            commands::term::term_list,
+            commands::term::term_scrollback,
             commands::workspace::open_workspace,
             commands::workspace::create_project,
             jam::commands::jam_plan,
             jam::commands::jam_start,
             jam::commands::jam_stop,
             jam::commands::jam_state,
+            // Canviar la IA de la Jam EN MARXA (sense aturar-la).
+            jam::commands::jam_set_ai,
             engine_open::open_project_in_engine,
             engine_open::godot_status,
             engine_open::bevy_status,
@@ -375,6 +413,11 @@ pub fn run() {
             commands::ai::send_prompt,
             commands::ai::ai_chat_plain,
             commands::ai::send_prompt_stream,
+            // Mode del motor (auto/local/cloud) — Fase 2.
+            commands::ai::ai_engine_mode_get,
+            commands::ai::ai_engine_mode_set,
+            // Verificació de sintaxi barata (php -l / node --check) per a la UI.
+            commands::ai::lint_paths,
             commands::ai::list_providers,
             commands::ai::set_active_provider,
             commands::ai::ollama_is_running,
@@ -385,6 +428,8 @@ pub fn run() {
             commands::ai::ollama_delete_model,
             commands::ai::ollama_loaded_models,
             commands::ai::ollama_unload_models,
+            // Allibera la memòria que NoOrbit no necessita (models + motors).
+            commands::ai::ai_free_ram,
             commands::ai::ollama_get_keep_alive,
             commands::ai::ollama_set_keep_alive,
             commands::ai::ollama_suggested_models,
@@ -422,6 +467,10 @@ pub fn run() {
             commands::ai::install_dsh,
             commands::ai::start_dsh_web,
             commands::ai::dsh_web_running,
+            commands::ai::copilot_installed,
+            commands::ai::copilot_version,
+            commands::ai::install_copilot,
+            commands::ai::acp_permission_reply,
             commands::ai::ollama_get_models_dir,
             commands::ai::ollama_set_models_dir,
             commands::ai::ollama_migrate_models,
@@ -539,6 +588,15 @@ pub fn run() {
             // Config
             commands::config::get_config,
             commands::config::update_config,
+            commands::config::list_lsp_servers,
+            // LSP headless persistent (Fase 3c): diagnòstics i IntelliSense
+            // reals amb degradació honesta si no hi ha servidor instal·lat.
+            lsp::commands::lsp_completion,
+            lsp::commands::lsp_hover,
+            lsp::commands::lsp_references,
+            lsp::commands::lsp_definition,
+            lsp::commands::lsp_diagnostics,
+            lsp::commands::lsp_status,
             // Informe de fallides («crash»): es pot copiar i enviar.
             commands::crash::crash_report,
             commands::crash::crash_log_path,

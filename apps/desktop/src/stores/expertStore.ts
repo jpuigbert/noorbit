@@ -1,5 +1,8 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import { expertFromMarkdown, expertToMarkdown, expertFileName, type ExpertMode } from "../utils/expertMarkdown";
+
+export type { ExpertMode };
 
 export interface Expert {
   id: string;
@@ -7,6 +10,9 @@ export interface Expert {
   role: string;
   systemPrompt: string;
   model: string | null;
+  /// Com pot treballar (patró OpenCode/Qoder): "primary" = cap al xat,
+  /// "subagent" = obrer (delegat/equip), "all" o absent = les dues coses.
+  mode?: ExpertMode | null;
   createdAt: number;
 }
 
@@ -15,6 +21,7 @@ export interface ExpertInput {
   role: string;
   systemPrompt: string;
   model: string | null;
+  mode?: ExpertMode | null;
 }
 
 export interface SubtaskResult {
@@ -30,6 +37,9 @@ export interface ProgressEvent {
   expert: string | null;
   detail: string;
   elapsedMs?: number;
+  /// Temps RESTANT estimat de l'equip (ms). 0/absent = el backend encara no
+  /// pot estimar-lo (la UI l'oculta).
+  etaMs?: number;
 }
 
 interface ExpertState {
@@ -50,6 +60,10 @@ interface ExpertState {
   create: (input: ExpertInput) => Promise<void>;
   update: (id: string, input: ExpertInput) => Promise<void>;
   remove: (id: string) => Promise<void>;
+  /// Exporta un especialista com a fitxer .md (compartible/versionable).
+  exportMarkdown: (e: Expert) => Promise<string | null>;
+  /// Importa especialistes des de fitxers .md (crea o sincronitza pel nom).
+  importMarkdown: () => Promise<number>;
   requestCreate: () => void;
   clearCreateRequest: () => void;
   runSolo: (
@@ -152,6 +166,74 @@ export const useExpertStore = create<ExpertState>((set, get) => ({
       await get().load();
     } catch (e) {
       set({ error: String(e) });
+    }
+  },
+
+  // Els fitxers .md fan el que ja fan els subagents de Qoder i d'OpenCode:
+  // un especialista és declaratiu, es pot guardar al repo i compartir.
+  exportMarkdown: async (e) => {
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+      const path = await save({
+        defaultPath: expertFileName(e.name),
+        filters: [{ name: "Markdown", extensions: ["md"] }],
+      });
+      if (!path) return null;
+      const file = path.endsWith(".md") ? path : `${path}.md`;
+      await writeTextFile(file, expertToMarkdown(e));
+      return file;
+    } catch (err) {
+      set({ error: String(err) });
+      return null;
+    }
+  },
+
+  importMarkdown: async () => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const { readTextFile } = await import("@tauri-apps/plugin-fs");
+      const sel = await open({
+        multiple: true,
+        title: "Tria els fitxers .md d'especialistes",
+        filters: [{ name: "Markdown", extensions: ["md"] }],
+      });
+      if (!sel) return 0;
+      const files = Array.isArray(sel) ? sel : [sel];
+      let n = 0;
+      for (const f of files) {
+        let parsed;
+        try {
+          parsed = expertFromMarkdown(await readTextFile(f));
+        } catch {
+          continue; // un fitxer il·legible no pot aturar la resta de la remesa
+        }
+        if (!parsed.name.trim()) continue;
+        // El nom és la clau: si ja existeix, el fitxer MANA (sincronització
+        // declarativa, com els agents .md d'OpenCode); si no, es crea.
+        const existing = get().experts.find(
+          (x) => x.name.trim().toLowerCase() === parsed.name.trim().toLowerCase()
+        );
+        const input: ExpertInput = {
+          name: parsed.name,
+          role: parsed.role,
+          systemPrompt: parsed.systemPrompt,
+          model: parsed.model,
+          mode: parsed.mode ?? "all",
+        };
+        try {
+          if (existing) await invoke("expert_update", { id: existing.id, input });
+          else await invoke("expert_create", { input });
+          n++;
+        } catch (e) {
+          set({ error: String(e) });
+        }
+      }
+      if (n > 0) await get().load();
+      return n;
+    } catch (err) {
+      set({ error: String(err) });
+      return 0;
     }
   },
 

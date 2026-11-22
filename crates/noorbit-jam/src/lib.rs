@@ -377,7 +377,22 @@ async fn run_inner(
     let deadline = Instant::now().checked_add(plan.duration).unwrap_or_else(Instant::now);
     let mut last_good = match deps.ckpt.head().await {
         Ok(sha) => sha,
-        Err(e) => { warn!("head: {e}"); stats.skipped = plan.tasks.len() as u32; return stats; }
+        Err(e) => {
+            warn!("head: {e}");
+            // Mai silenci: sense punt de partida la Jam NO pot treballar (es
+            // saltaria tot). L'usuari ho ha de veure al registre mateix.
+            deps.progress(Progress::Note {
+                id: String::new(),
+                text: format!(
+                    "no puc començar: el projecte no té un commit base de git ({e}). \
+                     Cap tasca s'executarà — crea un projecte nou amb NoOrbit o \
+                     fes un primer commit a la carpeta."
+                ),
+            })
+            .await;
+            stats.skipped = plan.tasks.len() as u32;
+            return stats;
+        }
     };
     let mut tracker = PhaseTracker::new(plan.budget.clone());
     let mut global_quality = QualityLevel::Full;

@@ -1,8 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { Loader2, Plus, Trash2, Pencil, Users, X, Square, MessagesSquare } from "lucide-react";
+import {
+  Loader2,
+  Plus,
+  Trash2,
+  Pencil,
+  Users,
+  X,
+  Square,
+  CheckSquare,
+  Copy,
+  Search,
+  MessagesSquare,
+  FileDown,
+  FileUp,
+} from "lucide-react";
 import { useT } from "../../i18n";
-import { useExpertStore, type Expert, type ExpertInput } from "../../stores/expertStore";
+import { formatDuration } from "../../utils/workTime";
+import { useExpertStore, type Expert, type ExpertInput, type ExpertMode } from "../../stores/expertStore";
+import { toastSuccess } from "../../stores/toastStore";
 import { useAIStore } from "../../stores/aiStore";
 import { useAgentStore } from "../../stores/agentStore";
 import { usePreviewStore } from "../../stores/previewStore";
@@ -99,6 +115,8 @@ export default function ExpertsPanel() {
       create: st.create,
       update: st.update,
       remove: st.remove,
+      exportMarkdown: st.exportMarkdown,
+      importMarkdown: st.importMarkdown,
       clearCreateRequest: st.clearCreateRequest,
       runTeam: st.runTeam,
       stopTeam: st.stopTeam,
@@ -109,6 +127,8 @@ export default function ExpertsPanel() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [goal, setGoal] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
+  // Filtre de la llista: amb molts especialistes trobar-los era un calvari.
+  const [filter, setFilter] = useState("");
 
   useEffect(() => {
     s.setupEvents();
@@ -135,7 +155,7 @@ export default function ExpertsPanel() {
     const e = s.experts.find((x) => x.id === id);
     if (!e) return;
     setEditingId(id);
-    setForm({ name: e.name, role: e.role, systemPrompt: e.systemPrompt, model: e.model });
+    setForm({ name: e.name, role: e.role, systemPrompt: e.systemPrompt, model: e.model, mode: e.mode ?? null });
   };
   const submitForm = async () => {
     if (!form || !form.name.trim()) return;
@@ -147,6 +167,45 @@ export default function ExpertsPanel() {
 
   const togglePick = (id: string) =>
     setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
+  // Selecció EN BLOC: l'acció de «Tots/Cap» va sobre els VISIBLES (si hi ha
+  // filtre actiu) per no perdre manualització; el recompte sempre és global.
+  const visible = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return s.experts;
+    return s.experts.filter((e) =>
+      `${e.name} ${e.role}`.toLowerCase().includes(q)
+    );
+  }, [s.experts, filter]);
+  const allVisiblePicked =
+    visible.length > 0 && visible.every((e) => picked.includes(e.id));
+  const pickAll = () =>
+    setPicked((p) => Array.from(new Set([...p, ...visible.map((e) => e.id)])));
+  const pickNone = () => {
+    const hid = new Set(visible.map((e) => e.id));
+    setPicked((p) => p.filter((x) => !hid.has(x)));
+  };
+  // Duplicar: base per a un expert nou sense refer el sistema sencer.
+  const duplicate = async (e: Expert) => {
+    await s.create({
+      name: `${e.name} (còpia)`,
+      role: e.role,
+      systemPrompt: e.systemPrompt,
+      model: e.model,
+      mode: e.mode ?? null,
+    });
+  };
+
+  // Importar/exportar .md (patró OpenCode/Qoder): els especialistes es
+  // guarden al projecte, es versionen amb Git i es comparteixen amb l'equip.
+  const exportMd = async (e: Expert) => {
+    const file = await s.exportMarkdown(e);
+    if (file) toastSuccess(t("experts.exported").replace("{f}", file.split("/").pop() ?? file));
+  };
+  const importMd = async () => {
+    const n = await s.importMarkdown();
+    if (n > 0) toastSuccess(t("experts.imported").replace("{n}", String(n)));
+  };
 
   // CREA EQUIP RÀPID: sense haver de crear especialistes a mà, un clic
   // prepara l'equip bàsic (Arquitecte · Programador · Revisor) amb rols
@@ -181,9 +240,29 @@ export default function ExpertsPanel() {
     for (const e of QUICK_TEAM) await s.create(e);
   };
 
+  // Obrers per defecte (mode ≠ primary): els usa el treball en equip quan
+  // l'usuari no n'ha seleccionat cap a mà.
+  const workerIds = useMemo(
+    () => s.experts.filter((e) => e.mode !== "primary").map((e) => e.id),
+    [s.experts]
+  );
+  const teamIds = () => (picked.length > 0 ? picked : workerIds.length > 0 ? workerIds : s.experts.map((e) => e.id));
+
   const runTeam = () => {
-    void s.runTeam(goal, picked.length > 0 ? picked : s.experts.map((e) => e.id));
+    // Per defecte només treballen els obrers (mode ≠ primary): el cap dona
+    // ordres al xat, no executa subtasques (herència del model OpenCode).
+    void s.runTeam(goal, teamIds());
   };
+
+  // ETA de l'equip: el backend la calcula amb el ritme REAL dels torns ja
+  // acabats (0 = encara sense dades). Agafem l'últim valor útil.
+  const teamEtaMs = useMemo(() => {
+    for (let i = s.teamProgress.length - 1; i >= 0; i--) {
+      const e = s.teamProgress[i].etaMs ?? 0;
+      if (e > 0) return e;
+    }
+    return 0;
+  }, [s.teamProgress]);
 
   return (
     <div className="ex-panel">
@@ -232,6 +311,16 @@ export default function ExpertsPanel() {
               </option>
             ))}
           </select>
+          {/* Mode de treball (patró OpenCode): cap / obrer / ambdós. */}
+          <select
+            className="ex-input"
+            value={form.mode ?? "all"}
+            onChange={(e) => setForm({ ...form, mode: (e.target.value || "all") as ExpertMode })}
+          >
+            <option value="all">{t("experts.modeAll")}</option>
+            <option value="primary">{t("experts.modePrimary")}</option>
+            <option value="subagent">{t("experts.modeSubagent")}</option>
+          </select>
           <button
             className="btn sm primary"
             disabled={!form.name.trim() || s.busy}
@@ -259,8 +348,42 @@ export default function ExpertsPanel() {
         </div>
       )}
 
+      {s.experts.length > 0 && (
+        <div className="ex-toolbar">
+          <button
+            className="btn sm"
+            onClick={allVisiblePicked ? pickNone : pickAll}
+            title={allVisiblePicked ? t("experts.selectNone") : t("experts.selectAll")}
+          >
+            {allVisiblePicked ? <Square size={12} /> : <CheckSquare size={12} />}
+            {allVisiblePicked ? t("experts.selectNone") : t("experts.selectAll")}
+          </button>
+          {picked.length > 0 && !allVisiblePicked && (
+            <button className="btn sm" onClick={pickNone} title={t("experts.selectNone")}>
+              <Square size={12} /> {t("experts.selectNone")}
+            </button>
+          )}
+          <button className="btn sm" onClick={() => void importMd()} title={t("experts.importHint")}>
+            <FileUp size={12} /> {t("experts.import")}
+          </button>
+          {s.experts.length > 5 && (
+            <span className="ex-filter">
+              <Search size={11} />
+              <input
+                placeholder={t("experts.filterPh")}
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+              />
+            </span>
+          )}
+          <span className="ex-count">
+            {t("experts.selectedCount", { n: picked.length, total: s.experts.length })}
+          </span>
+        </div>
+      )}
+
       <div className="ex-list">
-        {s.experts.map((e) => (
+        {visible.map((e) => (
           <div key={e.id} className="ex-card">
             <label className="ex-pick" title={t("experts.pickForTeam")}>
               <input
@@ -274,10 +397,30 @@ export default function ExpertsPanel() {
               <div className="ex-card-role">
                 {e.role}
                 {e.model && <span className="ex-model-chip">{e.model}</span>}
+                {e.mode === "primary" && (
+                  <span className="ex-model-chip" title={t("experts.modePrimary")}>{t("experts.chipPrimary")}</span>
+                )}
+                {e.mode === "subagent" && (
+                  <span className="ex-model-chip" title={t("experts.modeSubagent")}>{t("experts.chipSubagent")}</span>
+                )}
               </div>
             </div>
             <button className="icon-btn" title={t("common.edit")} onClick={() => startEdit(e.id)}>
               <Pencil size={13} />
+            </button>
+            <button
+              className="icon-btn"
+              title={t("experts.exportMd")}
+              onClick={() => void exportMd(e)}
+            >
+              <FileDown size={13} />
+            </button>
+            <button
+              className="icon-btn"
+              title={t("experts.duplicate")}
+              onClick={() => void duplicate(e)}
+            >
+              <Copy size={13} />
             </button>
             <button
               className="icon-btn"
@@ -288,6 +431,9 @@ export default function ExpertsPanel() {
             </button>
           </div>
         ))}
+        {visible.length === 0 && filter && (
+          <div className="ex-team-hint">{t("experts.filterEmpty")}</div>
+        )}
       </div>
 
       {/* Treball múltiple en equip */}
@@ -306,6 +452,7 @@ export default function ExpertsPanel() {
           className="btn sm primary"
           disabled={s.teamRunning || !goal.trim() || s.experts.length === 0}
           onClick={runTeam}
+          title={picked.length === 0 ? t("experts.teamRunAllHint", { n: teamIds().length }) : undefined}
         >
           {s.teamRunning && <Loader2 size={12} className="spin" />} {t("experts.teamRun")}
         </button>
@@ -314,22 +461,23 @@ export default function ExpertsPanel() {
             <Square size={11} /> {t("experts.teamStop")}
           </button>
         )}
-        {picked.length > 0 && (
-          <div className="ex-team-picked">
-            {t("experts.workingWith")}{" "}
-            {picked
-              .map((id) => s.experts.find((e) => e.id === id)?.name)
-              .filter(Boolean)
-              .join(", ")}
-          </div>
-        )}
+        <div className="ex-team-picked">
+          {picked.length > 0
+            ? t("experts.workingWith") +
+              " " +
+              picked
+                .map((id) => s.experts.find((e) => e.id === id)?.name)
+                .filter(Boolean)
+                .join(", ")
+            : t("experts.teamRunAllHint", { n: teamIds().length })}
+        </div>
 
         {/* EN DIRECTE: el que cada especialista està escrivint ara mateix,
             amb el mateix format del xat principal (sessió «team:<id>»).
             Es veu mentre corre l'equip i fins que es tanca el panell. */}
         {(s.teamRunning || s.teamProgress.length > 0) && (
           <div className="ex-live">
-            {[...(picked.length > 0 ? picked : s.experts.map((e) => e.id))]
+            {[...teamIds()]
               .map((id) => s.experts.find((e) => e.id === id))
               .filter((e): e is Expert => Boolean(e))
               .map((e) => (
@@ -353,7 +501,10 @@ export default function ExpertsPanel() {
                         )
                       )
                     )
-                  )
+                  ) +
+                  (teamEtaMs > 0
+                    ? ` · ${t("experts.teamEta", { d: formatDuration(teamEtaMs) })}`
+                    : "")
                 : t("experts.teamFinished")}
             </div>
             {s.teamProgress.map((p, i) => (

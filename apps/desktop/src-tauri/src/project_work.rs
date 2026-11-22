@@ -448,6 +448,9 @@ async fn run_loop(
     let deadline = start.checked_add(budget).unwrap_or(start);
     let mut pass = 0u32;
     let mut files_changed = 0u32;
+    // Bucle de verificació: errors de `php -l` de la passada anterior que es
+    // realimenten a la següent perquè la IA els corregeixi ABANS de millorar.
+    let mut lint_feedback = String::new();
     // El treball autopilotat pot durar dies sense que l'usuari toqui res:
     // bloquem el son del SO mentre el guard visqui (s'allibera en acabar).
     let _awake = crate::keep_awake::activar("treball autopilotat");
@@ -485,6 +488,9 @@ async fn run_loop(
         if engine.any() {
             prompt.push_str(&crate::engine_tools::directives_help(&engine));
         }
+        // Errors de lint de la passada anterior: entren al prompt perquè la
+        // IA els corregeixi en aquesta passada (verificació obligatòria).
+        prompt.push_str(&lint_feedback);
         let opts = ChatOpts {
             provider: provider.clone(),
             model: model.clone(),
@@ -583,6 +589,7 @@ Si et calen més eines de motor, emet més directrius."
         // 4) Materialitza els fitxers millorats (escriptura directa segura).
         let blocks = crate::agent::runtools::extract_file_blocks(&text);
         let mut n = 0u32;
+        let mut touched: Vec<String> = Vec::new();
         for (rel, content) in blocks {
             let Some(rel) = safe_rel(&rel) else { continue };
             if content.trim().is_empty() {
@@ -594,6 +601,7 @@ Si et calen més eines de motor, emet més directrius."
             }
             if std::fs::write(&path, content).is_ok() {
                 n += 1;
+                touched.push(rel);
             }
         }
         // SEGONA VIA: si el model no ha reeixit a tornar fitxers sencers (molt
@@ -604,25 +612,70 @@ Si et calen més eines de motor, emet més directrius."
             let edits = crate::agent::runtools::extract_edit_blocks(&text);
             if !edits.is_empty() {
                 let report = crate::agent::runtools::apply_edit_blocks_at(&root, &text);
-                n = report.len() as u32;
+                // Només compten les edicions REALMENT aplicades (no els errors).
+                n = report.iter().filter(|r| r.contains("aplicades")).count() as u32;
+                for b in &edits {
+                    if report.iter().any(|r| r.contains("aplicades") && r.starts_with(b.path.as_str())) {
+                        touched.push(b.path.clone());
+                    }
+                }
             }
         }
-        // Les operacions de motor també compten com a feina feta.
-        files_changed += n + tool_ok;
+        // 4bis) VERIFICACIÓ OBLIGATÒRIA: `php -l` sobre els .php i
+        // `node --check` sobre els .js/.mjs/.cjs tocats pel lot. Si falla,
+        // l'error es realimenta a la passada següent i NO es reporta
+        // «millora aplicada» (l'informe/progrés mostra l'error).
+        let lint_touched: Vec<String> = touched
+            .iter()
+            .filter(|p| {
+                let low = p.to_ascii_lowercase();
+                low.ends_with(".php")
+                    || low.ends_with(".js")
+                    || low.ends_with(".mjs")
+                    || low.ends_with(".cjs")
+            })
+            .cloned()
+            .collect();
+        let mut lint_errors: Vec<crate::agent::runtools::LintResult> = Vec::new();
+        if !lint_touched.is_empty() {
+            handle.set(|s| {
+                s.detail = format!("Passada {pass}: verificant la sintaxi (php -l / node --check)…");
+            });
+            emit_state(&app, &handle);
+            let root_lint = root.clone();
+            let results = tokio::task::spawn_blocking(move || {
+                crate::agent::runtools::lint_paths_blocking(&root_lint, &lint_touched)
+            })
+            .await
+            .unwrap_or_default();
+            lint_errors = results.into_iter().filter(|r| !r.ok).collect();
+        }
+        // Decisió PURA del gate de verificació (compartida amb els tests):
+        // amb lint fallant el lot NO es compta com a millora i l'error real
+        // es realimenta a la passada següent.
+        let gate = verification_gate(pass, n, tool_ok, &lint_errors);
+        files_changed += gate.counted;
+        match gate.feedback {
+            Some(fb) => lint_feedback = fb,
+            None => lint_feedback.clear(),
+        }
         let resum = text
             .lines()
             .find(|l| l.trim_start().to_ascii_uppercase().starts_with("RESUM:"))
             .unwrap_or("")
             .trim()
             .to_string();
+        let lint_detail = gate.detail;
         handle.set(|s| {
             s.pass = pass;
             s.files_changed = files_changed;
             s.elapsed_ms = start.elapsed().as_millis() as u64;
-            s.detail = if resum.is_empty() {
+            s.detail = if !lint_detail.is_empty() {
+                lint_detail.clone()
+            } else if resum.is_empty() {
                 format!("Passada {pass} ({focus}): {n} fitxers millorats")
             } else {
-                resum
+                resum.clone()
             };
         });
         emit_state(&app, &handle);
@@ -642,6 +695,51 @@ Si et calen més eines de motor, emet més directrius."
         };
     });
     emit_state(&app, &handle);
+}
+
+/// Resultat del gate de VERIFICACIÓ OBLIGATÒRIA d'una passada d'autopilotatge.
+struct VerifyGate {
+    /// Fitxers comptats com a feina feta: amb lint fallant el lot NO compta.
+    counted: u32,
+    /// Realimentació per a la passada següent (Some només si el lint falla).
+    feedback: Option<String>,
+    /// Detall per al progrés/UI (buit si no hi ha errors).
+    detail: String,
+}
+
+/// Decisió PURA del gate de verificació de `project_work`: si hi ha errors
+/// de `php -l`, el lot escrit NO es compta com a millora aplicada (només
+/// compten les operacions de motor) i l'error REAL es realimenta a la
+/// passada següent. Mateix codi que el bucle async, testeable sense Tauri.
+fn verification_gate(
+    pass: u32,
+    n: u32,
+    tool_ok: u32,
+    lint_errors: &[crate::agent::runtools::LintResult],
+) -> VerifyGate {
+    if lint_errors.is_empty() {
+        // Les operacions de motor també compten com a feina feta.
+        return VerifyGate { counted: n + tool_ok, feedback: None, detail: String::new() };
+    }
+    // El lot NO es compta com a millora aplicada: el lint falla.
+    let mut fb = String::from(
+        "\n\nVERIFICACIÓ FALLIDA DE LA PASSADA ANTERIOR (php -l). ABANS de qualsevol \
+         millora nova, CORREGEIX aquests errors de sintaxi reemetent els fitxers \
+         afectats amb «@file:» (codi COMPLET corregit):\n",
+    );
+    for e in lint_errors.iter().take(6) {
+        fb.push_str(&format!(
+            "— {}: {}\n",
+            e.path,
+            crate::agent::runtools::clip_head_tail(&e.output, 300, 500)
+        ));
+    }
+    let detail = format!(
+        "Passada {pass}: verificació PHP FALLIDA ({} error(s)) — no es compta com a millora; es corregeix a la passada següent. {}",
+        lint_errors.len(),
+        crate::engine_tools::clip(&lint_errors[0].output, 160)
+    );
+    VerifyGate { counted: tool_ok, feedback: Some(fb), detail }
 }
 
 #[cfg(test)]
@@ -737,5 +835,82 @@ mod tests {
         assert_eq!(generic_profile().focuses.len(), 7);
         assert!(generic_profile().allowed_ext.contains(&"rs"));
         assert!(generic_profile().allowed_ext.contains(&"gd"));
+    }
+
+    // ── REGRESSIÓ: cap camí autònom reporta èxit sense verificació ──────
+
+    /// `php -l` FALLANT sobre un fitxer real: el lot no compta com a millora
+    /// (només les operacions de motor) i l'error real es realimenta.
+    #[test]
+    fn lint_php_fallant_no_compta_com_millora() {
+        if crate::agent::runtools::php_binary().is_none() {
+            eprintln!("php no disponible en aquesta màquina: test omès");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("trencat.php"), "<?php function( {\n").unwrap();
+        let results = crate::agent::runtools::lint_paths_blocking(
+            dir.path(),
+            &["trencat.php".to_string()],
+        );
+        let errors: Vec<_> = results.into_iter().filter(|r| !r.ok).collect();
+        assert_eq!(errors.len(), 1, "php -l ha de detectar l'error");
+        // Passada amb 3 fitxers escrits + 1 operació de motor: amb lint
+        // fallant NOMÉS compta l'operació de motor.
+        let gate = verification_gate(2, 3, 1, &errors);
+        assert_eq!(gate.counted, 1, "el lot amb lint fallant NO és una millora");
+        let fb = gate.feedback.expect("feedback per a la passada següent");
+        assert!(fb.contains("VERIFICACIÓ FALLIDA"), "feedback: {fb}");
+        assert!(fb.contains("CORREGEIX"), "feedback: {fb}");
+        assert!(fb.contains("trencat.php"), "feedback: {fb}");
+        assert!(fb.to_lowercase().contains("error"), "feedback: {fb}");
+        assert!(gate.detail.contains("FALLIDA"), "detail: {}", gate.detail);
+        assert!(gate.detail.contains("no es compta com a millora"), "detail: {}", gate.detail);
+    }
+
+    /// `php -l` verd sobre un fitxer real: el lot SÍ compta i no hi ha
+    /// feedback d'errors (la passada següent comença neta).
+    #[test]
+    fn lint_php_verd_compta_el_lot_i_netega_feedback() {
+        if crate::agent::runtools::php_binary().is_none() {
+            eprintln!("php no disponible en aquesta màquina: test omès");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("bo.php"), "<?php echo 1;\n").unwrap();
+        let results = crate::agent::runtools::lint_paths_blocking(
+            dir.path(),
+            &["bo.php".to_string()],
+        );
+        let errors: Vec<_> = results.into_iter().filter(|r| !r.ok).collect();
+        assert!(errors.is_empty());
+        let gate = verification_gate(3, 4, 2, &errors);
+        assert_eq!(gate.counted, 6, "lot + operacions de motor");
+        assert!(gate.feedback.is_none());
+        assert!(gate.detail.is_empty());
+    }
+
+    /// Gate sintètic (sense PHP): sostre de 6 errors realimentats i detall
+    /// amb el PRIMER error; sense errors de lint, tot compta.
+    #[test]
+    fn gate_sintetic_realimenta_fins_a_sis_errors() {
+        let err = |i: usize| crate::agent::runtools::LintResult {
+            path: format!("f{i}.php"),
+            ok: false,
+            output: format!("PHP Parse error: syntax error {i}"),
+            checked: true,
+        };
+        let vuit: Vec<_> = (0..8).map(err).collect();
+        let gate = verification_gate(1, 8, 0, &vuit);
+        assert_eq!(gate.counted, 0, "cap millora amb lint fallant");
+        let fb = gate.feedback.unwrap();
+        assert_eq!(fb.matches("— f").count(), 6, "màxim 6 errors al feedback: {fb}");
+        assert!(fb.contains("f0.php") && !fb.contains("f7.php"));
+        assert!(gate.detail.contains("8 error(s)"), "detail: {}", gate.detail);
+        assert!(gate.detail.contains("syntax error 0"), "detail: {}", gate.detail);
+        // Sense errors: el lot compta sencer i no hi ha res a realimentar.
+        let ok = verification_gate(1, 8, 3, &[]);
+        assert_eq!(ok.counted, 11);
+        assert!(ok.feedback.is_none() && ok.detail.is_empty());
     }
 }

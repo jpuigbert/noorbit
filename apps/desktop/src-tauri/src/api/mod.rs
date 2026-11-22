@@ -144,6 +144,32 @@ pub fn openai_max_tokens(model: &str) -> Option<u64> {
     }
 }
 
+/// FASE 2 · sostre de sortida EXPLÍCIT per a TOTS els serveis compatibles amb
+/// OpenAI (generalitza el pedaç DeepSeek): cap petició es deixa al default
+/// del proveïdor, que sol tallar a ~4K i deixava fitxers a mitja. Excepció:
+/// la sèrie «o» i gpt-5 rebutgen «max_tokens» (usen «max_completion_tokens»
+/// amb un default ample) — a aquests no s'hi posa res.
+pub fn openai_output_tokens(model: &str) -> Option<u64> {
+    let m = model.to_lowercase();
+    if m.contains("deepseek") {
+        return Some(32_000);
+    }
+    if m.starts_with("o1") || m.starts_with("o3") || m.starts_with("o4") || m.contains("gpt-5") {
+        return None;
+    }
+    if m.contains("gpt-4.1") {
+        return Some(32_768);
+    }
+    if m.contains("gpt-4o") {
+        return Some(16_384);
+    }
+    if m.contains("gpt-4") || m.contains("gpt-3.5") {
+        return Some(4_096);
+    }
+    // Desconegut (Ollama remot, servidors compatibles…): sostre raonable.
+    Some(8_192)
+}
+
 /// Una imatge adjunta, ja codificada per a qualsevol dels dos formats d'API.
 struct ImagePart {
     mime: &'static str,
@@ -817,7 +843,9 @@ pub async fn chat(
     conversation: &[(String, String)],
     system: Option<&str>,
 ) -> Result<(String, Option<String>)> {
-    chat_with_images(http, provider, conversation, system, &[]).await
+    let (text, thinking, _usage) =
+        chat_with_images_usage(http, provider, conversation, system, &[]).await?;
+    Ok((text, thinking))
 }
 
 /// Com `chat`, però adjuntant IMATGES (visió) a l'últim torn d'usuari. Abans
@@ -830,6 +858,21 @@ pub async fn chat_with_images(
     system: Option<&str>,
     images: &[String],
 ) -> Result<(String, Option<String>)> {
+    let (text, thinking, _usage) =
+        chat_with_images_usage(http, provider, conversation, system, images).await?;
+    Ok((text, thinking))
+}
+
+/// Com `chat_with_images`, però torna també la COMPTABILITZACIÓ de tokens que
+/// ha donat el proveïdor. El camí sense streaming (agents, planificadors) la
+/// necessiten per dir quant ha costat cada torn.
+pub async fn chat_with_images_usage(
+    http: &reqwest::Client,
+    provider: &AiProvider,
+    conversation: &[(String, String)],
+    system: Option<&str>,
+    images: &[String],
+) -> Result<(String, Option<String>, Option<crate::ai::Usage>)> {
     chat_impl(http, provider, conversation, system, images, false).await
 }
 
@@ -843,7 +886,8 @@ pub async fn chat_quick(
     conversation: &[(String, String)],
     system: Option<&str>,
 ) -> Result<(String, Option<String>)> {
-    chat_impl(http, provider, conversation, system, &[], true).await
+    let (text, thinking, _usage) = chat_impl(http, provider, conversation, system, &[], true).await?;
+    Ok((text, thinking))
 }
 
 async fn chat_impl(
@@ -853,13 +897,17 @@ async fn chat_impl(
     system: Option<&str>,
     images: &[String],
     quick: bool,
-) -> Result<(String, Option<String>)> {
+) -> Result<(String, Option<String>, Option<crate::ai::Usage>)> {
     // IA NATIVA: resposta local del motor integrat (sense HTTP ni token).
     if provider.is_native() {
         let prompt = native_prompt(conversation);
         let brain = crate::ai::native::load_brain();
         let lessons = crate::ai::native::lessons_from_system(system);
-        return Ok((crate::ai::native::answer(&prompt, &brain, &lessons), None));
+        return Ok((
+            crate::ai::native::answer(&prompt, &brain, &lessons),
+            None,
+            None,
+        ));
     }
     let parts = load_images(images);
     let req = build_request(provider, conversation, system, &parts, false, quick);
@@ -1005,12 +1053,12 @@ fn build_request(
             "messages": messages,
             "stream": stream,
         });
-        // DeepSeek talla la sortida a ~4K si no se li demana el contrari: els
-        // fitxers que escrivien els agents quedaven a mitja. La resta de
-        // serveis no reben el paràmetre (alguns models el rebutgen).
+        // FASE 2 · tots els proveïdors porten un sostre de sortida explícit
+        // adequat al model (DeepSeek tallava a ~4K per defecte; la resta té
+        // sostres propis). La sèrie «o»/gpt-5 el rebutja: no se'ls posa.
         if quick {
             body["max_tokens"] = serde_json::json!(QUICK_MAX_TOKENS);
-        } else if let Some(mt) = openai_max_tokens(&provider.model) {
+        } else if let Some(mt) = openai_output_tokens(&provider.model) {
             body["max_tokens"] = serde_json::json!(mt);
         }
         if stream {
@@ -1167,15 +1215,89 @@ async fn send_chat(
     http: &reqwest::Client,
     provider: &AiProvider,
     req: ChatRequest,
-) -> Result<(String, Option<String>)> {
+) -> Result<(String, Option<String>, Option<crate::ai::Usage>)> {
     let anthropic = req.anthropic;
     let resp = open_chat_response(http, provider, req, "application/json").await?;
     let parsed: serde_json::Value = resp.json().await?;
-    if anthropic {
-        read_anthropic(&parsed)
+    // Comptabilització: el proveïdor diu quant ha consumit (i quant ha pagat
+    // de veritat, si ho diu). Sense això, aquest camí no deixava ni una xifra.
+    let usage = parse_usage(&parsed, anthropic);
+    let (text, thinking) = if anthropic {
+        read_anthropic(&parsed)?
     } else {
-        read_openai(&parsed)
+        read_openai(&parsed)?
+    };
+    Ok((text, thinking, usage))
+}
+
+/// Llegeix el compte de tokens d'una resposta de proveïdor. Cada casa l'ho
+/// envia a la seva manera:
+/// · OpenAI-compatible: `usage.prompt_tokens` (ja hi inclou els tokens de la
+///   memòria cau) i `usage.prompt_tokens_details.cached_tokens`.
+/// · DeepSeek: `usage.prompt_cache_hit_tokens` i `prompt_cache_miss_tokens`.
+/// · Anthropic: `usage.input_tokens` (NOMÉS els que NO venen de la memòria
+///   cau) més `cache_read_input_tokens` i `cache_creation_input_tokens`.
+///
+/// El que importa és la diferència entre el que es CONSUMEIX i el que es
+/// PAGA: els tokens de la memòria cau es consumeixen igual, però es paguen
+/// a una fracció del preu d'entrada.
+pub fn parse_usage(
+    parsed: &serde_json::Value,
+    anthropic: bool,
+) -> Option<crate::ai::Usage> {
+    let u = parsed.get("usage")?.as_object()?;
+    let get = |k: &str| u.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+    if anthropic {
+        let plain = get("input_tokens");
+        let read = get("cache_read_input_tokens");
+        let write = get("cache_creation_input_tokens");
+        let output = get("output_tokens");
+        if plain == 0 && read == 0 && write == 0 && output == 0 {
+            return None;
+        }
+        Some(crate::ai::Usage {
+            // Anthropic: `input_tokens` NO inclou els tokens de la memòria cau.
+            input: plain + read + write,
+            output,
+            cache_read: read,
+            cache_write: write,
+        })
+    } else {
+        let cached = u
+            .get("prompt_tokens_details")
+            .and_then(|d| d.get("cached_tokens"))
+            .and_then(|x| x.as_u64())
+            .unwrap_or_else(|| get("cached_tokens"))
+            .max(get("prompt_cache_hit_tokens"));
+        let miss = get("prompt_cache_miss_tokens");
+        let prompt = get("prompt_tokens");
+        let input = if prompt > 0 { prompt } else { miss + cached };
+        let output = get("completion_tokens").max(get("output_tokens"));
+        if input == 0 && output == 0 {
+            return None;
+        }
+        Some(crate::ai::Usage {
+            input,
+            output,
+            cache_read: cached.min(input),
+            cache_write: 0,
+        })
     }
+}
+
+/// Tokens de memòria cau d'un objecte «usage» de proveïdor: els que es
+/// consumeixen però NO es paguen al preu sencer d'entrada.
+fn cache_tokens(u: &serde_json::Map<String, serde_json::Value>) -> (u64, u64) {
+    let get = |k: &str| u.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
+    let read = u
+        .get("prompt_tokens_details")
+        .and_then(|d| d.get("cached_tokens"))
+        .and_then(|x| x.as_u64())
+        .unwrap_or_else(|| get("cached_tokens"))
+        .max(get("prompt_cache_hit_tokens"))
+        .max(get("cache_read_input_tokens"));
+    let write = get("cache_creation_input_tokens");
+    (read, write)
 }
 
 // ── Streaming (event unificat «ai://process») ─────────────────────────────
@@ -1306,6 +1428,11 @@ async fn stream_sse(
     // «message_delta». Sense això no es pot saber quant s'ha gastat.
     let mut usage_input: u64 = 0;
     let mut usage_output: u64 = 0;
+    // Tokens de MEMÒRIA CAU: es consumeixen igual, però es paguen a una
+    // fracció del preu d'entrada. Són el que fa que «consumit» i «pagat» no
+    // coincideixin.
+    let mut usage_cache_read: u64 = 0;
+    let mut usage_cache_write: u64 = 0;
     // El flux també pot acabar TALLAT pel sostre de sortida; callar-ho era el
     // que feia que un fitxer escrit per la IA semblés «fet» sent incomplet.
     let mut cut = false;
@@ -1356,13 +1483,29 @@ async fn stream_sse(
                 if c > 0 {
                     usage_output = c;
                 }
+                let (read, write) = cache_tokens(u);
+                if read > 0 {
+                    usage_cache_read = read;
+                }
+                if write > 0 {
+                    usage_cache_write = write;
+                }
             }
             if v.get("type").and_then(|t| t.as_str()) == Some("message_start") {
-                if let Some(u) = v.get("message").and_then(|m| m.get("usage")) {
-                    usage_input = u
-                        .get("input_tokens")
-                        .and_then(|x| x.as_u64())
-                        .unwrap_or(usage_input);
+                if let Some(u) = v
+                    .get("message")
+                    .and_then(|m| m.get("usage"))
+                    .and_then(|u| u.as_object())
+                {
+                    let plain = u.get("input_tokens").and_then(|x| x.as_u64()).unwrap_or(0);
+                    let (read, write) = cache_tokens(u);
+                    if plain > 0 || read > 0 || write > 0 {
+                        // Anthropic: `input_tokens` NO inclou els tokens de la
+                        // memòria cau (aquests s'hi sumen al final).
+                        usage_input = plain;
+                        usage_cache_read = read;
+                        usage_cache_write = write;
+                    }
                 }
             }
             if v.get("type").and_then(|t| t.as_str()) == Some("message_delta") {
@@ -1438,13 +1581,25 @@ async fn stream_sse(
     // pel nombre de caràcters (~4 caràcters per token) per no deixar-ho en
     // blanc.
     if usage_input > 0 || usage_output > 0 {
+        // Anthropic compta l'entrada SENSE els tokens de la memòria cau; per a
+        // tota la resta, `prompt_tokens` ja els hi inclou.
+        let anthropic = provider.is_anthropic();
+        let input = if anthropic {
+            usage_input + usage_cache_read + usage_cache_write
+        } else {
+            usage_input.max(usage_cache_read)
+        };
         crate::ai::emit_usage(
             app,
             &ctl.id,
             &provider.kind_name(),
             &model,
-            usage_input,
-            usage_output,
+            crate::ai::Usage {
+                input,
+                output: usage_output,
+                cache_read: usage_cache_read,
+                cache_write: usage_cache_write,
+            },
             None,
         );
     }
@@ -1611,6 +1766,30 @@ mod tests {
         assert_eq!(openai_max_tokens("deepseek-v4-pro"), Some(32_000));
         // La sèrie «o» d'OpenAI rebutja el paràmetre: no s'hi posa.
         assert_eq!(openai_max_tokens("gpt-4o-mini"), None);
+    }
+
+    #[test]
+    fn tots_els_proveidors_porten_sostre_de_sortida_explicit() {
+        // DeepSeek conserva el sostre del pedaç original.
+        assert_eq!(openai_output_tokens("deepseek-flash"), Some(32_000));
+        // GPT-4o/4.1/4/3.5: sostre real del model, mai el default tallat.
+        assert_eq!(openai_output_tokens("gpt-4o-mini"), Some(16_384));
+        assert_eq!(openai_output_tokens("gpt-4.1"), Some(32_768));
+        assert_eq!(openai_output_tokens("gpt-4-turbo"), Some(4_096));
+        assert_eq!(openai_output_tokens("gpt-3.5-turbo"), Some(4_096));
+        // Sèrie «o» i gpt-5: rebutgen «max_tokens» (default ample via
+        // «max_completion_tokens»): no s'hi posa res.
+        assert_eq!(openai_output_tokens("o3-mini"), None);
+        assert_eq!(openai_output_tokens("gpt-5"), None);
+        // Desconegut: sostre raonable en lloc del default del proveïdor.
+        assert_eq!(openai_output_tokens("model-rar"), Some(8_192));
+        // La petició real el porta sempre (fora del mode curt).
+        let p = provider("openai", "https://api.openai.com/v1", "gpt-4o-mini");
+        let req = build_request(&p, &turns(), Some("sys"), &[], false, false);
+        assert_eq!(req.body["max_tokens"], 16_384);
+        let o = provider("openai", "https://api.openai.com/v1", "o3-mini");
+        let req = build_request(&o, &turns(), Some("sys"), &[], false, false);
+        assert!(req.body.get("max_tokens").is_none());
     }
 
     #[test]
@@ -1823,5 +2002,63 @@ mod tests {
 
         let buit = serde_json::json!({ "choices": [{ "message": { "content": "" } }] });
         assert!(read_openai(&buit).is_err());
+    }
+
+    #[test]
+    fn l_us_de_openai_compta_els_tokens_de_la_memoria_cau() {
+        let v = serde_json::json!({
+            "usage": {
+                "prompt_tokens": 1000,
+                "completion_tokens": 120,
+                "prompt_tokens_details": { "cached_tokens": 800 }
+            }
+        });
+        let u = parse_usage(&v, false).unwrap();
+        assert_eq!(u.input, 1000);
+        assert_eq!(u.output, 120);
+        assert_eq!(u.cache_read, 800);
+        // Els tokens de la memòria cau NO es paguen al preu sencer.
+        assert_eq!(u.paid_input(), 200);
+    }
+
+    #[test]
+    fn l_us_de_deepseek_compta_la_memoria_cau() {
+        let v = serde_json::json!({
+            "usage": {
+                "prompt_cache_hit_tokens": 900,
+                "prompt_cache_miss_tokens": 100,
+                "completion_tokens": 50
+            }
+        });
+        let u = parse_usage(&v, false).unwrap();
+        assert_eq!(u.input, 1000);
+        assert_eq!(u.cache_read, 900);
+        assert_eq!(u.paid_input(), 100);
+    }
+
+    #[test]
+    fn l_us_d_anthropic_afegeix_la_memoria_cau_a_l_entrada() {
+        let v = serde_json::json!({
+            "usage": {
+                "input_tokens": 200,
+                "cache_read_input_tokens": 800,
+                "cache_creation_input_tokens": 50,
+                "output_tokens": 30
+            }
+        });
+        let u = parse_usage(&v, true).unwrap();
+        // Anthropic: `input_tokens` NO inclou els tokens de la memòria cau.
+        assert_eq!(u.input, 1050);
+        assert_eq!(u.cache_read, 800);
+        assert_eq!(u.cache_write, 50);
+        assert_eq!(u.paid_input(), 250);
+    }
+
+    #[test]
+    fn sense_compte_de_tokens_no_hi_ha_comptabilitzacio() {
+        let v = serde_json::json!({ "choices": [{ "message": { "content": "hola" } }] });
+        assert!(parse_usage(&v, false).is_none());
+        let buit = serde_json::json!({ "usage": { "prompt_tokens": 0, "completion_tokens": 0 } });
+        assert!(parse_usage(&buit, false).is_none());
     }
 }

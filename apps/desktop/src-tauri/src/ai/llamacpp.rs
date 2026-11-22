@@ -341,6 +341,31 @@ pub fn downloaded_models() -> Vec<(String, u64)> {
     out
 }
 
+/// El `llama-server` instal·lat reconeix aquesta opció de línia de comandes?
+/// Es consulta l'`--help` del binari (una sola vegada, es desa en memòria):
+/// les versions antigues moren amb opcions que no coneixen, així que els
+/// callers poden oferir millores (p. ex. la quantització de la cache KV) només
+/// quan el motor les suporta.
+pub fn supports_flag(flag: &str) -> bool {
+    static HELP: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let txt = HELP.get_or_init(|| {
+        let Some(bin) = binary() else {
+            return String::new();
+        };
+        std::process::Command::new(&bin)
+            .arg("--help")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .map(|o| {
+                let mut s = String::from_utf8_lossy(&o.stdout).to_string();
+                s.push_str(&String::from_utf8_lossy(&o.stderr));
+                s
+            })
+            .unwrap_or_default()
+    });
+    txt.contains(flag)
+}
+
 /// Engega `llama-server` amb un model GGUF i espera que l'API respongui.
 ///
 /// Retorna el proveïdor creat (id, nom, base i model) perquè el xat l pugui
@@ -350,6 +375,19 @@ pub async fn start(
     model_path: &str,
     port: u16,
     ctx: u32,
+) -> Result<(String, String, String)> {
+    start_with_args(http, model_path, port, ctx, &[]).await
+}
+
+/// Igual que [`start`] però amb opcions addicionals per a `llama-server`
+/// (p. ex. `--cache-type-k q8_0`). Si el procés mor en arrencar —el binari no
+/// reconeix alguna opció—, es reintenta automàticament sense les opcions.
+pub async fn start_with_args(
+    http: &reqwest::Client,
+    model_path: &str,
+    port: u16,
+    ctx: u32,
+    extra: &[&str],
 ) -> Result<(String, String, String)> {
     let bin = binary().ok_or_else(|| {
         anyhow!(
@@ -372,8 +410,10 @@ pub async fn start(
 
     // Engega el servidor. Preferim «--no-webui» (evita obrir el navegador),
     // però les versions antigues de llama.cpp no el coneixen: si el procés
-    // mor tot seguit, ho tornem a provar sense ell.
-    let engega = |amb_webui: bool| -> std::io::Result<std::process::Child> {
+    // mor tot seguit, ho tornem a provar sense ell. El mateix escalonament
+    // s'aplica a les opcions `extra`: primer amb elles i, si el motor mor en
+    // arrencar (opció no reconeguda), es reintenten sense.
+    let engega = |amb_webui: bool, amb_extra: bool| -> std::io::Result<std::process::Child> {
         let mut cmd = std::process::Command::new(&bin);
         cmd.arg("-m")
             .arg(&path)
@@ -383,6 +423,11 @@ pub async fn start(
             .arg(port.to_string())
             .arg("-c")
             .arg(ctx.to_string());
+        if amb_extra {
+            for a in extra {
+                cmd.arg(a);
+            }
+        }
         if !amb_webui {
             cmd.arg("--no-webui");
         }
@@ -399,13 +444,32 @@ pub async fn start(
         cmd.spawn()
     };
 
-    let mut child = engega(false)
-        .map_err(|e| anyhow!("No s'ha pogut engegar llama-server: {}", e))?;
-    // Si ha mort de seguida (opció no reconeguda), ho intentem sense ella.
-    if let Ok(Some(_)) = child.try_wait() {
-        child = engega(true)
-            .map_err(|e| anyhow!("No s'ha pogut engegar llama-server: {}", e))?;
+    // Escalonament (webui, extra): sense opcions extra els intents amb elles
+    // se salten i el comportament és exactament l'original d'abans.
+    let mut triat: Option<std::process::Child> = None;
+    let mut darrer_error: Option<anyhow::Error> = None;
+    for (amb_webui, amb_extra) in [(false, true), (true, true), (false, false), (true, false)] {
+        if amb_extra && extra.is_empty() {
+            continue;
+        }
+        match engega(amb_webui, amb_extra) {
+            Ok(mut c) => {
+                // Mig segon de marge: si una opció no és reconeguda, el procés
+                // mor de seguida i passem a la combinació següent.
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                if let Ok(Some(_)) = c.try_wait() {
+                    darrer_error = Some(anyhow!("«llama-server» ha mort en arrencar"));
+                    continue;
+                }
+                triat = Some(c);
+                break;
+            }
+            Err(e) => darrer_error = Some(anyhow!("No s'ha pogut engegar llama-server: {}", e)),
+        }
     }
+    let child = triat.ok_or_else(|| {
+        darrer_error.unwrap_or_else(|| anyhow!("No s'ha pogut engegar llama-server"))
+    })?;
     let pid = child.id();
 
     // Espera que l'API OpenAI-compatible respongui (fins a 3 minuts: en CPU

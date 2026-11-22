@@ -48,7 +48,8 @@ copiat:
          apps/desktop/src/editor/editorApi.ts             :: findDefinitionHere
 
   - Terminal integrat (⌘J)           (VS Code "Integrated Terminal")
-         apps/desktop/src-tauri/src/commands/term.rs      :: run_command
+         apps/desktop/src-tauri/src/commands/term.rs      :: run_command,
+                                                             term_start (PTY)
          apps/desktop/src/components/Terminal/TerminalPanel.tsx
 
   - Vista de Control de codi font    (VS Code "Source Control" / panell de Git)
@@ -61,7 +62,106 @@ copiat:
     VS Code.
 
 --------------------------------------------------------------------------------
-3. Altres dependències principals (totes amb llicències permissives)
+3. OpenCode — patró de snapshots «shadow git» per pas d'agent (MIT)
+--------------------------------------------------------------------------------
+Producte: OpenCode
+Copyright (c) els autors d'OpenCode
+Llicència: MIT
+Font:     https://github.com/sst/opencode
+On:       apps/desktop/src-tauri/src/agent/snapshot.rs
+          apps/desktop/src-tauri/src/commands/snapshot.rs
+
+NoOrbit reimplementa el patró d'OpenCode de «shadow git» per desfer els
+passos de l'agent de manera fiable: un git-dir OCULT fora del projecte
+(dades de l'app) captura l'estat del work-tree amb `add -A` + `write-tree`
+abans de cada lot d'escriptures, i el desfer fa `read-tree` +
+`checkout-index -a -f` sense tocar mai el `.git` ni l'historial de
+l'usuari. El codi de NoOrbit està escrit des de zero per a Tauri (Rust);
+se n'atribueix el PATRÓ de disseny a OpenCode sota llicència MIT.
+
+--------------------------------------------------------------------------------
+3b. OpenCode — patró de system prompt EN CAPES (MIT)
+--------------------------------------------------------------------------------
+Producte: OpenCode
+Copyright (c) els autors d'OpenCode
+Llicència: MIT
+Font:     https://github.com/sst/opencode
+On:       apps/desktop/src-tauri/src/ai/sysprompt.rs
+
+NoOrbit reimplementa el patró d'OpenCode de compondre el system prompt en
+CAPES idempotents: instruccions específiques del proveïdor + capa d'entorn
+(cwd del projecte, sistema operatiu, eines disponibles detectades al PATH)
++ instruccions del projecte llegides d'AGENTS.md/NOORBIT.md a l'arrel del
+workspace (truncades). Cada capa porta una marca pròpia perquè cap camí
+(xat amb eines, routing cloud) no la duplique. El codi de NoOrbit està
+escrit des de zero per a Tauri (Rust); se n'atribueix el PATRÓ de disseny
+a OpenCode sota llicència MIT.
+
+--------------------------------------------------------------------------------
+3c. portable-pty (wezterm) — pseudoterminals reals del terminal (MIT)
+--------------------------------------------------------------------------------
+Producte: portable-pty (crate del projecte WezTerm)
+Copyright (c) Wez Furlong i els autors de wezterm
+Llicència: MIT
+Font:     https://github.com/wezterm/wezterm (crate `portable-pty`)
+On:       apps/desktop/src-tauri/src/commands/term.rs
+
+El terminal integrat multi-sessió (Fase 3b) executa shells interactives de
+l'usuari dins pseudoterminals reals gràcies a la biblioteca portable-pty
+del projecte WezTerm: stdin real, resize amb SIGWINCH i streaming de la
+sortida. És una dependència genuïna de crates.io, sense codi copiat.
+
+--------------------------------------------------------------------------------
+3d. xterm.js — emulador de terminal a la interfície (MIT)
+--------------------------------------------------------------------------------
+Producte: xterm.js (paquets `@xterm/xterm`, `@xterm/addon-fit`)
+Copyright (c) The xterm.js authors
+Llicència: MIT
+Font:     https://github.com/xtermjs/xterm.js
+On:       apps/desktop/src/components/Terminal/xtermHosts.ts
+          apps/desktop/src/components/Terminal/TerminalPanel.tsx
+
+La representació del terminal a la UI (scrollback, colors ANSI, selecció,
+redimensionament amb l'addon fit) la fa xterm.js, l'emulador de terminal
+estàndard de la indústria (el mateix que usa VS Code). Dependència genuïna
+de npm; el tema es deriva dels tokens de theme.css de NoOrbit.
+
+--------------------------------------------------------------------------------
+3e. lsp-types — tipus del protocol LSP (MIT)
+--------------------------------------------------------------------------------
+Producte: lsp-types (crate de crates.io)
+Copyright (c) els autors de lsp-types
+Llicència: MIT
+Font:     https://github.com/gluon-lang/lsp-types
+On:       apps/desktop/src-tauri/src/lsp/session.rs
+
+El client LSP genèric persistent (Fase 3c) usa lsp-types per serialitzar i
+validar els missatges del Language Server Protocol (initialize, didOpen,
+publishDiagnostics, definition, references, completion, hover) amb els
+servidors que l'usuari tinga instal·lats (rust-analyzer, phpactor, pyright…).
+Dependència genuïna de crates.io, sense codi copiat.
+
+--------------------------------------------------------------------------------
+3f. tsserver (TypeScript del VS Code instal·lat) — ÚS EXTERN (Apache-2.0)
+--------------------------------------------------------------------------------
+Producte: TypeScript / tsserver (distribuït amb Visual Studio Code)
+Copyright (c) Microsoft Corporation
+Llicència: Apache-2.0
+Font:     https://github.com/microsoft/TypeScript
+On:       apps/desktop/src-tauri/src/lsp/tsserver.rs
+          apps/desktop/src-tauri/src/lsp/session.rs
+
+NoOrbit NO copia ni redistribueix cap codi de TypeScript ni de VS Code.
+Quan l'usuari TÉ Visual Studio Code instal·lat, NoOrbit EXECUTA com a eina
+externa el `tsserver.js` que ja viu dins d'eixa instal·lació (o el `tsserver`
+del PATH / node_modules del projecte) i hi parla pel seu protocol públic
+documentat (JSON line-delimited amb seq/type/command): open, completions,
+quickinfo, definition, references i geterr. Si no hi ha cap tsserver
+instal·lat, la funcionalitat degrada honestament (els workers de Monaco
+continuen fent l'IntelliSense local de TS/JS).
+
+--------------------------------------------------------------------------------
+4. Altres dependències principals (totes amb llicències permissives)
 --------------------------------------------------------------------------------
   Tauri 2                 MIT / Apache-2.0   https://github.com/tauri-apps/tauri
   React / React DOM       MIT                https://github.com/facebook/react

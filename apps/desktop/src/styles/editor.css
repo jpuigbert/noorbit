@@ -29,6 +29,9 @@
   color: var(--text-1);
   background: var(--bg-2);
   border: 1px solid var(--border);
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
   transition:
     background var(--speed-fast) var(--ease-out),
     color var(--speed-fast) var(--ease-out),
@@ -39,11 +42,124 @@
   color: var(--text-0);
   border-color: var(--border-2);
 }
+/* Pestanya ACTIVA: fons de l'editor + veta de l'accent (com VS Code). */
+.editor-tab.active {
+  background: var(--bg-0);
+  color: var(--text-0);
+  border-color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+/* També visible al grup dividit: marca discreta de l'accent secundari. */
+.editor-tab.in-split:not(.active) {
+  border-color: var(--accent-2);
+}
 .editor-tab .dirty-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--accent-2);
+  flex-shrink: 0;
+}
+.tab-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Creu de tancar: discreta; visible en hover o a la pestanya activa. */
+.tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  opacity: 0;
+  flex-shrink: 0;
+  transition:
+    opacity var(--speed-fast) var(--ease-out),
+    background var(--speed-fast) var(--ease-out),
+    color var(--speed-fast) var(--ease-out);
+}
+.editor-tab:hover .tab-close,
+.editor-tab.active .tab-close {
+  opacity: 1;
+}
+.tab-close:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+/* Barra de pestanyes amb SCROLL HORITZONTAL quan no caben (overflow). */
+.editor-tabs-scroll {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-2) transparent;
+}
+.editor-tabs-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+.editor-tabs-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-2);
+  border-radius: 2px;
+}
+.editor-tabs-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.editor-tabs-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* ---- Grups d'editor (divisió vertical, ⌘\) ---- */
+.editor-groups {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.editor-group {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.editor-groups.split .editor-group + .editor-group {
+  border-left: 1px solid var(--border-2);
+}
+/* Capçalera auxiliar d'un grup (media o split): nom + accions. */
+.editor-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  flex-shrink: 0;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-1);
+}
+.editor-group-head .dirty-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-2);
+  flex-shrink: 0;
+}
+.editor-group-name {
+  font-weight: 600;
+  color: var(--text-0);
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .editor-content {
   flex: 1;
@@ -84,7 +200,7 @@
 }
 .review-file {
   font-weight: 600;
-  color: var(--text-0, #fff);
+  color: var(--text-0);
   max-width: 40%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -101,18 +217,18 @@
   font-variant-numeric: tabular-nums;
 }
 .review-accept {
-  border-color: rgba(74, 222, 128, 0.45);
+  border-color: color-mix(in srgb, var(--success) 45%, transparent);
   color: var(--success);
 }
 .review-accept:hover {
-  background: rgba(74, 222, 128, 0.12);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
 }
 .review-reject {
-  border-color: rgba(248, 113, 113, 0.45);
-  color: #f87171;
+  border-color: color-mix(in srgb, var(--error) 45%, transparent);
+  color: var(--error);
 }
 .review-reject:hover {
-  background: rgba(248, 113, 113, 0.12);
+  background: color-mix(in srgb, var(--error) 12%, transparent);
 }
 .review-diff {
   border-top: 1px solid var(--border);
@@ -202,7 +318,66 @@
   border-radius: 2px;
 }
 .noorbit-match-active {
-  background: rgba(248, 81, 73, 0.45);
-  border: 1px solid rgba(248, 81, 73, 0.8);
+  background: color-mix(in srgb, var(--error) 45%, transparent);
+  border: 1px solid color-mix(in srgb, var(--error) 80%, transparent);
   border-radius: 2px;
+}
+
+/* ---- Ruta del fitxer actiu (breadcrumbs, Fase 4) ----
+   Barra compacta sota les pestanyes: carpetes clicables (obren l'arbre),
+   «…» plegable per rutes fondes i el·lipsi al nom del fitxer. */
+.breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 26px;
+  padding: 0 var(--space-2);
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-2);
+  overflow: hidden;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 24px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  flex-shrink: 0;
+  transition:
+    background var(--speed-fast) var(--ease-out),
+    color var(--speed-fast) var(--ease-out);
+}
+button.crumb:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+.crumb-sep {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.crumb-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.crumb-more {
+  font-weight: 600;
+}
+.crumb-file {
+  color: var(--text-1);
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+  cursor: default;
+}
+.crumb-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

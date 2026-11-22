@@ -204,6 +204,193 @@ fn join_amb_pressupost(linies: Vec<String>, max: usize) -> String {
     out
 }
 
+// ── COMPACTACIÓ PER CONTEXT (Fase 2) ─────────────────────────────────────
+// Quan el context ESTIMAT supera el 90% de la finestra del model, els torns
+// ANTICS es substitueixen per un resum (via el mateix proveïdor, o extractiu
+// local si no n'hi ha cap de disponible) i els DARRERS torns es conserven
+// sencers, amb els fitxers i decisions clau. La selecció de torns és PURA.
+
+/// Llindar d'ocupació del context a partir del qual es compacta (percentatge).
+pub const COMPACT_THRESHOLD_PCT: u64 = 90;
+
+/// Torns recents que es conserven SENCERS en compactar.
+pub const KEEP_RECENT: usize = 4;
+
+/// Estimació barata de tokens: ~4 caràcters per token (heurística habitual
+/// per a text barrejat català/codi). No és el compte real del proveïdor, però
+/// és prou bona per decidir si cal compactar ABANS d'enviar la petició.
+pub fn estimate_tokens(text: &str) -> u64 {
+    (text.chars().count() as u64 + 3) / 4
+}
+
+/// Context estimat d'un torn: sistema + historial + prompt actual.
+pub fn context_used(history: &[HistoryTurn], prompt: &str, system: Option<&str>) -> u64 {
+    let mut total = estimate_tokens(prompt) + estimate_tokens(system.unwrap_or(""));
+    for t in history {
+        total += estimate_tokens(&t.content) + 4; // rol + embolcall del missatge
+    }
+    total
+}
+
+/// Cal compactar? Quan l'ús estimat arriba al 90% de la finestra del model.
+/// Amb finestra desconeguda (0) no es compacta mai per aquest criteri.
+pub fn needs_compaction(used: u64, limit: u64) -> bool {
+    limit > 0 && used * 100 >= limit * COMPACT_THRESHOLD_PCT
+}
+
+/// Resum EXTRACTIU (determinista, sense model) dels torns antics: conserva
+/// l'objectiu, els fets/decisions, les rutes de fitxer i l'esquelet del codi.
+/// És la reserva quan no hi ha cap proveïdor que pugui resumir.
+pub fn extractive_summary(old: &[HistoryTurn]) -> String {
+    let objectiu: String = old
+        .iter()
+        .find(|t| t.role == "user")
+        .map(|t| t.content.trim())
+        .unwrap_or("")
+        .chars()
+        .take(800)
+        .collect();
+    let mut fets: Vec<String> = Vec::new();
+    let mut esquelet: Vec<String> = Vec::new();
+    let mut vistes: Vec<String> = Vec::new();
+    for t in old {
+        for raw in t.content.lines() {
+            let l = raw.trim();
+            if l.is_empty() || vistes.iter().any(|v| v == l) {
+                continue;
+            }
+            if es_esquelet(l) && esquelet.len() < 60 {
+                esquelet.push(l.to_string());
+                vistes.push(l.to_string());
+            } else if es_fet_o_decisio(l) && fets.len() < 120 {
+                fets.push(l.to_string());
+                vistes.push(l.to_string());
+            }
+        }
+    }
+    let mut out = String::from(
+        "RESUM DE LA SESSIÓ (compactació automàtica de NoOrbit: el context \
+         superava el 90% de la finestra del model; els torns antics s'han \
+         condensat i els darrers es conserven sencers).\n",
+    );
+    if !objectiu.is_empty() {
+        out.push_str("\nOBJECTIU:\n");
+        out.push_str(&objectiu);
+        out.push('\n');
+    }
+    let fets = join_amb_pressupost(fets, 2_400);
+    if !fets.is_empty() {
+        out.push_str("\nFETS, DECISIONS I RUTES:\n");
+        out.push_str(&fets);
+        out.push('\n');
+    }
+    let esquelet = join_amb_pressupost(esquelet, 1_200);
+    if !esquelet.is_empty() {
+        out.push_str("\nESQUELET DEL CODI:\n");
+        out.push_str(&esquelet);
+        out.push('\n');
+    }
+    out
+}
+
+/// Substitueix els torns ANTICS per un torn de resum, conservant els
+/// `KEEP_RECENT` darrers SENCERS. Si el resum és un torn «user» i el primer
+/// dels recents també, es fusionen (algunes APIs exigeixen rols alternats).
+/// Amb pocs torns (≤ KEEP_RECENT) no es toca res.
+pub fn compact_history(history: &[HistoryTurn], summary: &str) -> Vec<HistoryTurn> {
+    if history.len() <= KEEP_RECENT || summary.trim().is_empty() {
+        return history.to_vec();
+    }
+    let recents = &history[history.len() - KEEP_RECENT..];
+    let mut out: Vec<HistoryTurn> = Vec::new();
+    if recents[0].role == "user" {
+        out.push(HistoryTurn {
+            role: "user".into(),
+            content: format!("{}\n\n{}", summary.trim(), recents[0].content),
+        });
+        out.extend_from_slice(&recents[1..]);
+    } else {
+        out.push(HistoryTurn {
+            role: "user".into(),
+            content: summary.trim().to_string(),
+        });
+        out.extend_from_slice(recents);
+    }
+    out
+}
+
+/// System prompt del resumidor: el resum ha de conservar el fil de treball.
+const SUMMARY_SYSTEM: &str = "Ets el resumidor de sessions de NoOrbit. Resumeix \
+EN CATALÀ la sessió de treball que se t'adjunta: conserva l'OBJECTIU, les \
+DECISIONS preses, les RUTES de fitxers tocats, l'estat de les tasques i els \
+errors pendents. Màxim ~400 paraules. No inventes res que no sigui al text.";
+
+/// Compacta la sessió SI CAL (context estimat ≥ 90% de `limit`). El resum es
+/// demana al MATEIX proveïdor del xat (sessió aïllada, amb timeout); si no
+/// n'hi ha cap de disponible o falla, s'usa el resum extractiu local. En
+/// compactar, emet «ai://compacted» perquè el xat mostri la nota.
+/// Retorna `true` si s'ha compactat.
+pub async fn maybe_compact(
+    app: &tauri::AppHandle,
+    ai: &std::sync::Arc<super::AiManager>,
+    sid: &str,
+    opts: &mut super::ChatOpts,
+    prompt: &str,
+    system: Option<&str>,
+    limit: u64,
+) -> bool {
+    let used = context_used(&opts.history, prompt, system);
+    if !needs_compaction(used, limit) || opts.history.len() <= KEEP_RECENT {
+        return false;
+    }
+    let (old, _) = opts.history.split_at(opts.history.len() - KEEP_RECENT);
+    // Proveïdor capaç de resumir: remot amb clau, o Ollama en marxa. La
+    // nativa integrada (0.5B) no resumeix: el resum extractiu és millor.
+    let (provider, _) = ai.session_labels(sid).await;
+    let pot_resumir = if provider == "ollama" {
+        ai.is_running().await
+    } else {
+        provider != super::native::PROVIDER_ID
+    };
+    let mut summary = String::new();
+    if pot_resumir {
+        let old_text = old
+            .iter()
+            .map(|t| format!("{}: {}", t.role, t.content))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let old_text: String = old_text.chars().take(24_000).collect();
+        let demana = format!("Resumeix aquesta sessió:\n\n{}", old_text);
+        let opts_sum = super::ChatOpts {
+            provider: Some(provider.clone()),
+            ..Default::default()
+        };
+        if let Ok(Ok(text)) = tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            super::in_session(
+                &format!("compact_{}", sid),
+                ai.chat_opts(&demana, Some(SUMMARY_SYSTEM), &opts_sum),
+            ),
+        )
+        .await
+        {
+            if !text.trim().is_empty() {
+                summary = text.trim().chars().take(6_000).collect();
+            }
+        }
+    }
+    if summary.is_empty() {
+        summary = extractive_summary(old);
+    }
+    opts.history = compact_history(&opts.history, &summary);
+    use tauri::Emitter;
+    let _ = app.emit(
+        "ai://compacted",
+        serde_json::json!({ "session": sid, "note": "Sessió resumida per context" }),
+    );
+    true
+}
+
 #[cfg(test)]
 mod proves {
     use super::*;
@@ -261,5 +448,85 @@ mod proves {
             "la memòria compactada és massa gran: {} caràcters",
             out.chars().count()
         );
+    }
+
+    // ── Compaction per context (Fase 2) ─────────────────────────────────
+
+    #[test]
+    fn el_llindar_de_compactacio_es_el_90_percent() {
+        // 89% → no; 90% → sí; finestra desconeguda → mai.
+        assert!(!needs_compaction(89, 100));
+        assert!(needs_compaction(90, 100));
+        assert!(needs_compaction(100, 100));
+        assert!(!needs_compaction(1_000_000, 0));
+        // Estimació ~4 caràcters/token.
+        assert_eq!(estimate_tokens("12345678"), 2);
+        assert_eq!(estimate_tokens(""), 0);
+    }
+
+    #[test]
+    fn la_compactacio_conserva_els_darrers_torns_sencers() {
+        let hist: Vec<HistoryTurn> = (0..10)
+            .map(|i| {
+                torn(
+                    if i % 2 == 0 { "user" } else { "assistant" },
+                    &format!("torn {}", i),
+                )
+            })
+            .collect();
+        let out = compact_history(&hist, "RESUM dels antics");
+        // Els 4 darrers torns hi són SENCERS i en ordre; el primer («user»)
+        // porta el resum fusionat al davant (algunes APIs exigeixen rols
+        // alternats) però el seu contingut es conserva íntegre.
+        assert_eq!(out.len(), 4);
+        let cua: Vec<&str> = out.iter().map(|t| t.content.as_str()).collect();
+        assert!(cua[0].ends_with("torn 6"), "el torn 6 s'ha perdut: {}", cua[0]);
+        assert_eq!(&cua[1..], &["torn 7", "torn 8", "torn 9"]);
+        // El resum substitueix els antics (no queda cap «torn 0»).
+        assert!(out.iter().any(|t| t.content.contains("RESUM dels antics")));
+        assert!(!out.iter().any(|t| t.content == "torn 0"));
+        // Històries curtes: no es toquen.
+        let curta = &hist[..3];
+        assert_eq!(compact_history(curta, "resum").len(), 3);
+    }
+
+    #[test]
+    fn el_resum_es_fusiona_amb_el_primer_recent_si_tots_dos_son_user() {
+        let hist = vec![
+            torn("user", "antic"),
+            torn("assistant", "resposta"),
+            torn("user", "darrer user 1"),
+            torn("assistant", "darrer ia 1"),
+            torn("user", "darrer user 2"),
+            torn("assistant", "darrer ia 2"),
+        ];
+        let out = compact_history(&hist, "RESUM");
+        // Rols alternats: el resum s'ha fusionat amb el primer recent «user»
+        // (6 torns → resum+4 recents fusionats en 4).
+        assert_eq!(out.len(), 4);
+        assert_eq!(out[0].role, "user");
+        assert!(out[0].content.starts_with("RESUM"));
+        assert!(out[0].content.contains("darrer user 1"));
+        for parell in out.windows(2) {
+            assert_ne!(parell[0].role, parell[1].role);
+        }
+    }
+
+    #[test]
+    fn el_resum_extractiu_conserva_decisions_i_rutes() {
+        let hist = vec![
+            torn("user", "Construeix un joc de tres en ratlla amb Godot."),
+            torn(
+                "assistant",
+                "- Pla: crear tauler i lògica\nHe creat src/tauler.gd\nn _ready():\nError: el node no existeix\n@todo: afegir IA",
+            ),
+            torn("user", "continua"),
+        ];
+        let out = extractive_summary(&hist);
+        assert!(out.contains("RESUM DE LA SESSIÓ"));
+        assert!(out.contains("tres en ratlla"));
+        assert!(out.contains("src/tauler.gd"));
+        assert!(out.contains("@todo:"));
+        assert!(out.contains("Error"));
     }
 }

@@ -3,6 +3,96 @@
 Totes les releases amb els seus binaris: <https://github.com/jpuigbert/noorbit/releases>.
 Les notes completes de cada release són a la pàgina del release corresponent.
 
+## 0.71.17-alpha (2026-11-22)
+
+**GitHub Copilot com a motor del xat: el runtime en Rust, parlat per ACP**
+
+GitHub ha reescrit el runtime de Copilot en Rust — el mateix que alimenta el CLI, el SDK, l'extensió de VS Code i M365 Copilot. NoOrbit hi pot parlar **directament**, sense cap API de compatibilitat: el CLI de Copilot exposa un servidor **ACP** (Agent Client Protocol: JSON-RPC 2.0 sobre NDJSON) i NoOrbit hi actua de client.
+
+- *client ACP propi* (`src/acp/mod.rs`): obre la sessió (`initialize` + `session/new`), mana el prompt (`session/prompt`) i atén les peticions de l'agent: `fs/read_text_file` i `fs/write_text_file` — tots dos **dins de la carpeta del projecte**, amb normalització de `..` i comprovació dels enllaços simbòlics — i `session/request_permission`.
+- *streaming de veritat* (`ai/mod.rs`): cada fragment que arriba es retransmet com a «ai://chunk» i el raonament va per separat, igual que la resta de motors. El fil del diàleg **es conserva entre torns** (la sessió ACP viu per xat i per projecte) i el botó «Atura» envia `session/cancel` a l'agent.
+- *permisos a la interfície* (`AcpPermissionModal.tsx`): quan l'agent vol fer alguna cosa, apareix un diàleg amb l'operació i les opcions que ofereix l'agent. **Mai no s'aprova en silenci**: si l'usuari no contesta en 3 minuts, l'operació es rebutja.
+- *instal·lació sense administrador* (`external_orchestrator/copilot.rs`): si el CLI ja és al sistema (npm global, Homebrew…) es fa servir tal qual; si no, el botó l'instal·la dins les dades de NoOrbit amb el mateix patró que el DeepSeek Harness (baixa el Node.js LTS oficial si al sistema no n'hi ha i fa `npm install @github/copilot`), sense tocar res del sistema i conservant-se en mode portàtil/USB.
+- *al xat i al Gestor de proveïdors* (`AgentPanel.tsx`, `HarnessSection.tsx`): «GitHub Copilot (ACP)» apareix com a IA del xat, i el Gestor de proveïdors mostra l'estat (instal·lat o no, amb versió), el botó d'instal·lació i l'avís de fer «copilot login» una vegada.
+- *proves*: 8 tests Rust nous del client ACP (parseo dels tres tipus de missatge, soroll ignorat, text i raonament separats, crida d'eina, camins fora de l'espai rebutjats, lectura d'una porció de fitxer i permís sense resposta); `cargo test --lib` (319), `tsc --noEmit`, ESLint, Vitest (275) i `vite build` en verd.
+
+**Rutes absolutes, bucles d'edicions i `RUN|` enganxats**
+
+Un projecte obert des d'un volum extern (`/Volumes/Toshi/programes/forestin the sky`) acabava amb un xat que reemetia **15 blocs idèntics** i una carpeta falsa `Volumes/Toshi/…` dins del propi projecte. Són quatre causes reals, i les quatre estan arreglades:
+
+- *una sola manera de resoldre rutes* (`agent/runtools.rs`, `write_rel` + `fileBlocks.ts`, `relForWrite`): si la ruta del model **reprodueix l'arrel** (amb o sense barra inicial, repetida dues o tres vegades, amb symlink o majúscules diferents) se'n treu l'arrel i queda RELATIVA; si és realment FORA, no s'escriu mai. El backend i el frontend deixen de divergir (abans l'un rebutjava la ruta en silenci i l'altre hi creava la carpeta falsa).
+- *fi de l'error silenciós* (`apply_edit_blocks_at`, `rejected_write_paths`, `applyEditBlocks`, `autoMaterialize`): una ruta rebutjada —tant a les «@edit:» com a les «@file:», que abans es descartaven soles— **s'escriu al report**: el model rep la ruta bruta, l'arrel esperada i com ho ha de reemetre, i l'usuari veu un «⛔ … FORA del projecte obert» al resum del torn (`agentFlow.pathsOutsideProject`). Abans era un `continue` mut: el model no sabia res i la reemetia igual torn rere torn.
+- *guard anti-bucle* (`commands/ai.rs`, `action_fingerprint`): es compara NOMÉS el pla d'accions (`RUN|`, `@edit:`, `@file:`, `NB|`) —mai la prosa—. Primer torn idèntic: no es torna a executar res i s'envia al model una nota amb les quatre correccions concretes; segon: el torn s'ATURA i ho fa visible a la UI. `MAX_ROUNDS` ja no es crema repetint una comanda que no pot canviar res.
+- *`RUN|` enganxats* (`split_glued`): «`RUN|pip install -r requirements.txtRUN|python3 main.py`» era **una sola** comanda innombrable; ara es tallen en tantes com cal, respectant les cometes (un `run|` dins d'un grep no es parteix).
+- *prompt* (`RUN_PROMPT`): rutes SEMPRE relatives a l'arrel, rutes amb espais **entrecomillades** dins `RUN|`, cada directriu a la seva línia i prohibició de reemetre una acció que no canvia res.
+- *proves*: 8 tests Rust nous (`write_rel` amb volum extern, matriu de rutes rebutjades, `RUN|` enganxats, segell d'accions, report no mut tant d'«@edit:» com d'«@file:») i 11 de Vitest (`relForWrite`, `@edit:`/`@file:` absoluts dins i fora del projecte); `cargo test --lib` (353), `tsc --noEmit`, ESLint i Vitest (338) en verd.
+
+**L'app real en marxa: els quatre defectes que només es veuen fent clics**
+
+El pla es va validar amb tests, però mai s'havia executat el binari. Fer de veritat els fluxos estrella (tema de WordPress des del xat, «Desfés el pas», terminal PTY, mode professional) en va treure quatre que cap prova de unitat veia:
+
+- *«fes un joc» amb IA local feia Pygame* en lloc de Godot: amb un LLM disponible (Ollama) el torn es menjava la branca neuronal i **bypassava el determinista**. Ara `scaffold_joc_generic` (`ai/codegen.rs`) resol el joc genèric amb el projecte Godot 4 canònic (`project.godot` + `main.tscn` + `main.gd`) abans que el model respongui, i la consigna del proveïdor local (`ai/sysprompt.rs`, `provider_layer`) fixa Godot com a motor per defecte. Els motors **explícits** («fes un joc en pygame/Unity/Bevy…») no s'intercepten mai.
+- *la cadena greu «PNG fals → pantalla de pànic → pèrdua del projecte»*: la IA escrivia text dins d'un `.png`, el visor el servia sense validar-lo, la webview no el decodificava, l'error arribava al vigilà d'arrencada i **segrestava tota la UI**; en reiniciar, el projecte es perdia. Tallada als quatre nivells: `magic_ok` (`commands/image.rs`) rebutja el fitxer si la signatura no correspon a l'extensió, el vigilà (`index.html`) cobreix **només la finestra d'arrencada** i es retira quan React ha pintat, l'editor i el xat degraden a un placeholder «imatge no vàlida» (`onError` en lloc de petar) i `restoreLastRoot` reobre el projecte després de qualsevol reinici.
+- *Esc no tancava els modals*: Configuració, Projecte nou i Compte tenien cadascun la seva lògica (o cap). Ara comparteixen `utils/useEscapeToClose.ts`.
+- *lastRoot esborrat per un permís pendent*: després d'un rebuild amb firma ad-hoc, macOS torna a demanar accés (TCC) a l'Escriptori o als volums i `openWorkspace` falla **temporalment**; el codi esborrava la clau `noorbit.lastRoot` per a qualsevol error, així que els reinicios següents ja no restauraven res. Ara només l'esborra si el camí **realment no existeix** (`isMissingRootError`, amb el backend reservant «… no existeix» per a `ErrorKind::NotFound`) i la conserva en fallades de permís.
+- *proves*: tests Rust nous de l'enrutament del joc (`joc_generic_amb_llm_local_resol_el_scaffold_godot`, `joc_explicit_no_s_intercepta_mai`, `joc_generic_nomes_la_pregunta_real`, `joc_generic_godot_i_endevinament_nomes_explicit`, `la_consigna_local_fixa_godot_com_a_motor_per_defecte`) i de la signatura d'imatge; Vitest per al vigilà d'arrencada (`bootGuard.test.ts`, sobre l'`index.html` real), el visor d'imatges, la imatge del xat, l'Esc dels tres modals i la restauració del projecte. Total: `cargo test --lib` (365), `cargo test --workspace` a `crates`, `tsc --noEmit`, ESLint, Vitest (359) i `vite build` en verd.
+
+## 0.71.16-alpha (2026-11-21)
+
+**El cost real dels tokens: què s'ha consumit i què s'ha pagat**
+
+«Es pot tornar la informació a l'API dient que realment no s'han gastat tokens?» La resposta curta: el compte del proveïdor de núvol és del servidor — el client no hi pot tocar, i enganyar-lo seria exportar-ho malament. El que sí que es pot fer, i el que fa aquesta versió, és **calcular el cost real**: els tokens servits des de la memòria cau del proveïdor es consumeixen igual, però es paguen a una fracció del preu, i fins ara NoOrbit els tractava com si es paguessin sencers.
+
+- *la memòria cau, per proveïdor* (`api/mod.rs`, `parse_usage`): OpenAI-compatible (`prompt_tokens_details.cached_tokens`), DeepSeek (`prompt_cache_hit_tokens`) i Anthropic (`cache_read_input_tokens` + `cache_creation_input_tokens`) queden separats dels tokens d'entrada; Anthropic els exclou de `input_tokens` i això es té en compte per no comptar-los dos cops.
+- *preus reals* (`ai/pricing.rs`): taula de preus en USD per milió de tokens (entrada, sortida, lectura i escriptura de la memòria cau) per a 21 models d'OpenAI, Anthropic, DeepSeek i Gemini; el cost es calcula amb els tokens **pagats** (entrada menys els de la memòria cau), no amb els consumits. Model desconegut → **cap xifra inventada**: el cost queda buit i la interfície no hi mostra res.
+- *els agents també hi compten* (`ai/mod.rs`): el camí sense streaming (planificadors, agents, equips) **no emetia cap comptabilització** de tokens; ara emet el mateix esdeveniment que el xat.
+- *proveïdors locals a cost zero* (`is_free_provider`): Ollama i la IA integrada mostren «gratis» en lloc d'un preu estimat.
+- *al xat* (`AgentPanel.tsx`, `agentStore.ts`): cada resposta mostra els tokens de memòria cau i el **cost estimat del torn** en dòlars, amb el tooltip que explica quins tokens es paguen al preu sencer.
+- *proves*: 8 tests Rust nous (4 de la taula de preus, 4 del parseo de la memòria cau per proveïdor); `cargo test --lib` (283), `tsc --noEmit`, ESLint, Vitest (160) i `vite build` en verd.
+
+## 0.71.15-alpha (2026-11-21)
+
+**La Jam ara es veu treballar, es pot canviar d'IA en marxa i allibera la memòria**
+
+Donar una tasca a l'Autonomous Jam era un salt al buit: el registre existia però no avançava sol, no hi havia manera de triar amb quina IA treballava, i els gigabytes dels models locals quedaven ocupats sense fer serves.
+
+- *visibilitat en viu* (`jam/mod.rs`, `JamPanel.tsx`): el worker emet un **cor batent** cada 20 s («la IA genera el codi… (fa 40 s)») perquè el model local no sembli encallat; el registre fa **autoscroll**, marca l'hora de cada línia, i la capçalera mostra «en marxa» amb pols i «fa X s» del darrer esdeveniment.
+- **tria d'IA** (`JamRequest`, `resolve_jam_ai`, `AiPicker`): el desplegable «IA que farà la Jam» ofereix la IA integrada, els models locals d'Ollama i els proveïdors en línia; la tria s'aplica al **pla** i a **cada tasca**, i el pla es fa en una sessió aïllada (`jam-plan`) per no canviar la IA del xat de l'usuari sota els seus peus.
+- **canvi d'IA EN MARCA** (`jam_set_ai`, `jam/agent.rs`): el backend desa la tria a `ai.json` i el procés fill la rellegeix cada 2 s — la Jam continua amb la IA nova sense aturar-se ni perdre la feina feta.
+- **«Allibera la memòria»** (`ai_free_ram`): un sol botó descarrega els models d'Ollama residents i atura els motors locals (llama.cpp), mesura la RAM abans i després i diu quant s'ha recuperat. Es desactiva mentre la Jam treballa (ara la memòria sí que s'està fent servir).
+
+## 0.71.14-alpha (2026-11-21)
+
+**Les edicions buides «@edit:» ja no passen per feina feta**
+
+Un model consultat per afegir una dependència al `requirements.txt` va emetre un bloc CERCA/NOU amb el **mateix text als dos bàndols** — no canviava res — i NoOrbit ho va anunciar com a «📁 Aplicats automàticament (1 fitxers)». Mentida a la UI, diff verd/roig fals i un bucle que no aprèn res.
+
+- *rebuig no-op al disc* (`agent/runtools.rs`, `apply_edit_blocks_at`): si CERCA == NOU la secció **no compta com a aplicada i no s'escriu res**; si tot el bloc era no-op, l'informe que torna al model diu explícitament que les seccions són IDÈNTIQUES i que no emet res si el fitxer ja és correcte (abans el model no rebia cap senyal).
+- *mateix criteri al xat* (`agentStore.ts`, `applyEditBlocks`): les seccions idèntiques es listen a part («⏹️ Edicions inútils rebutjades») en lloc d'obrir un diff que no canvia res.
+- *la Jam no es deixa enganyar* (`jam/mod.rs`): la segona via d'escriptura només comptava qualsevol informe com a feina feta; ara exigeix com a mínim una edició realment «aplicada».
+- *prompts reforçats* (`RUN_PROMPT`, `prompts.ts`, regles del worker de la Jam): el text NOU ha de ser DISTINT del CERCA, mai edicions buides, i escriu NOMÉS els fitxers que la petició demana.
+- *proves*: test Rust nou (`noop_editions_are_not_applied`: el fitxer queda intacte i l'informe ho declara) i test Vitest nou (el parser conserva les seccions no-op perquè l'aplicador les rebutge); `cargo check --lib`, `cargo test edit_tests`, `pnpm typecheck` i Vitest (23 a `fileBlocks`) nets.
+
+**Experts: gestió d'estil «treballar amb professionals», menys RAM/CPU i temps estimat**
+
+El panell d'Especialistes passa de «llista amb caselles» a una gestió completa, i el treball en equip deixa de malgastar minuts de CPU recarregant el mateix model a cada torn.
+
+- *selecció i filtratge* (`ExpertsPanel.tsx`): botó **Tots/Cap** per seleccionar tot l'equip de cop (actua sobre els visibles quan hi ha filtre), recompte «{n} de {total} seleccionats», cerca per nom/rol quan n'hi ha més de 5, i **duplicar** un especialista per partir d'un de semblant i afinar-lo.
+- *claritat del flux*: la línia d'equip sempre visible explica què passarà («Treballaran: …» o «sense seleccionar-ne cap, treballaran tots N») i el botó d'iniciar-ho ho recorda al tooltip.
+- *RAM/CPU al treball en equip* (`commands/experts.rs`): abans es descarregava el model local **després de cada especialista**, obligant a recarregar-lo (minuts de CPU a Mac amb CPU) tot i que els següents feien servir el mateix. Ara el model es **manté mentre el torn consecutiu utilitzi el mateix model** i es descarrega només quan canvia, quan la fusió no el necessita, quan l'usuari atura l'equip i en acabar; el protocol de fitxers de cada especialista (`FILE_PROTOCOL`) afegeix regles d'estalvi: edita amb «@edit:» sense reemetre fitxers sencers i escriu NOMÉS el que la tasca demana (menys tokens = menys RAM i menys temps).
+- *temps estimat (ETA)*: els events de progrés de l'equip inclouen `eta_ms` calculat amb el **ritme real** (temps mitjà per subtasca feta, amb priors locals 150 s / núvol 40 s) i es mostra a la UI («queda 4 min 30 s»). Al xat (`AgentPanel.tsx`), mentre la IA treballa es mostra un ETA deduït de la **mediana de longitud i velocitat de les respostes anteriors** d'aquell xat i, quan ja està escrivint, del cabal de caràcters en viu (barrejat amb l'historial per no distortar-se amb el primer token).
+- *proves*: `tsc --noEmit`, Vitest (107 proves), `cargo check --lib` i `cargo test edit_tests` en verd.
+
+**Experts declaratives i jerarquia cap/obrer (després d'estudiar Qoder, OpenCode i VS Code)**
+
+S'han revisat els agents instal·lats al sistema (subagents `.md` de Qoder amb capçalera `name/description/model`, el model d'agents d'OpenCode amb `mode` primari/subagent i permisos, i el registre d'accions/paleta de VS Code) i se'n traslladen els patrons que milloren com es gestiona i es treballa amb els especialistes:
+
+- *especialistes com a fitxers `.md`* (`utils/expertMarkdown.ts` + botons al panell): cada expert pot **exportar-se** a un Markdown declaratiu (capçalera `name/description/model/mode` + instruccions al cos, com els subagents de Qoder/d'OpenCode) i **importar-ne** diversos de cop: si el nom ja existeix, el fitxer MANA i sincronitza. Així els equips es poden versionar amb Git dins del projecte i compartir entre màquines.
+- *mode cap/obrer* (nous valors `mode` a `Expert`/`ExpertInput`, Rust i TS, backward compatible per defecte «all»): **primary** = cap que dona ordres al xat (no apareix al roster de delegació «@use:», no fa d'obrer a l'equip), **subagent** = obrer (delegable i d'equip, no es pot vincular al xat), **all** = ambdós. S'aplica a totes bandes: formulari (selector) + xips a la targeta, filtre del selector d'expert del xat, `rosterContext()` (tots 5 punts d'injecció coberts d'una vegada), delegació `@use:` i equip per defecte (sense selecció, treballen només els obrers).
+- *ECC adaptat*: els 72 agents `.md` que importa el botó ECC es marquen **subagents** per definició (a la pràctica ja ho són: els crida un orquestrador), alliberant el selector del xat sense perdre'ls com a obrers.
+- *paleta de comandaments* (⇧⌘P, l'infraestructura ja existia estil VS Code): noves entrades «Especialistes: nou especialista» i «Especialistes: importar fitxers .md…» — accés des de qualsevol pantalla.
+- *proves*: 7 tests Vitest nous (`expertMarkdown`: serialització, anada i volta, fitxers sense capçalera, alias en català, noms d'arxiu); `tsc`, Vitest (114), `cargo check --lib` i `cargo test --lib` en verd.
+
 ## 0.71.13-alpha (2026-11-20)
 
 **Portada, wiki i release multiplaforma: tot al dia**

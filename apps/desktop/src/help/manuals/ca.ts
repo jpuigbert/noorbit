@@ -448,7 +448,7 @@ export const manual: Manual = {
         "El registre de la dreta mostra cada pas (tarea iniciada, feta o fallada). «Atura» la Jam en qualsevol moment.",
         "MEMÒRIA: si una tasca consumeix massa, l'agent s'atura, es reintenta amb menys qualitat i la Jam continua. El Mac no es congela.",
         "Al final es genera un REPORT.md al projecte amb el pla, els resultats i els commits.",
-        "REQUISIT: el projecte ha de ser un repositori git (la Jam fa commits i pot tornar enrere).",
+        "GIT: si el projecte no és un repositori, NoOrbit l'inicialitza sol en arrencar la Jam (cada tasca es desa com un commit i es pot tornar enrere). Sense git instal·lat, la Jam funciona igualment, però sense checkpoints.",
       ],
     },
     {

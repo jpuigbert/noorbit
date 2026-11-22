@@ -9,7 +9,7 @@ import { ExternalLink, Terminal as TerminalIcon } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useT } from "../i18n";
-import { applyTheme, loadFunCursor, loadTheme, useUIStore } from "../stores/uiStore";
+import { applyTheme, loadFunCursor, loadProfessionalMode, loadTheme, useUIStore } from "../stores/uiStore";
 import { alignChatBucket } from "../stores/agentStore";
 import { closePanelWindow, CHAT_LABEL, TERM_LABEL } from "../windowing";
 import { useFunCursor } from "../utils/useFunCursor";
@@ -104,6 +104,11 @@ export function mountDetached(kind: "chat" | "terminal") {
   // s'enviarien l'avís en cercle).
   void listen("fun-cursor://changed", () =>
     useUIStore.setState({ funCursor: loadFunCursor() })
+  ).catch(() => undefined);
+  // Mode professional: igual que el cursor, es rellegeix del localStorage
+  // compartit quan canvia al programa principal (sense reemetre).
+  void listen("professional-mode://changed", () =>
+    useUIStore.setState({ professionalMode: loadProfessionalMode() })
   ).catch(() => undefined);
   initFunFx();
   const el = document.getElementById("root");

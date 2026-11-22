@@ -1,80 +1,117 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { ChevronDown, Eraser, ExternalLink, Square, Terminal as TerminalIcon } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
+import {
+  ChevronDown,
+  Eraser,
+  ExternalLink,
+  Plus,
+  Terminal as TerminalIcon,
+  X,
+} from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
 import { useT } from "../../i18n";
 import { useUIStore } from "../../stores/uiStore";
-import { useTerminalStore, currentCallId } from "../../stores/terminalStore";
-import { toastError } from "../../stores/toastStore";
+import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { useTerminalStore } from "../../stores/terminalStore";
 import { closePanelWindow, detachTerminal, TERM_LABEL } from "../../windowing";
+import { disposeHost, ensureHost, fitHost, getHost, hostIds, refreshTheme } from "./xtermHosts";
 
-/// Terminal integrat (panell inferior, com VS Code). Executa comandes dins
-/// la carpeta del projecte obert i mostra la sortida mentre va arribant.
-/// ⌘J l'obre/tanca; ↑/↓ naveguen l'historial.
-/// Amb «detached» viu en una FINESTRA SEPARADA (per posar-lo a una altra
-/// pantalla): sempre obert, omple la finestra i el botó de tancar el torna
-/// al programa principal.
+/// Terminal integrat REAL (Fase 3b): sessions PTY multi-pestanya amb xterm.
+/// Cada pestanya és una shell interactiva de l'usuari (stdin real: npm init,
+/// composer, php -a…); les instàncies xterm viuen fora de React i NO es
+/// desmunten en canviar de pestanya (scrollback de 5000 línies intacte).
+/// ⌘J l'obre/tanca. Amb «detached» viu en una FINESTRA SEPARADA: la sessió
+/// PTY és del backend i sobreviu al detach/reattach (es repinta amb el
+/// buffer de `term_scrollback`); el botó de tancar el torna al programa.
 export default function TerminalPanel({ detached = false }: { detached?: boolean }) {
   const { t } = useT();
   const openStore = useUIStore((s) => s.terminalOpen);
   const setOpen = useUIStore((s) => s.setTerminalOpen);
   const open = detached || openStore;
-  const { lines, running, history, run, clear } = useTerminalStore(
-    useShallow((st) => ({
-      lines: st.lines,
-      running: st.running,
-      history: st.history,
-      run: st.run,
-      clear: st.clear,
-    }))
-  );
+  const root = useWorkspaceStore((s) => s.root);
+  const { sessions, activeId, init, createSession, closeSession, setActive } =
+    useTerminalStore(
+      useShallow((st) => ({
+        sessions: st.sessions,
+        activeId: st.activeId,
+        init: st.init,
+        createSession: st.createSession,
+        closeSession: st.closeSession,
+        setActive: st.setActive,
+      }))
+    );
 
-  const [value, setValue] = useState("");
-  const [histIdx, setHistIdx] = useState(-1);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  /// Slots DOM per sessió: TOTS muntats sempre; el no actiu es oculta amb
+  /// display:none (l'xterm amagat conserva buffer i scrollback).
+  const slotsRef = useRef(new Map<string, HTMLDivElement>());
 
-  // Auto-scroll a l'última línia quan arriba sortida nova.
+  // En obrir: connecta events, sincronitza sessions existents (finestra
+  // separada o reattach) i crea la primera sessió si no n'hi ha cap.
   useEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [lines]);
+    if (!open) return;
+    void init().then(() => useTerminalStore.getState().bootstrap(root ?? ""));
+  }, [open, init, root]);
 
+  // Munta els hosts xterm als seus slots i neteja els de sessions tancades.
   useEffect(() => {
-    if (open) {
-      const id = setTimeout(() => inputRef.current?.focus(), 30);
-      return () => clearTimeout(id);
+    if (!open) return;
+    const alive = new Set(sessions.map((s) => s.id));
+    for (const id of hostIds()) {
+      if (!alive.has(id)) disposeHost(id);
+    }
+    for (const s of sessions) {
+      const slot = slotsRef.current.get(s.id);
+      if (!slot) continue;
+      const host = ensureHost(s.id);
+      if (host.el.parentElement !== slot) slot.appendChild(host.el);
+    }
+    if (activeId) {
+      // Després del layout: el slot visible ja té mida real.
+      const raf = requestAnimationFrame(() => {
+        fitHost(activeId);
+        getHost(activeId)?.term.focus();
+      });
+      return () => cancelAnimationFrame(raf);
     }
     return undefined;
+  }, [open, sessions, activeId]);
+
+  // Resize debounced del slot actiu → addon-fit → term_resize (SIGWINCH).
+  useEffect(() => {
+    if (!open || !activeId) return;
+    const slot = slotsRef.current.get(activeId);
+    if (!slot) return;
+    let timer: number | undefined;
+    const ro = new ResizeObserver(() => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => fitHost(activeId), 120);
+    });
+    ro.observe(slot);
+    return () => {
+      window.clearTimeout(timer);
+      ro.disconnect();
+    };
+  }, [open, activeId, sessions.length]);
+
+  // Canvi de tema del programa (o de la finestra separada): repinta els
+  // xterm amb els tokens nous. Guard de StrictMode per no duplicar.
+  useEffect(() => {
+    if (!open) return;
+    let un: (() => void) | undefined;
+    let disposed = false;
+    void listen("theme://changed", () => refreshTheme())
+      .then((u) => {
+        if (disposed) u();
+        else un = u;
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      un?.();
+    };
   }, [open]);
 
   if (!open) return null;
-
-  const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && !running) {
-      e.preventDefault();
-      run(value);
-      setValue("");
-      setHistIdx(-1);
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      if (history.length === 0) return;
-      const i = histIdx < 0 ? history.length - 1 : Math.max(0, histIdx - 1);
-      setHistIdx(i);
-      setValue(history[i]);
-    } else if (e.key === "ArrowDown") {
-      e.preventDefault();
-      if (histIdx < 0) return;
-      const i = histIdx + 1;
-      if (i >= history.length) {
-        setHistIdx(-1);
-        setValue("");
-      } else {
-        setHistIdx(i);
-        setValue(history[i]);
-      }
-    }
-  };
 
   return (
     <div
@@ -86,7 +123,6 @@ export default function TerminalPanel({ detached = false }: { detached?: boolean
       <div className="terminal-head">
         <span className="terminal-title">
           <TerminalIcon size={12} /> {t("terminal.title")}
-          {running && <span className="terminal-running">{t("terminal.running")}</span>}
         </span>
         <div className="terminal-tools">
           {!detached && (
@@ -98,27 +134,18 @@ export default function TerminalPanel({ detached = false }: { detached?: boolean
               <ExternalLink size={12} />
             </button>
           )}
-          {running && (
-            <button
-              className="btn sm"
-              onClick={() => {
-                // Atura la comanda en execució (mata el grup de processos).
-                void invoke("kill_command", { callId: currentCallId() }).catch((e) =>
-                  toastError("No s'ha pogut aturar la comanda", e)
-                );
-              }}
-              title={t("terminal.stop")}
-            >
-              <Square size={12} />
-            </button>
-          )}
-          <button className="btn sm" onClick={clear} title={t("terminal.clear")}>
+          <button
+            className="btn sm"
+            onClick={() => activeId && getHost(activeId)?.term.clear()}
+            title={t("terminal.clear")}
+          >
             <Eraser size={12} />
           </button>
           <button
             className="btn sm"
             onClick={() => {
-              // En finestra separada, tancar = tornar al programa principal.
+              // En finestra separada, tancar = tornar al programa principal
+              // (les sessions PTY NO es maten: sobreviuen al reattach).
               if (detached) void closePanelWindow(TERM_LABEL);
               else setOpen(false);
             }}
@@ -128,28 +155,62 @@ export default function TerminalPanel({ detached = false }: { detached?: boolean
           </button>
         </div>
       </div>
-      <div className="terminal-output" ref={scrollRef}>
-        {lines.length === 0 && <div className="terminal-empty">{t("terminal.hint")}</div>}
-        {lines.map((l) => (
-          <div key={l.id} className={"term-line term-" + l.kind}>
-            {l.kind === "cmd" ? "$ " : ""}
-            {l.text}
+      <div className="terminal-tabs" role="tablist">
+        {sessions.map((s) => (
+          <div
+            key={s.id}
+            role="tab"
+            tabIndex={0}
+            aria-selected={s.id === activeId}
+            className={
+              "terminal-tab" + (s.id === activeId ? " active" : "") + (s.alive ? "" : " dead")
+            }
+            title={s.title}
+            onClick={() => setActive(s.id)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setActive(s.id);
+              }
+            }}
+          >
+            <span className="terminal-tab-name">
+              {s.title}
+              {!s.alive && <span className="terminal-tab-exit"> · {t("terminal.exited")}</span>}
+            </span>
+            <button
+              className="terminal-tab-close"
+              title={t("terminal.closeSession")}
+              onClick={(e) => {
+                e.stopPropagation();
+                void closeSession(s.id);
+              }}
+            >
+              <X size={11} />
+            </button>
           </div>
         ))}
-        {running && <div className="term-line term-out term-caret">…</div>}
+        <button
+          className="btn sm terminal-new"
+          onClick={() => void createSession(root ?? "")}
+          title={t("terminal.newSession")}
+        >
+          <Plus size={12} />
+        </button>
       </div>
-      <div className="terminal-input-row">
-        <span className="terminal-prompt">$</span>
-        <input
-          ref={inputRef}
-          className="terminal-input"
-          value={value}
-          placeholder={running ? t("terminal.running") : t("terminal.placeholder")}
-          disabled={running}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={onKey}
-          spellCheck={false}
-        />
+      <div className="terminal-xterm-wrap">
+        {sessions.length === 0 && <div className="terminal-empty">{t("terminal.hint")}</div>}
+        {sessions.map((s) => (
+          <div
+            key={s.id}
+            className="terminal-xterm-slot"
+            style={{ display: s.id === activeId ? "block" : "none" }}
+            ref={(el) => {
+              if (el) slotsRef.current.set(s.id, el);
+              else slotsRef.current.delete(s.id);
+            }}
+          />
+        ))}
       </div>
     </div>
   );

@@ -26,6 +26,9 @@ export default function MenuBar() {
   // llegir l'estat perquè la llista es refresqui en fer clic.
   const funCursor = useUIStore((s) => s.funCursor);
   const setFunCursor = useUIStore((s) => s.setFunCursor);
+  // Mode professional: les opcions del cursor lúdic s'amaguen del menú
+  // (el codi i les preferències es conserven; tornen en desactivar-lo).
+  const professionalMode = useUIStore((s) => s.professionalMode);
   const theme = useUIStore((s) => s.theme);
 
   // tanca el desplegable en fer clic fora
@@ -91,14 +94,19 @@ export default function MenuBar() {
       { label: t("menu.minimap"), action: act("view.minimap") },
       { sep: true, label: "" },
       // Cursor del ratolí: el divertit per zones o el clàssic de l'ordinador.
-      { label: t("menu.cursorFun"), check: funCursor, action: () => setFunCursor(true) },
-      {
-        label: t("menu.cursorClassic"),
-        check: !funCursor,
-        title: t("menu.cursorHint"),
-        action: () => setFunCursor(false),
-      },
-      { sep: true, label: "" },
+      // Amb el mode professional actiu aquestes fileres no es mostren.
+      ...(professionalMode
+        ? []
+        : ([
+            { label: t("menu.cursorFun"), check: funCursor, action: () => setFunCursor(true) },
+            {
+              label: t("menu.cursorClassic"),
+              check: !funCursor,
+              title: t("menu.cursorHint"),
+              action: () => setFunCursor(false),
+            },
+            { sep: true, label: "" },
+          ] as Row[])),
       { label: t("menu.zoomIn"), kbd: "⌘=", action: act("view.zoomIn") },
       { label: t("menu.zoomOut"), kbd: "⌘-", action: act("view.zoomOut") },
       { label: t("menu.zoomReset"), kbd: "⌘0", action: act("view.zoomReset") },
@@ -121,6 +129,7 @@ export default function MenuBar() {
       { label: t("menu.gotoLine"), kbd: "⌃G", action: act("goto.line") },
       { label: t("menu.gotoSymbol"), kbd: "⇧⌘O", action: act("goto.symbol") },
       { label: t("menu.gotoDefinition"), kbd: "F12", action: act("goto.definition") },
+      { label: t("menu.gotoReferences"), kbd: "⌥F12", action: act("goto.references") },
     ],
     run: [
       { label: t("menu.runPreview"), kbd: "⌘R", action: act("run.preview") },

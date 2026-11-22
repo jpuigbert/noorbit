@@ -62,6 +62,10 @@ import {
   CONTEXT_SYSTEM,
   CONSOLIDATION_SYSTEM,
   rosterContext,
+  esProjecteWordPress,
+  wpThemeTemplates,
+  SCAFFOLD_MIN_WP,
+  SCAFFOLD_MIN_GENERIC,
 } from "./agent/prompts";
 import { skillsCatalogContext } from "./agent/skillsContext";
 import {
@@ -72,13 +76,18 @@ import {
   extractFromProse,
   extractRecommendedPaths,
   parseDeleteDirectives,
-  extractSingleFileContent,
   esBlocDeDocumentacio,
   nomesDocumentacio,
   extractTreePaths,
   parseEditBlocks,
+  applyEditsToContent,
+  relForWrite,
+  esRutaForaDeRelatiu,
   REC_EXT,
 } from "./agent/fileBlocks";
+import type { ProseSkip } from "./agent/fileBlocks";
+import { generateFileQueue } from "./agent/scaffoldQueue";
+import { t } from "../i18n";
 import {
   parseAgentDirectives,
   stripAgentDirectiveLines,
@@ -252,11 +261,13 @@ async function applyDelegateDirectives(raw: string, sid: string): Promise<string
   for (const r of reqs) {
     // Coincidència tolerant: la IA sovent escriu «la Tester» o «agent tester» en lloc
     //del nom exacte; abans una diferència mínima matava la delegació en silenci.
-    const expert = matchExpert(r.agent, useExpertStore.getState().experts);
+    // Els experts «primary» queden fora: són caps, no obrers (mode OpenCode).
+    const expert = matchExpert(r.agent, useExpertStore.getState().experts.filter((x) => x.mode !== "primary"));
     if (!expert) {
       const noms = useExpertStore
         .getState()
-        .experts.map((e) => `«${e.name}»`)
+        .experts.filter((x) => x.mode !== "primary")
+        .map((e) => `«${e.name}»`)
         .join(", ");
       results.push({
         agent: r.agent,
@@ -453,16 +464,31 @@ async function attachReferencedFiles(
 
 /// Aplica els blocs «@edit:» al fitxer REAL: cerca el text CERCA (exacte o
 /// per línies retallades —tolera indentació—) i el substitueix per NOU.
-/// Retorna un informe per al xat: què s'ha aplicat i què no s'ha trobat.
-async function applyEditBlocks(
+/// Seccions CERCA == NOU (no-op) es REBUTGEN: no toquen el disc — els models
+/// copien el mateix text als dos bàndols i fingien un canvi inexistent.
+/// Les rutes es normalitzen amb «relForWrite»: una ABSOLUTA dins del projecte
+/// es converteix en relativa (abans creava una carpeta falsa sota l'arrel) i
+/// una de FORA del projecte es rebutja i es reporta (mai s'escriu en silenci).
+/// Quan un CERCA no coincideix, es mostra al xat el fragment REAL més
+/// semblant (amb números de línia) perquè l'usuari/model el corregeixi.
+/// Retorna un informe per al xat: què s'ha aplicat, què no s'ha trobat.
+/// Exportada NOMÉS per als tests de regressió (agentStore.test.ts).
+export async function applyEditBlocks(
   base: string,
   blocks: EditBlock[]
-): Promise<{ edited: string[]; failed: string[] }> {
+): Promise<{ edited: string[]; failed: string[]; noops: string[]; outside: string[] }> {
   const edited: string[] = [];
   const failed: string[] = [];
+  const noops: string[] = [];
+  const outside: string[] = [];
   for (const block of blocks) {
-    const rel = block.path.replace(/^\/+/, "").replace(/\\/g, "/");
-    if (rel.split("/").some((s) => s === "..")) continue;
+    const rel = relForWrite(base, block.path);
+    if (!rel) {
+      // Rebutjada: ruta absoluta fora del projecte o amb «..». Abans callàvem
+      // i el xat no sabia per què la IA «no editava res».
+      if (block.path.trim().startsWith("/")) outside.push(block.path.trim());
+      continue;
+    }
     const abs = `${base}/${rel}`;
     let old: string;
     try {
@@ -471,52 +497,44 @@ async function applyEditBlocks(
       failed.push(`${rel}: el fitxer no existeix (no es pot editar)`);
       continue;
     }
-    let updated = old;
-    let ok = 0;
-    let fail = 0;
-    for (const ed of block.edits) {
-      if (updated.includes(ed.find)) {
-        updated = updated.replace(ed.find, ed.replace);
-        ok++;
-        continue;
-      }
-      // Coincidència per línies retallades (models que canvien indentació):
-      const findLines = ed.find.split("\n").map((l) => l.trim());
-      const contentLines = updated.split("\n");
-      let hit = -1;
-      outer: for (let i = 0; i + findLines.length <= contentLines.length; i++) {
-        for (let k = 0; k < findLines.length; k++) {
-          if (contentLines[i + k].trim() !== findLines[k]) continue outer;
-        }
-        hit = i;
-        break;
-      }
-      if (hit >= 0) {
-        const replLines = ed.replace ? ed.replace.split("\n") : [];
-        contentLines.splice(hit, findLines.length, ...replLines);
-        updated = contentLines.join("\n");
-        ok++;
-      } else {
-        fail++;
-      }
-    }
+    const res = applyEditsToContent(old, block.edits);
+    const { ok, fail, noop } = res;
     if (ok > 0) {
       try {
         const prev = await captureOriginal(abs);
-        await invoke("write_file", { path: abs, content: updated });
-        noteFileEdited(abs, updated, prev.original, prev.existed);
-        edited.push(`${rel} (${ok} edició${ok === 1 ? "" : "s"}${fail ? `, ${fail} no trobades` : ""})`);
+        await invoke("write_file", { path: abs, content: res.updated });
+        noteFileEdited(abs, res.updated, prev.original, prev.existed);
+        edited.push(`${rel} (${ok} edició${ok === 1 ? "" : "s"}${fail ? `, ${fail} no trobades` : ""}${noop ? `, ${noop} no-op ignorades` : ""})`);
       } catch {
         failed.push(`${rel}: no s'ha pogut escriure`);
       }
+    } else if (noop > 0 && fail === 0) {
+      // Tot el bloc era CERCA == NOU: edició inútil, el fitxer no canvia.
+      noops.push(`${rel}: les ${noop} seccions CERCA/NOU són idèntiques (no canvien res) — edició inútil, no aplicada`);
     } else if (fail > 0) {
-      failed.push(`${rel}: el text CERCA no coincideix amb el fitxer real — cal el text EXACTE`);
+      // Feedback per al reintent: el fragment REAL més semblant de cada
+      // CERCA fallit, amb números de línia (el model corregeix el CERCA).
+      const notes = res.failures
+        .map((f) => {
+          if (!f.fragment) return t("agentFlow.editNoSimilar");
+          const numbered = f.fragment.lines
+            .map((l, k) => `${f.fragment!.startLine + k}│ ${l}`)
+            .join("\n");
+          return (
+            t("agentFlow.editClosest", { start: f.fragment.startLine, end: f.fragment.endLine }) +
+            "\n" +
+            numbered
+          );
+        })
+        .join("\n");
+      failed.push(t("agentFlow.editNoMatch", { path: rel }) + (notes ? "\n" + notes : ""));
     }
   }
-  return { edited, failed };
+  return { edited, failed, noops, outside };
 }
 
-async function autoMaterialize(raw: string): Promise<string | null> {
+/// Exportada NOMÉS per als tests de regressió (agentStore.test.ts).
+export async function autoMaterialize(raw: string): Promise<string | null> {
   const ws = useWorkspaceStore.getState();
   const root = ws.root;
   if (!root || !raw) {
@@ -532,9 +550,15 @@ async function autoMaterialize(raw: string): Promise<string | null> {
     return null;
   }
 
+  // Arrel neta (sense barra final): es necessita DESPRÉS de parsejar, per
+  // normalitzar les rutes que el model escriu absolutes.
+  const base = root.replace(/\/+$/, "");
   let files = parseFileBlocks(raw);
+  // Blocs de prosa sense ruta clara: S'OMETEN amb avís visible (mai rutes
+  // inventades tipus «bloc_N.ext» escrites a cegues).
+  const skipped: ProseSkip[] = [];
   if (files.length === 0) {
-    files = extractFromProse(raw);
+    files = extractFromProse(raw, { skipped });
   }
   // El model pot REPETIR el mateix fitxer moltes vegades (bucle genseratiu:
   // 20 cops el mateix @file:). Es queda només l'última versió (que és la
@@ -546,15 +570,32 @@ async function autoMaterialize(raw: string): Promise<string | null> {
     for (const f of files) ultimes.set(f.path, f);
     files = [...ultimes.values()];
   }
-  // Blocs de codi SENSE nom de fitxer (els models locals sovint no anomenen
-  // res): abans es descartaven i NOMÉS sobrevivien els .md, així que «no crea
-  // res de codi». Ara els blocs de CODI real (.py/.js/.ts/…) es desin a la
-  // carpeta «codi_ia/» del projecte (els .md/.txt sense nom es descarten:
-  // són prosa explicativa, no codi).
+  // Blocs «bloc_N» que el model ha anomenat EXPLÍCITAMENT amb «@file:»: els
+  // de codi real (.py/.js/.ts/…) es desen a la carpeta «codi_ia/» del
+  // projecte; els .md/.txt es descarten (prosa explicativa, no codi). Els
+  // blocs de PROSA sense nom ja no arriben ací: extractFromProse els omet.
   const isUnnamed = (p: string) => /^bloc_\d+\./.test(p.split("/").pop() || "");
   files = files
     .filter((f) => !isUnnamed(f.path) || !/\.(md|txt)$/i.test(f.path))
     .map((f) => (isUnnamed(f.path) ? { ...f, path: `codi_ia/${f.path}` } : f));
+  // Rutes que la IA ha posat FORA del projecte (absoluta que no és sota
+  // l'arrel, o amb «..»): NO s'escriuen mai — s'avisa l'usuari al resum.
+  const outside = new Set<string>();
+  const keepRel = (rawPath: string): string | null => {
+    const rel = relForWrite(base, rawPath);
+    if (!rel && esRutaForaDeRelatiu(base, rawPath)) outside.add(rawPath.trim());
+    return rel;
+  };
+  files = files
+    .map((f) => ({ ...f, path: keepRel(f.path) ?? "" }))
+    .filter((f) => f.path !== "");
+  // Dos noms diferents per a LA MATEIXA ruta (p. ex. «/arrel/a.py» i «a.py»):
+  // es queda l'últim contingut, que és el més complet.
+  {
+    const unics = new Map<string, { path: string; content: string }>();
+    for (const f of files) unics.set(f.path, f);
+    files = [...unics.values()];
+  }
   // EDICIÓ D'UN SOL FITXER: si la resposta porta UN sol bloc sense nom i la
   // prosa esmenta UNA única ruta coneguda (p. ex. «he modificat src/app.py»),
   // aquest bloc ÉS aquell fitxer: l'escrivim a la seva ruta REAL en lloc de
@@ -575,21 +616,36 @@ async function autoMaterialize(raw: string): Promise<string | null> {
     }
   }
   // Carpetes que la IA ha demanat explícitament (estructura buida, sense fitxer).
-  const dirReqs = parseDirDirectives(raw);
+  // Les rutes es normalitzen JA: una absoluta dins del projecte es torna
+  // relativa; una de FORA s'omet i es registra a «outside» (avís visible).
+  const dirReqs = parseDirDirectives(raw)
+    .map((d) => keepRel(d))
+    .filter((d): d is string => !!d);
   // Fitxers/carpetes que la IA ha demanat ESBORRAR (l'opció contraria a @file:).
-  const delReqs = parseDeleteDirectives(raw);
+  const delReqs = parseDeleteDirectives(raw)
+    .map((d) => keepRel(d))
+    .filter((d): d is string => !!d);
   // Edicions QUIRÚRGIQUES «@edit:» (CERCA/NOU): modificar o esborrar codi
   // existent sense reemetre fitxers sencers (els models locals els tallen).
   const editBlocks = parseEditBlocks(raw);
-  if (
-    files.length === 0 &&
-    dirReqs.length === 0 &&
-    delReqs.length === 0 &&
-    editBlocks.length === 0
-  )
+  if (files.length === 0 && dirReqs.length === 0 && delReqs.length === 0 && editBlocks.length === 0) {
+    // Sense res materialitzable: si la IA només demanava rutes FORA del
+    // projecte, l'usuari ha de saber PER QUÈ no s'ha escrit res.
+    if (outside.size > 0) {
+      return t("agentFlow.pathsOutsideProject", { root: base, paths: [...outside].join(", ") });
+    }
+    // Sense res materialitzable: si hi havia blocs sense ruta, l'usuari ho
+    // ha de SABER (abans callàvem i semblava que la IA no havia fet res).
+    if (skipped.length > 0) {
+      return (
+        t("agentFlow.skippedBlocks", { n: skipped.length }) +
+        "\n" +
+        skipped.map((s) => `• ${s.preview}`).join("\n")
+      );
+    }
     return null;
+  }
 
-  const base = root.replace(/\/+$/, "");
   const written: string[] = [];
   const createdDirs: string[] = [];
   const pending: string[] = [];
@@ -610,8 +666,7 @@ async function autoMaterialize(raw: string): Promise<string | null> {
   //    es crea també. Recollim aquestes carpetes-estructura per al resum.
   const structure = new Set<string>(createdDirs);
   for (const f of files) {
-    const rel = f.path.replace(/^\/+/, "").replace(/\\/g, "/");
-    if (rel.split("/").some((s) => s === "..")) continue;
+    const rel = f.path;
     try {
       const abs = `${base}/${rel}`;
       // El codi VELL es llegeix ABANS d'aixafar-lo: és el que es mostrarà en
@@ -632,7 +687,9 @@ async function autoMaterialize(raw: string): Promise<string | null> {
     }
   }
   if (written.length === 0 && createdDirs.length === 0 && delReqs.length === 0 && editBlocks.length === 0)
-    return null;
+    return outside.size > 0
+      ? t("agentFlow.pathsOutsideProject", { root: base, paths: [...outside].join(", ") })
+      : null;
 
   // 3) Esborra el que la IA ha demanat amb «@delete:/@esborra:». Va DESPRÉS
   //    de les escriptures: si un fitxer s'ha reescrit i alhora s'ha demanat
@@ -653,7 +710,7 @@ async function autoMaterialize(raw: string): Promise<string | null> {
   // 4) Edicions quirúrgiques «@edit:» (CERCA/NOU): modificar codi existent
   //    o ESBORRAR-ne fragments (NOU buit). Van DESPRÉS de les escriptures:
   //    un @file: complet mana sobre un @edit del mateix fitxer.
-  let editReport: { edited: string[]; failed: string[] } | null = null;
+  let editReport: { edited: string[]; failed: string[]; noops: string[]; outside: string[] } | null = null;
   if (editBlocks.length > 0) {
     editReport = await applyEditBlocks(base, editBlocks);
   }
@@ -692,6 +749,20 @@ async function autoMaterialize(raw: string): Promise<string | null> {
         `només s'ha aplicat l'última versió de cada fitxer.`
     );
   }
+  // Rutes que la IA ha demanat FORA del projecte: mai s'escriuen, però cal
+  // dir-ho (abans era silenci i el xat semblava que «no feia res»).
+  if (outside.size > 0) {
+    parts.push(
+      t("agentFlow.pathsOutsideProject", { root: base, paths: [...outside].join(", ") })
+    );
+  }
+  if (skipped.length > 0) {
+    parts.push(
+      t("agentFlow.skippedBlocks", { n: skipped.length }) +
+        "\n" +
+        skipped.map((s) => `• ${s.preview}`).join("\n")
+    );
+  }
   // Si el motor lleuger ha detectat errors (claus sense tancar, JSON invàlid…),
   // avisem: es veuran al panell «Problemes» i la IA els pot corregir si se li
   // demana. És el mateix que fa Eclipse en marcar línies en vermell en escriure.
@@ -707,7 +778,7 @@ async function autoMaterialize(raw: string): Promise<string | null> {
         deleted.map((p) => `• ${p}`).join("\n")
     );
   }
-  if (editReport && (editReport.edited.length > 0 || editReport.failed.length > 0)) {
+  if (editReport && (editReport.edited.length > 0 || editReport.failed.length > 0 || editReport.outside.length > 0)) {
     if (editReport.edited.length > 0) {
       parts.push(
         `✏️ Edicions aplicades al codi existent (${editReport.edited.length}):\n` +
@@ -720,6 +791,20 @@ async function autoMaterialize(raw: string): Promise<string | null> {
           editReport.failed.map((p) => `• ${p}`).join("\n")
       );
     }
+    if (editReport.outside.length > 0) {
+      parts.push(
+        t("agentFlow.pathsOutsideProject", {
+          root: base,
+          paths: editReport.outside.join(", "),
+        })
+      );
+    }
+  }
+  if (editReport && editReport.noops.length > 0) {
+    parts.push(
+      `⏹️ Edicions inútils rebutjades (el text NOU era IDÈNTIC al CERCA — no canvien res):\n` +
+        editReport.noops.map((p) => `• ${p}`).join("\n")
+    );
   }
   // El que s'ha esborrat ja no és cap tasca pendent.
   const pend = Array.from(new Set([...pending, ...todos])).filter((p) => !deleted.includes(p));
@@ -796,15 +881,23 @@ async function runLiveMaterialize() {
   // Només blocs estrictes @file: (els de prosa podrien ser prosa incompleta).
   // Parsegem la cua del stream: un bloc que ACABA de tancar-se sempre hi és,
   // i els blocs anteriors o ja estan escrits o els reescriu «autoMaterialize»
-  // al final del torn.
-  const blocks = parseFileBlocks(raw.length > LIVE_TAIL ? raw.slice(raw.length - LIVE_TAIL) : raw);
+  // al final del torn. «onlyClosed»: MAI s'escriu un preview PARCIAL a disc
+  // mentre el fence/@file encara és obert — el bloc es bufferitza fins que
+  // està tancat (abans s'escrivia codi tallat per la meitat en directe).
+  const blocks = parseFileBlocks(
+    raw.length > LIVE_TAIL ? raw.slice(raw.length - LIVE_TAIL) : raw,
+    { onlyClosed: true }
+  );
   if (blocks.length === 0) return;
   liveBusy = true;
   let anyNew = false;
   try {
     for (const f of blocks) {
-      const rel = f.path.replace(/^\/+/, "").replace(/\\/g, "/");
-      if (!rel || rel.split("/").some((s) => s === "..")) continue;
+      // Mateixa normalització que «autoMaterialize»: absoluta dins del
+      // projecte → relativa; absoluta FORA → s'omet (no es creen carpetes
+      // falses sota l'arrel mentre la IA encara escriu).
+      const rel = relForWrite(base, f.path);
+      if (!rel) continue;
       if (liveWritten.get(rel) === f.content) continue; // sense canvis
       const abs = `${base}/${rel}`;
       // Aquest fitxer ja l'està escrivint un altre run: no hi escrivim ara
@@ -1018,6 +1111,10 @@ const initialChats = (() => {
 /// Projecte del calaix de xats que es crearà just després amb «initialChats».
 currentBucket = useWorkspaceStore.getState().root;
 
+/// FASE 2 · notes de compactació pendents: el backend ha resumit la sessió
+/// («ai://compacted») i el resultat del torn en curs ho ha de dir al xat.
+const compactNotes = new Set<string>();
+
 export const useAgentStore = create<AgentState>((set, get) => {
   /// Aplicar un canvi al xat `sid` (si ja no existeix, es ignora: pot haver
   /// estat tancat mentre la IA responia).
@@ -1044,6 +1141,10 @@ export const useAgentStore = create<AgentState>((set, get) => {
             input: p.input ?? 0,
             output: p.output ?? 0,
             total: p.total ?? (p.input ?? 0) + (p.output ?? 0),
+            cacheRead: p.cacheRead ?? 0,
+            cacheWrite: p.cacheWrite ?? 0,
+            paidInput: p.paidInput ?? (p.input ?? 0),
+            costUsd: p.costUsd ?? null,
             contextWindow: p.contextWindow ?? 0,
             contextUsedPct: p.contextUsedPct ?? 0,
           };
@@ -1074,6 +1175,27 @@ export const useAgentStore = create<AgentState>((set, get) => {
       )
       // Sense catch, un registre fallat deixava un rebuig sense gestionar i
       // el comptador d'ús de tokens es quedava congelat en silenci.
+      .catch(() => undefined);
+  }
+
+  // FASE 2 · COMPACTACIÓ AL 90%: el backend substitueix els torns antics per
+  // un resum quan el context estimat arriba al 90% del límit del model. La
+  // nota és VISIBLE al xat: pas a la timeline + recordatori al resultat.
+  if (!(globalThis as Record<string, unknown>).__noorbitCompactedListener) {
+    (globalThis as Record<string, unknown>).__noorbitCompactedListener = true;
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen<{ session: string; note?: string }>("ai://compacted", (evt) => {
+          const sid = evt.payload?.session;
+          if (!sid) return;
+          compactNotes.add(sid);
+          get().pushStep(sid, {
+            label: "ia",
+            detail: evt.payload.note ?? "Sessió resumida per context",
+            ok: true,
+          });
+        })
+      )
       .catch(() => undefined);
   }
 
@@ -1549,6 +1671,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
         // entenia per què la IA «no recordava» el que estaven fent).
         const text = oomLevel.value;
         const oom = oomNote(oomLevel.level);
+        const compactNote = compactNotes.delete(sid)
+          ? "_(Sessió resumida per context)_"
+          : null;
         const thinking = await fetchThinking(sid);
         get().pushStep(sid, {
           label: "ia",
@@ -1572,7 +1697,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
           // Les línies «@agent:» ja s'han executat: no cal mostrar-les al xat
           // (el resum d'agents creats informa de la mateixa feina).
           lastResult:
-            [stripAgentDirectiveLines(text), delegated, extra, agents, todos, oom]
+            [stripAgentDirectiveLines(text), delegated, extra, agents, todos, oom, compactNote]
               .filter(Boolean)
               .join("\n\n") || stripAgentDirectiveLines(text),
           lastThinking: thinking,
@@ -1714,7 +1839,11 @@ export const useAgentStore = create<AgentState>((set, get) => {
           } else if (level === 2) {
             promptForLevel = user + "\n\nIMPORTANT: resposta MOLT BREU (només README.md + 1 fitxer mínim).";
           } else if (level === 3) {
-            promptForLevel = user + "\n\nIMPORTANT: només un fitxer README.md amb el pla.";
+            // El nivell mínim JA NO és «només README amb el pla»: es manté
+            // la llista canònica de fitxers amb contingut REAL (per WP, els
+            // 5 bàsics del tema) i personalització parcial.
+            promptForLevel =
+              user + "\n\n" + (esProjecteWordPress(text) ? SCAFFOLD_MIN_WP : SCAFFOLD_MIN_GENERIC);
           }
           return await invoke<string>("send_prompt_stream", {
             prompt: promptForLevel,
@@ -1729,14 +1858,37 @@ export const useAgentStore = create<AgentState>((set, get) => {
         get().pushStep(sid, { label: "ia", detail: "Resposta rebuda; n'extrec els fitxers…", ok: true });
         let files = parseFileBlocks(raw);
         let skeleton = false;
-        // Fitxers que encara no s'han generat (per torn) — l'usuari pot
-        // demanar «continua» per fer la resta.
+        // Fitxers que queden pendents (cancel·lació) o que el model no ha
+        // pogut generar ni amb el reintent: s'informa al resum del xat.
         let pendentsLlista: string[] = [];
+        let fallitsLlista: string[] = [];
 
         // Capa 2: si el model no usa @file: però SÍ escriu codi en blocs ```
         // (tutorials en prosa), resquem els blocs i en fem fitxers reals.
+        // Els blocs sense ruta clara S'OMETEN amb avís (mai «bloc_N.ext»).
+        const skipped: ProseSkip[] = [];
         if (files.length === 0) {
-          files = extractFromProse(raw);
+          files = extractFromProse(raw, { skipped });
+        }
+
+        // Degradació OOM al nivell mínim: MAI «només README amb el pla».
+        // Si és WordPress, garantim els 5 fitxers canònics amb contingut de
+        // plantilla REAL i personalitzat (el model pot haver-los retallat).
+        if (oomLevel.level >= 3 && esProjecteWordPress(text)) {
+          let addedTpl = 0;
+          for (const tpl of wpThemeTemplates(folder, text, "")) {
+            if (!files.some((f) => f.path === tpl.path)) {
+              files.push(tpl);
+              addedTpl++;
+            }
+          }
+          if (addedTpl > 0) {
+            get().pushStep(sid, {
+              label: "projecte",
+              detail: t("agentFlow.wpMinLevel", { n: addedTpl }),
+              ok: true,
+            });
+          }
         }
 
         // Pla de reserva: si el model no respecta «@file:», demana-li NOMÉS la
@@ -1752,7 +1904,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
           // Si és WordPress, se li dona la llista CANÒNICA de fitxers: un
           // model dèbil no la inventa sola i el projecte quedava sense
           // admin.php, functions.php, style.css…
-          const ésWordPress = /\b(wordpress|unt[eé]na|gosets|wordpress|plugin|tema|theme)\b/i.test(text);
+          const ésWordPress = esProjecteWordPress(text);
           const wpHint = ésWordPress
             ? "\n\nÉS UN PROJECTE WORDPRESS: usa les rutes canòniques d'un tema " +
               "o plugin: style.css, functions.php, index.php, header.php, footer.php, " +
@@ -1776,50 +1928,60 @@ export const useAgentStore = create<AgentState>((set, get) => {
             // escriure 20 fitxers d'un cop: s'atura, s'omple de prosa i
             // inventa blocs «bloc_2.md». Fitxer a fitxer, en canvi, sí que
             // funciona: el context és petit i la resposta és codi real.
-            const MAX_PER_TORN = 8;
-            const generats: { path: string; content: string }[] = [];
-            const pendents: string[] = [];
+            // Continuació AUTOMÀTICA: lots successius fins buidar la cua
+            // (abans es tallava als 8 primers i la resta quedava «per a un
+            // torn nou» que mai arribava). MAI placeholders a disc: si un
+            // fitxer surt buit es regenera un cop i, si falla, s'informa.
             // «Quins fitxers he de crear?»: la llista es queda a la LLISTA DE
             // TASQUES del xat (la de dalt, sempre visible) i NoOrbit va
             // marcant cada fitxer com a fet a mesura que el genera.
             const tasques = useTaskListStore.getState();
             for (const rel of paths) tasques.add(`Crear ${rel}`, "ia");
-            for (const rel of paths) {
-              if (generats.length >= MAX_PER_TORN) {
-                pendents.push(rel);
-                continue;
-              }
-              get().pushStep(sid, {
-                label: "projecte",
-                detail: `Generant el codi de «${rel}»…`,
-                ok: true,
-              });
-              const raw = await invoke<string>("ai_chat_plain", {
-                prompt:
-                  `Projecte: ${text}\n\nEscriu NOMÉS el fitxer «${rel}» amb el seu ` +
-                  `contingut COMPLET i executable. Cap text fora del codi.`,
-                system: FILE_SYSTEM,
-                provider: ia.provider ?? undefined,
-                model: ia.model ?? undefined,
-              }).catch(() => "");
-              const content = extractSingleFileContent(raw);
-              generats.push({
-                path: rel,
-                content:
-                  content ||
-                  `${rel}\n\n(Pendent: el model no ha retornat contingut per a aquest fitxer)\n`,
-              });
-              // Fitxer generat: es marca com a fet a la llista de tasques.
-              useTaskListStore.getState().complete(`Crear ${rel}`);
-            }
-            files = generats;
-            if (pendents.length > 0) {
-              pendentsLlista = pendents;
-            }
+            const cua = await generateFileQueue({
+              projectText: text,
+              paths,
+              system: FILE_SYSTEM,
+              provider: ia.provider,
+              model: ia.model,
+              isCancelled: () => sessOf(sid)?.stopped === true,
+              onLot: (lot, lots, done, total) =>
+                get().pushStep(sid, {
+                  label: "projecte",
+                  detail: t("agentFlow.lot", { lot, lots, done, total }),
+                  ok: true,
+                }),
+              onFile: (rel) =>
+                get().pushStep(sid, {
+                  label: "projecte",
+                  detail: t("agentFlow.file", { file: rel }),
+                  ok: true,
+                }),
+              onRetry: (rel) =>
+                get().pushStep(sid, {
+                  label: "projecte",
+                  detail: t("agentFlow.retry", { file: rel }),
+                  ok: true,
+                }),
+              onSkip: (rel) =>
+                get().pushStep(sid, {
+                  label: "projecte",
+                  detail: t("agentFlow.skip", { file: rel }),
+                  ok: false,
+                }),
+              onDone: (rel) => useTaskListStore.getState().complete(`Crear ${rel}`),
+            });
+            files = cua.generated;
+            pendentsLlista = cua.pending;
+            fallitsLlista = cua.failed;
           }
         }
 
         if (files.length === 0) {
+          if (fallitsLlista.length > 0) {
+            // El manifest existia però CAP fitxer s'ha pogut generar: ho
+            // diem clarament (abans s'escrivien placeholders fingits).
+            throw new Error(t("agentFlow.allFailed"));
+          }
           throw new Error(
             "El model actual no genera ni les rutes dels fitxers. Amb un model tan lleuger (1.5b) això és habitual: connecta un model més potent o un proveïdor remot amb token (p. ex. Venice AI)."
           );
@@ -1846,14 +2008,22 @@ export const useAgentStore = create<AgentState>((set, get) => {
         await ws.refreshTree();
         armAllMarks();
         const head = skeleton
-          ? `🗂️ Esquelet creat a «${folder}»: ${created.length} fitxers/carpetes (buits, per omplir — el model local és dèbil):\n`
+          ? t("agentFlow.skeletonHead", { folder, n: created.length }) + "\n"
           : `✅ Creats ${created.length} fitxers a «${folder}»:\n`;
         const summary =
           head +
           created.map((c) => `• ${c}`).join("\n") +
           (pendentsLlista.length > 0
-            ? `\n\n📌 Queden ${pendentsLlista.length} fitxer(s) per generar en un torn nou (digues «continua el projecte»):\n` +
+            ? "\n\n" + t("agentFlow.pendingCancelled", { n: pendentsLlista.length }) + "\n" +
               pendentsLlista.map((c) => `• ${c}`).join("\n")
+            : "") +
+          (fallitsLlista.length > 0
+            ? "\n\n" + t("agentFlow.failedFiles", { n: fallitsLlista.length }) + "\n" +
+              fallitsLlista.map((c) => `• ${c}`).join("\n")
+            : "") +
+          (skipped.length > 0
+            ? "\n\n" + t("agentFlow.skippedBlocks", { n: skipped.length }) + "\n" +
+              skipped.map((sk) => `• ${sk.preview}`).join("\n")
             : "") +
           (lintErrors > 0
             ? `\n\n⚠️ ${lintErrors} error${
@@ -2017,8 +2187,10 @@ export const useAgentStore = create<AgentState>((set, get) => {
         const base = root.replace(/\/+$/, "");
         const folder = root.split(/[/\\]/).pop() ?? root;
         // Primer intentem el format estricte @file:; si no, rescatem blocs de codi.
+        // Els blocs sense ruta clara S'OMETEN amb avís (mai rutes inventades).
         let files = parseFileBlocks(raw);
-        if (files.length === 0) files = extractFromProse(raw);
+        const skipped: ProseSkip[] = [];
+        if (files.length === 0) files = extractFromProse(raw, { skipped });
         // Els «bloc_N.md» són fragments de documentació que els models locals
         // inventen quan no saben escriure codi: NO són fitxers del projecte i
         // no es materialitzen (es reporten a l'usuari).
@@ -2029,6 +2201,13 @@ export const useAgentStore = create<AgentState>((set, get) => {
         // El missatge també pot portar peticions d'esborrat («@delete: …»).
         const dels = parseDeleteDirectives(raw);
         if (files.length === 0 && dels.length === 0) {
+          if (skipped.length > 0) {
+            throw new Error(
+              t("agentFlow.skippedBlocks", { n: skipped.length }) +
+                "\n" +
+                skipped.map((sk) => `• ${sk.preview}`).join("\n"),
+            );
+          }
           if (blocsDoc.length > 0) {
             throw new Error(
               `Aquest missatge només conté DOCUMENTACIÓ (${blocsDoc
@@ -2046,6 +2225,8 @@ export const useAgentStore = create<AgentState>((set, get) => {
               "• Si la resposta es va TALLAR (codi a mitges), demana «continua»."
           );
         }
+        // Fora del projecte obert: no s'escriu, però l'usuari ho ha de saber.
+        const outside: string[] = [];
         get().pushStep(sid, {
           label: "projecte",
           detail: `Escrivint ${files.length} fitxers (i les seves carpetes) al projecte…`,
@@ -2054,8 +2235,11 @@ export const useAgentStore = create<AgentState>((set, get) => {
         const created: string[] = [];
         let lintErrors = 0;
         for (const f of files) {
-          const rel = f.path.replace(/^\/+/, "").replace(/\\/g, "/");
-          if (rel.split("/").some((seg) => seg === "..")) continue;
+          const rel = relForWrite(base, f.path);
+          if (!rel) {
+            if (esRutaForaDeRelatiu(base, f.path)) outside.push(f.path.trim());
+            continue;
+          }
           const abs = `${base}/${rel}`;
           const prev = await captureOriginal(abs);
           await invoke("write_file", { path: abs, content: f.content });
@@ -2065,7 +2249,12 @@ export const useAgentStore = create<AgentState>((set, get) => {
         }
         // Esborras demanats: van després de les escriptures (mana l'esborrat).
         const erased: string[] = [];
-        for (const d of dels) {
+        for (const d0 of dels) {
+          const d = relForWrite(base, d0);
+          if (!d) {
+            if (esRutaForaDeRelatiu(base, d0)) outside.push(d0.trim());
+            continue;
+          }
           try {
             await invoke("delete_path", { path: `${base}/${d}` });
             dropMark(`${base}/${d}`);
@@ -2078,11 +2267,26 @@ export const useAgentStore = create<AgentState>((set, get) => {
         }
         await ws.refreshTree();
         armAllMarks();
+        if (created.length === 0 && erased.length === 0) {
+          throw new Error(
+            outside.length > 0
+              ? t("agentFlow.pathsOutsideProject", { root: base, paths: outside.join(", ") })
+              : "NoOrbit no ha pogut escriure cap fitxer d'aquest missatge: les rutes " +
+                "anaven fora del projecte obert o eren invàlides.",
+          );
+        }
         const summary =
           `✅ Creats ${created.length} fitxers a «${folder}» des del missatge:\n` +
           created.map((c) => `• ${c}`).join("\n") +
+          (outside.length > 0
+            ? "\n\n" + t("agentFlow.pathsOutsideProject", { root: base, paths: outside.join(", ") })
+            : "") +
           (erased.length > 0
             ? `\n\n🗑 Esborrats (${erased.length}):\n` + erased.map((d) => `• ${d}`).join("\n")
+            : "") +
+          (skipped.length > 0
+            ? "\n\n" + t("agentFlow.skippedBlocks", { n: skipped.length }) + "\n" +
+              skipped.map((sk) => `• ${sk.preview}`).join("\n")
             : "") +
           (lintErrors > 0
             ? `\n\n⚠️ ${lintErrors} error${
@@ -2122,8 +2326,8 @@ export const useAgentStore = create<AgentState>((set, get) => {
       const existed: string[] = [];
       const failed: string[] = [];
       for (const rawLine of lines) {
-        const p = rawLine.trim().replace(/^\/+/, "").replace(/\\/g, "/");
-        if (!p || p.split("/").includes("..")) continue;
+        const p = relForWrite(base, rawLine);
+        if (!p) continue;
         const abs = `${base}/${p}`;
         try {
           if (p.endsWith("/")) {
@@ -2860,6 +3064,9 @@ export const useAgentStore = create<AgentState>((set, get) => {
           const out = oomLevelSend.value;
           const thinking = await fetchThinking(sid);
           const oom = oomNote(oomLevelSend.level);
+          const compactNote = compactNotes.delete(sid)
+            ? "_(Sessió resumida per context)_"
+            : null;
           get().pushStep(sid, {
             label: "ia",
             detail: "Resposta rebuda; comprovant si cal crear o desar fitxers al projecte…",
@@ -2875,7 +3082,7 @@ export const useAgentStore = create<AgentState>((set, get) => {
             startedAt: null,
             lastElapsedMs: Date.now() - t0,
             lastResult:
-              [stripAgentDirectiveLines(out), delegated, extra, agents, todos, oom]
+              [stripAgentDirectiveLines(out), delegated, extra, agents, todos, oom, compactNote]
                 .filter(Boolean)
                 .join("\n\n") || stripAgentDirectiveLines(out),
             lastThinking: thinking,
