@@ -67,6 +67,10 @@ Tres idees sostenen el projecte:
 
 ## Novetats de la 0.71.13
 
+*Les novetats de les versions següents (cost real dels tokens, Copilot per ACP,
+l'app real provada amb clics) són a [`CHANGELOG.md`](CHANGELOG.md) i al cos de
+cada release.*
+
 ### 🎮🦀 Godot 4 i Bevy: motors de primera classe
 
 Godot i Bevy ja no són «modes»: **es detecten, s'instal·len, s'editen i la IA els pilota
@@ -132,17 +136,20 @@ L'historial **complet**, versió per versió, és a [`CHANGELOG.md`](CHANGELOG.m
 
 ## Instal·lació (usuari final)
 
-**👉 <https://github.com/jpuigbert/noorbit/releases>**
+**👉 <https://github.com/jpuigbert/noorbit/releases/latest>**
 
-Cada release publiqua els tres sistemes operatius:
+Cada release publica els tres sistemes operatius. `<VERSIÓ>` és sempre la del
+release que descarregueu (l'última publicada és la del link de dalt), així que
+l'enllaç directe té aquesta forma:
+`https://github.com/jpuigbert/noorbit/releases/latest/download/NoOrbit_<VERSIÓ>_universal.dmg`.
 
 | Sistema | Fitxer | Notes |
 |---|---|---|
-| **macOS** (universal, Intel + Apple Silicon) | `NoOrbit_0.71.13-alpha_universal.dmg` | Signatura ad-hoc; arrossega l'app a **Aplicacions** |
-| **Windows** (10 / 11) | `NoOrbit_0.71.13-alpha_x64-setup.exe` | Instal·lació per a l'usuari actual, sense drets d'administrador |
-| **Linux** (Debian / Ubuntu) | `NoOrbit_0.71.13-alpha_amd64.deb` | `sudo apt install ./…deb` |
-| **Linux** (Fedora / RHEL) | `NoOrbit-0.71.13-alpha-1.x86_64.rpm` | `sudo dnf install ./…rpm` |
-| **Linux** (universal) | `NoOrbit_0.71.13-alpha_amd64.AppImage` | `chmod +x` i executa |
+| **macOS** (universal, Intel + Apple Silicon) | `NoOrbit_<VERSIÓ>_universal.dmg` | Signatura ad-hoc; arrossega l'app a **Aplicacions** |
+| **Windows** (10 / 11) | `NoOrbit_<VERSIÓ>_x64-setup.exe` | Instal·lació per a l'usuari actual, sense drets d'administrador |
+| **Linux** (Debian / Ubuntu) | `NoOrbit_<VERSIÓ>_amd64.deb` | `sudo apt install ./…deb` |
+| **Linux** (Fedora / RHEL) | `NoOrbit-<VERSIÓ>-1.x86_64.rpm` | `sudo dnf install ./…rpm` |
+| **Linux** (universal) | `NoOrbit_<VERSIÓ>_amd64.AppImage` | `chmod +x` i executa |
 
 L'índex automàtic de **totes** les versions i els seus enllaços és l'asset `versions.json`
 de l'últim release. Les versions velles **mai no s'esborren**.
@@ -167,18 +174,18 @@ xattr -dr com.apple.quarantine /Applications/NoOrbit.app
 
 ### Windows
 
-Doble clic a `NoOrbit_0.71.13-alpha_x64-setup.exe` → s'instal·la per a l'usuari actual
+Doble clic a `NoOrbit_<VERSIÓ>_x64-setup.exe` → s'instal·la per a l'usuari actual
 i l'executable apareix al menú Inici.
 
 ### Linux
 
 ```bash
 # Debian / Ubuntu
-sudo apt install ./NoOrbit_0.71.13-alpha_amd64.deb
+sudo apt install ./NoOrbit_<VERSIÓ>_amd64.deb
 # Fedora / RHEL
-sudo dnf install ./NoOrbit-0.71.13-alpha-1.x86_64.rpm
+sudo dnf install ./NoOrbit-<VERSIÓ>-1.x86_64.rpm
 # AppImage
-chmod +x NoOrbit_0.71.13-alpha_amd64.AppImage && ./NoOrbit_0.71.13-alpha_amd64.AppImage
+chmod +x NoOrbit_<VERSIÓ>_amd64.AppImage && ./NoOrbit_<VERSIÓ>_amd64.AppImage
 ```
 
 ---

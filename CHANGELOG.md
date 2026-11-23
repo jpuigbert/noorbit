@@ -3,6 +3,23 @@
 Totes les releases amb els seus binaris: <https://github.com/jpuigbert/noorbit/releases>.
 Les notes completes de cada release són a la pàgina del release corresponent.
 
+## 0.71.18-alpha (2026-11-23)
+
+**El motor llama.cpp dins del bundle universal: les dues arquitectures, i res en silenci**
+
+Els instal·ladors de la 0.71.17 portaven el model GGUF (396 MB) però **no el motor**
+a macOS: Windows i Linux sí que l'empaquetaven. Cap test ho deia: el pas de CI és
+`continue-on-error` i l'API de GitHub havia respost un error de quota que el script
+iterava com si fos la llista de releases (`rels is not iterable`), matant el procés
+DESPRÉS d'haver baixat el model. Només es va veure llistant el contingut del `.app`
+ja publicat.
+
+- *API validada, amb reintent i token* (`scripts/fetch-native-model.mjs`, `releasesLlamaCpp`): es comprova l'HTTP i que el payload sigui REALMENT una llista, tres intents amb espera creixent, i el `GITHUB_TOKEN` del runner (de 60 a 5000 peticions/h). El motor és opcional: **avisa i continua**, no mata el build i no calla (`avisa` emet `::warning::` dins Actions).
+- *bundle universal de veritat* (`assetsAEmpaquetar` i `engine_src_for`, `ai/native_llm.rs`): a macOS es baixen **LES DUES slices** (`bin-macos-arm64` + `bin-macos-x64`) a `native-engine/macos-arm64|macos-x64`, i l'app copia **només la de l'arquitectura que s'executa**. Abans es copiava tot el directori i `llamacpp::binary()` agafava la primera carpeta que trobava: un Mac Intel amb un binari arm64 rep «bad CPU type in executable», que és pitjor que no portar-ne cap.
+- *què porta realment l'instal·lador, escrit al log* (`.github/workflows/release.yml`, pas `Verify bundled model + engine`): comprova el `.gguf` i cada slice del motor i ho converteix en anotació visible, perquè un `continue-on-error` no torni a amagar res.
+- *docs que no caduquen* (`README.md`, `INSTALL.md`): els noms d'instal·lador no porten una versió escrita a mà (el README deia 0.71.13 i l'INSTALL 0.71.6); ara `<VERSIÓ>`, globs o `releases/latest`.
+- *proves*: 3 tests Rust nous de la selecció per arquitectura (bundle amb les dues slices, slice absent, motor pla i bundle sense motor); verificat de punta a punta amb la descàrrega real dels dos binaris: la slice x64 arrenca (`Darwin x86_64`) i l'arm64 dona «bad CPU type» en aquest mateix Mac — per això escollir la bona no és un detall cosmètic. `cargo test --lib` (368), `cargo check --all-targets`, `tsc --noEmit`, ESLint, Vitest (359) i `vite build` en verd.
+
 ## 0.71.17-alpha (2026-11-22)
 
 **GitHub Copilot com a motor del xat: el runtime en Rust, parlat per ACP**
@@ -90,7 +107,7 @@ S'han revisat els agents instal·lats al sistema (subagents `.md` de Qoder amb c
 - *especialistes com a fitxers `.md`* (`utils/expertMarkdown.ts` + botons al panell): cada expert pot **exportar-se** a un Markdown declaratiu (capçalera `name/description/model/mode` + instruccions al cos, com els subagents de Qoder/d'OpenCode) i **importar-ne** diversos de cop: si el nom ja existeix, el fitxer MANA i sincronitza. Així els equips es poden versionar amb Git dins del projecte i compartir entre màquines.
 - *mode cap/obrer* (nous valors `mode` a `Expert`/`ExpertInput`, Rust i TS, backward compatible per defecte «all»): **primary** = cap que dona ordres al xat (no apareix al roster de delegació «@use:», no fa d'obrer a l'equip), **subagent** = obrer (delegable i d'equip, no es pot vincular al xat), **all** = ambdós. S'aplica a totes bandes: formulari (selector) + xips a la targeta, filtre del selector d'expert del xat, `rosterContext()` (tots 5 punts d'injecció coberts d'una vegada), delegació `@use:` i equip per defecte (sense selecció, treballen només els obrers).
 - *ECC adaptat*: els 72 agents `.md` que importa el botó ECC es marquen **subagents** per definició (a la pràctica ja ho són: els crida un orquestrador), alliberant el selector del xat sense perdre'ls com a obrers.
-- *paleta de comandaments* (⇧⌘P, l'infraestructura ja existia estil VS Code): noves entrades «Especialistes: nou especialista» i «Especialistes: importar fitxers .md…» — accés des de qualsevol pantalla.
+- *paleta de comandes* (⇧⌘P, l'infraestructura ja existia estil VS Code): noves entrades «Especialistes: nou especialista» i «Especialistes: importar fitxers .md…» — accés des de qualsevol pantalla.
 - *proves*: 7 tests Vitest nous (`expertMarkdown`: serialització, anada i volta, fitxers sense capçalera, alias en català, noms d'arxiu); `tsc`, Vitest (114), `cargo check --lib` i `cargo test --lib` en verd.
 
 ## 0.71.13-alpha (2026-11-20)

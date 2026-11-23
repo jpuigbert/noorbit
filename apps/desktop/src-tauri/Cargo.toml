@@ -1,6 +1,6 @@
 [package]
 name = "no-orbit"
-version = "0.71.17-alpha"
+version = "0.71.18-alpha"
 description = "NoOrbit — IDE amb agent IA local, Blender i Unreal Engine 5"
 authors = ["NoOrbit"]
 edition = "2021"

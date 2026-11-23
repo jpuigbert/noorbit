@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Descarrega el model GGUF petit que la IA NATIVA de NoOrbit porta EN
 // l'instal·lador (decisió de l'usuari: «un cop instal·lat, funciono offline
-// sense baixar res»). Cal un LLM real que cabiga en 4 GB: un model d'uns
+// sense baixar res»). Cal un LLM real que capigui en 4 GB: un model d'uns
 // 0.5 B params quantitzat Q4 (~350 MB), prou bo per parlar, raonar i programar
 // una mica, i suficientment petit per no saturar la RAM.
 //
@@ -67,17 +67,6 @@ async function descarrega(url, dest) {
   console.log("  ✓ fet");
 }
 
-// Asset oficial de llama.cpp per a la plataforma actual (per empaquetar el
-// motor i fer la nativa realment offline).
-function assetLlamaCpp() {
-  const p = process.platform;
-  const a = process.arch;
-  if (p === "darwin") return a === "arm64" ? "bin-macos-arm64" : "bin-macos-x64";
-  if (p === "linux") return a === "arm64" ? "bin-ubuntu-arm64" : "bin-ubuntu-x64";
-  if (p === "win32") return a === "arm64" ? "bin-win-cpu-arm64" : "bin-win-cpu-x64";
-  return null;
-}
-
 async function portaModel() {
   const dest = join(modelDir, MODEL_NAME);
   if (existsSync(dest) && statSync(dest).size > 1_000_000) {
@@ -88,62 +77,159 @@ async function portaModel() {
   return dest;
 }
 
-async function portaEngine() {
-  const marker = join(engineDir, ".llamacpp-ok");
-  if (existsSync(marker)) {
-    console.log("✓ El motor (llama.cpp) ja és empaquetat");
-    return;
+// Avís visible TAMBÉ a GitHub Actions. El motor és opcional, però que no hi
+// sigui no ha de quedar mai en silenci: a la 0.71.17 va fallar només a macOS
+// (el build de Windows i Linux el portaven) i ho vam de descobrir llegint el
+// llistat del `.app` ja publicat.
+function avisa(text) {
+  if (process.env.GITHUB_ACTIONS) console.log(`::warning::${text}`);
+  else console.warn(`⚠ ${text}`);
+}
+
+// Quins assets oficials de llama.cpp cal empaquetar. A macOS el bundle és
+// UNIVERSAL (el mateix .app ha de córrer natiu en Apple Silicon i en Intel),
+// així que s'hi posen LES DOS slices en subcarpetes `macos-arm64/` i
+// `macos-x64/`; `ai/native_llm.rs` n'escull la de l'arquitectura que
+// s'està executant. Windows i Linux van en pla, com sempre.
+function assetsAEmpaquetar() {
+  const p = process.platform;
+  const a = process.arch;
+  if (p === "darwin") {
+    return [
+      { clau: "bin-macos-arm64", sub: "macos-arm64" },
+      { clau: "bin-macos-x64", sub: "macos-x64" },
+    ];
   }
-  const asset = assetLlamaCpp();
-  if (!asset) {
-    console.warn(`⚠ Plataforma desconeguda (${process.platform}/${process.arch}): no s'empaqueta el motor.`);
-    return;
+  if (p === "win32") {
+    return [{ clau: a === "arm64" ? "bin-win-cpu-arm64" : "bin-win-cpu-x64", sub: "" }];
   }
-  const rels = await fetch(
-    "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=5",
-    { headers: { "User-Agent": "NoOrbit-installer", Accept: "application/vnd.github+json" } }
-  ).then((r) => r.json());
-  let url;
-  let nom;
+  if (p === "linux") {
+    return [{ clau: a === "arm64" ? "bin-ubuntu-arm64" : "bin-ubuntu-x64", sub: "" }];
+  }
+  return [];
+}
+
+// Llista de releases de llama.cpp amb reintent i verificació. Dos forats
+// reals que tapava: (1) l'API sense autenticar respon un OBJECTE de rate
+// limit amb HTTP 403 i el codi ho iterava com si fos la llista
+// («rels is not iterable»); (2) qualsevol d'aquells errors feia sortir el
+// script amb codi 1 DESPRÉS d'haver baixat el model, de manera que el build
+// continuava (continue-on-error) sense el motor i sense cap senyal clar.
+async function releasesLlamaCpp() {
+  const url = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=10";
+  const headers = { "User-Agent": "NoOrbit-installer", Accept: "application/vnd.github+json" };
+  // El token del runner (si existeix) puja el límit de peticions de 60 a
+  // 5000/h: és el que fa que tres builds simultanis no es mengin la quota.
+  if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  let ultimError;
+  for (let intent = 1; intent <= 3; intent++) {
+    try {
+      const res = await fetch(url, { headers });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const dades = await res.json();
+      if (!Array.isArray(dades)) {
+        throw new Error(`l'API ha respost «${dades?.message ?? "una estructura inesperada"}»`);
+      }
+      return dades;
+    } catch (e) {
+      ultimError = e;
+      if (intent < 3) await new Promise((r) => setTimeout(r, intent * 5000));
+    }
+  }
+  throw ultimError;
+}
+
+function cercaAsset(rels, clau) {
   for (const rel of rels) {
     for (const a of rel.assets ?? []) {
-      if (a.name.includes(asset) && (a.name.endsWith(".zip") || a.name.endsWith(".tar.gz"))) {
-        url = a.browser_download_url;
-        nom = a.name;
-        break;
+      if (a.name.includes(clau) && (a.name.endsWith(".zip") || a.name.endsWith(".tar.gz"))) {
+        return { url: a.browser_download_url, nom: a.name };
       }
     }
-    if (url) break;
   }
-  if (!url) {
-    console.warn(`⚠ No trobo un binari oficial de llama.cpp per a ${asset}: la nativa caurà al motor del sistema o al simbòlic.`);
-    return;
-  }
-  const arxiu = join(engineDir, nom);
-  mkdirSync(engineDir, { recursive: true });
-  await descarrega(url, arxiu);
+  return null;
+}
+
+async function desempaquetar(arxiu, nom, dest) {
   if (nom.endsWith(".zip")) {
-    execFileSync("unzip", ["-o", arxiu, "-d", engineDir], { stdio: "inherit" });
+    execFileSync("unzip", ["-o", arxiu, "-d", dest], { stdio: "inherit" });
   } else {
-    execFileSync("tar", ["-xzf", arxiu, "-C", engineDir], { stdio: "inherit" });
+    execFileSync("tar", ["-xzf", arxiu, "-C", dest], { stdio: "inherit" });
   }
   // Neteja l'arxiu comprimit: només cal el binari desempaquetat.
   const { rmSync } = await import("node:fs");
   rmSync(arxiu, { force: true });
   // Marca el servidor executable (Unix).
   try {
-    execFileSync("chmod", ["-R", "+x", engineDir], { stdio: "ignore" });
+    execFileSync("chmod", ["-R", "+x", dest], { stdio: "ignore" });
   } catch {
     /* Windows: no cal chmod */
   }
-  const { writeFileSync } = await import("node:fs");
-  writeFileSync(marker, new Date().toISOString());
-  console.log(`✓ Motor empaquetat: ${nom}`);
+}
+
+async function portaEngine() {
+  const targets = assetsAEmpaquetar();
+  if (!targets.length) {
+    avisa(`Plataforma desconeguda (${process.platform}/${process.arch}): no s'empaqueta el motor.`);
+    return;
+  }
+  let rels;
+  try {
+    rels = await releasesLlamaCpp();
+  } catch (e) {
+    avisa(
+      `No llisto les releases de llama.cpp (${e?.message ?? e}): la IA nativa farà servir Ollama o el motor del sistema.`
+    );
+    return;
+  }
+  let empaquetats = 0;
+  for (const { clau, sub } of targets) {
+    const dest = sub ? join(engineDir, sub) : engineDir;
+    const marker = join(engineDir, `.llamacpp-ok${sub ? `-${sub}` : ""}`);
+    if (existsSync(marker)) {
+      console.log(`✓ El motor (${sub || clau}) ja és empaquetat`);
+      empaquetats++;
+      continue;
+    }
+    const trobat = cercaAsset(rels, clau);
+    if (!trobat) {
+      avisa(`No trobo cap binari oficial de llama.cpp per a «${clau}».`);
+      continue;
+    }
+    const arxiu = join(dest, trobat.nom);
+    // CADA slice es protegeix a part: si la baixada o l'extracció d'una
+    // falla a mig camí, l'altra arquitectura NO ha de quedar-se també sense
+    // motor (era el comportament anterior: un sol `try` per a tot el bucle).
+    try {
+      mkdirSync(dest, { recursive: true });
+      await descarrega(trobat.url, arxiu);
+      await desempaquetar(arxiu, trobat.nom, dest);
+      const { writeFileSync } = await import("node:fs");
+      writeFileSync(marker, new Date().toISOString());
+      console.log(`✓ Motor empaquetat: ${trobat.nom}${sub ? ` → native-engine/${sub}/` : ""}`);
+      empaquetats++;
+    } catch (e) {
+      avisa(`Ha fallat el motor «${trobat.nom}»: ${e?.message ?? e}`);
+    }
+  }
+  if (empaquetats === 0) {
+    avisa(
+      "El bundle NO porta el motor llama.cpp: la IA nativa dependrà d'Ollama o del motor del sistema."
+    );
+  }
 }
 
 async function main() {
   const dest = await portaModel();
-  if (withEngine) await portaEngine();
+  if (withEngine) {
+    // El motor és OPCIONAL i mai ha de fer fallar el build — però cada
+    // fracàs seu deixa un avís visible (vegeu `avisa`).
+    try {
+      await portaEngine();
+    } catch (e) {
+      avisa(`Motor no empaquetat: ${e?.message ?? e}`);
+    }
+  }
   console.log("\nModel llest per empaquetar als recursos de Tauri:");
   console.log(`  ${dest}`);
   console.log("Reexecuta l'build de l'app perquè el .app/.dmg l'inclogui.");

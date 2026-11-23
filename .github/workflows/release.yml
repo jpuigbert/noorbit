@@ -155,10 +155,50 @@ jobs:
       # als recursos que Tauri empaquetarà (native-model/, native-engine/). Així,
       # un cop instal·lat, la nativa té LLM local offline sense descàrregues.
       # Si la xarxa falla, no trenca el release: la nativa cau al motor simbòlic.
+      # El token del runner puja el límit de l'API de GitHub de 60 a 5000
+      # peticions/h: sense ell, tres builds simultanis es poden menjar la quota
+      # i el motor no es baixa (exactament el que va passar amb el 0.71.17 a
+      # macOS, on l'API va respondre un error que el script iterava com si fos
+      # la llista de releases).
       - name: Fetch bundled native model + engine
         continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm native:model
         shell: bash
+
+      # ── Què porta REALMENT l'instal·lador: el pas anterior no ho pot dir,
+      # perquè `continue-on-error` empassa qualsevol fracàs. Aquí queda escrit
+      # al log i com a anotació del run, en lloc de descobrir-ho setmanes
+      # després llistant el contingut d'un .app ja publicat.
+      - name: Verify bundled model + engine
+        shell: bash
+        run: |
+          M="apps/desktop/src-tauri/native-model"
+          E="apps/desktop/src-tauri/native-engine"
+          if find "$M" -name '*.gguf' -size +50M | grep -q .; then
+            echo "✓ Model GGUF empaquetat: $(find "$M" -name '*.gguf' -exec du -h {} \; | cut -f1 | tr '\n' ' ')"
+          else
+            echo "::error::No hi ha cap .gguf gros a native-model: la IA nativa no tindrà model offline."
+          fi
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            # Bundle universal: calen LES DUES slices. Un Mac Intel amb un
+            # motor arm64 no arrenca res («bad CPU type in executable»), i
+            # això és pitjor que no portar-ne cap.
+            for a in macos-arm64 macos-x64; do
+              if find "$E/$a" -name 'llama-server*' -type f 2>/dev/null | grep -q .; then
+                echo "✓ Motor llama.cpp empaquetat per a $a"
+              else
+                echo "::warning::Sense motor per a $a: els Mac d'aquesta arquitectura cauran a Ollama o al motor del sistema."
+              fi
+            done
+          else
+            if find "$E" -name 'llama-server*' -type f | grep -q .; then
+              echo "✓ Motor llama.cpp empaquetat"
+            else
+              echo "::warning::Sense motor llama.cpp empaquetat: la IA nativa caurà a Ollama o al motor del sistema."
+            fi
+          fi
 
       # ── Build: la comanda del matrix passa per ENV, no interpolada ───────
       - name: Build (${{ matrix.id }})

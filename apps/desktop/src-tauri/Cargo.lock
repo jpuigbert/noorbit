@@ -2555,7 +2555,7 @@ dependencies = [
 
 [[package]]
 name = "no-orbit"
-version = "0.71.17-alpha"
+version = "0.71.18-alpha"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -49,7 +49,7 @@ pnpm app:build:mac:arm     # només aarch64 (Apple Silicon)
 
 ```
 apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/
-├── dmg/NoOrbit_0.71.6-alpha_universal.dmg   ← comparteix això
+├── dmg/NoOrbit_<VERSIÓ>_universal.dmg   ← comparteix això
 └── macos/NoOrbit.app
 ```
 
@@ -61,13 +61,16 @@ Apple. El CI de GitHub ja ho fa sol en publicar; en local:
 
 ```bash
 BUNDLE=apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle
+# La versió REAL surt de tauri.conf.json: així el script no queda
+# lligat a una versió fixa que caduca a cada release.
+VERSIÓ=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
 codesign --force --deep --sign - "$BUNDLE/macos/NoOrbit.app"
 codesign --verify --deep --strict "$BUNDLE/macos/NoOrbit.app" && echo OK
 # regenera el DMG amb la .app signada:
 STAGE=$(mktemp -d); cp -R "$BUNDLE/macos/NoOrbit.app" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 hdiutil create -volname NoOrbit -srcfolder "$STAGE" -ov -format UDZO \
-  "$BUNDLE/dmg/NoOrbit_0.71.6-alpha_universal.dmg"; rm -rf "$STAGE"
+  "$BUNDLE/dmg/NoOrbit_${VERSIÓ}_universal.dmg"; rm -rf "$STAGE"
 ```
 
 ### Instal·lar en un altre Mac (usuari final — doble clic)
@@ -112,7 +115,7 @@ pnpm app:build:deb          # només .deb
 ### Resultat
 
 ```
-apps/desktop/src-tauri/target/release/bundle/deb/NoOrbit_0.71.6-alpha_amd64.deb
+apps/desktop/src-tauri/target/release/bundle/deb/NoOrbit_<VERSIÓ>_amd64.deb
 ```
 
 ### Instal·lar (usuari final)
@@ -121,9 +124,9 @@ apps/desktop/src-tauri/target/release/bundle/deb/NoOrbit_0.71.6-alpha_amd64.deb
 programari) o bé per terminal:
 
 ```bash
-sudo apt install ./NoOrbit_0.71.6-alpha_amd64.deb
+sudo apt install ./NoOrbit_*_amd64.deb
 # o bé, després d'haver-lo descarregat:
-sudo dpkg -i NoOrbit_0.71.6-alpha_amd64.deb && sudo apt -f install
+sudo dpkg -i NoOrbit_*_amd64.deb && sudo apt -f install
 ```
 
 Executa'l amb `no-orbit` o des del menú d'aplicacions.
@@ -155,13 +158,13 @@ pnpm app:build:win
 
 ```
 apps\desktop\src-tauri\target\release\bundle\
-└── nsis\NoOrbit_0.71.6-alpha_x64-setup.exe   ← instal·lador clàssic (doble clic)
+└── nsis\NoOrbit_<VERSIÓ>_x64-setup.exe   ← instal·lador clàssic (doble clic)
 ```
 
 > L'`.msi` no es genera en versions alfa: el format MSI exige un identificador
-> de prepublicació **només numèric** (≤ 65535) i rebutja `0.71.6-alpha`. Per a
-> desplegaments empresarials, compila una versió sense sufix alfa:
-> `pnpm tauri build --bundles msi`.
+> de prepublicació **només numèric** (≤ 65535) i rebutja qualsevol sufix com
+> `-alpha`. Per a desplegaments empresarials, compila una versió sense sufix
+> alfa: `pnpm tauri build --bundles msi`.
 
 ### Instal·lar (usuari final)
 

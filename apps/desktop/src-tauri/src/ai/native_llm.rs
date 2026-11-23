@@ -46,6 +46,39 @@ const SMALL_HINTS: &[&str] = &[
     "smollm", "qwen2.5-0", "qwen2-0", "tinyllama", "llama-3.2-1b", "llama3.2-1b",
 ];
 
+/// Clau de la subcarpeta del motor empaquetat per a una arquitectura, tal com
+/// la reporta `std::env::consts::ARCH`. El bundle de macOS és UNIVERSAL: hi
+/// conviuen `macos-arm64` i `macos-x64` perquè EL MATEIX `.app` ha de córrer
+/// natiu en un Apple Silicon i en un Intel.
+/// `None` = arquitectura sense slice pròpia.
+fn engine_arch_key(arch: &str) -> Option<&'static str> {
+    match arch {
+        "aarch64" => Some("macos-arm64"),
+        "x86_64" => Some("macos-x64"),
+        _ => None,
+    }
+}
+
+/// Quina carpeta de `native-engine/` s'ha de copiar a la carpeta de dades.
+///
+/// Amb un bundle particionat per arquitectura, copiar el directori SENCER
+/// (el que feia aquest `init` abans) fa que `llamacpp::binary()` agafi la
+/// primera carpeta que trobi: un `llama-server` de l'altra arquitectura, que
+/// en un Intel no arrenca i que en un Apple Silicon transladat es menja la
+/// RAM. Per això, si hi ha subcarpetes d'arquitectura només es copia LA
+/// NOSTRA, i si no existeix no es copia res — la nativa caurà a Ollama o al
+/// motor del sistema, que és un fallback honest en lloc d'un binari inútil.
+/// Sense subcarpetes (Windows/Linux o un instal·lador antic) es copia tot.
+fn engine_src_for(base: &std::path::Path, arch: &str) -> Option<PathBuf> {
+    const ARQS: &[&str] = &["macos-arm64", "macos-x64"];
+    if ARQS.iter().any(|a| base.join(a).is_dir()) {
+        let key = engine_arch_key(arch)?;
+        let sub = base.join(key);
+        return sub.is_dir().then_some(sub);
+    }
+    base.is_dir().then(|| base.to_path_buf())
+}
+
 /// Resol el model i (opcionalment) copia el motor empaquetat a la carpeta de
 /// dades. S'anomena una sola vegada des del `setup` de Tauri, on hi ha
 /// `AppHandle` per resoldre la ruta de recursos.
@@ -63,11 +96,13 @@ pub fn init(app: &tauri::AppHandle) {
     //    `native-engine/`, el copiem a la carpeta on `llamacpp::binary()` el
     //    trobarà, perquè la nativa funcioni offline sense Homebrew ni
     //    descàrregues. Si ja hi ha un llama-server (brew, instal·lat, o
-    //    copiat abans), no cal res.
-    let engine_src = resource.join("native-engine");
-    if engine_src.is_dir() && crate::ai::llamacpp::binary().is_none() {
-        if let Some(dst) = crate::ai::llamacpp::install_dir() {
-            let _ = copy_tree(&engine_src, &dst);
+    //    copiat abans), no cal res. En un bundle universal només es copia la
+    //    slice de l'arquitectura que s'està executant (`engine_src_for`).
+    let engine_base = resource.join("native-engine");
+    let engine_src = engine_src_for(&engine_base, std::env::consts::ARCH);
+    if engine_src.is_some() && crate::ai::llamacpp::binary().is_none() {
+        if let (Some(src), Some(dst)) = (engine_src, crate::ai::llamacpp::install_dir()) {
+            let _ = copy_tree(&src, &dst);
             // Marca executable el(s) binari(s) que hagi pogut copiar.
             #[cfg(unix)]
             if let Some(bin) = crate::ai::llamacpp::binary() {
@@ -770,5 +805,45 @@ mod proves {
     fn cap_retalla_amb_elipsis() {
         assert_eq!(cap("hola", 10), "hola");
         assert_eq!(cap("0123456789x", 5), "01234…");
+    }
+
+    #[test]
+    fn bundle_universal_copia_la_nostra_slice() {
+        let dir = tempfile::tempdir().expect("temp");
+        let base = dir.path();
+        for a in ["macos-arm64", "macos-x64"] {
+            std::fs::create_dir_all(base.join(a)).unwrap();
+            std::fs::write(base.join(a).join("llama-server"), "binari").unwrap();
+        }
+        assert_eq!(engine_src_for(base, "aarch64"), Some(base.join("macos-arm64")));
+        assert_eq!(engine_src_for(base, "x86_64"), Some(base.join("macos-x64")));
+        // Arquitectura sense slice: cap còpia (abans s'hauria copiat tot el
+        // directori i el motor hauria trobat el binari aliè).
+        assert_eq!(engine_src_for(base, "arm"), None);
+    }
+
+    #[test]
+    fn slice_absent_no_copia_laltra_arquitectura() {
+        let dir = tempfile::tempdir().expect("temp");
+        std::fs::create_dir_all(dir.path().join("macos-arm64")).unwrap();
+        // Bundle que només té arm64 (com passa avui si el runner és Silicon):
+        // un Intel no ha de rebre mai aquest binari.
+        assert_eq!(engine_src_for(dir.path(), "x86_64"), None);
+        assert_eq!(
+            engine_src_for(dir.path(), "aarch64"),
+            Some(dir.path().join("macos-arm64"))
+        );
+    }
+
+    #[test]
+    fn motor_pla_es_copia_i_sense_motor_no_es_fa_res() {
+        let dir = tempfile::tempdir().expect("temp");
+        // Windows/Linux: binaris i DLL en pla, sense subcarpetes d'arquitectura.
+        std::fs::write(dir.path().join("llama-server"), "binari").unwrap();
+        assert_eq!(engine_src_for(dir.path(), "x86_64"), Some(dir.path().to_path_buf()));
+        // Bundle sense motor (el cas dels instal·ladors macOS publicats amb la
+        // 0.71.17): el directori no hi és i no s'ha de copiar res.
+        let absent = dir.path().join("native-engine");
+        assert_eq!(engine_src_for(&absent, "aarch64"), None);
     }
 }
