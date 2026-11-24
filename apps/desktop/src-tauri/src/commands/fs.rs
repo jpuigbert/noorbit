@@ -25,7 +25,19 @@ pub async fn read_file(path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || std::fs::read_to_string(&resolved))
         .await
         .map_err(|e| e.to_string())?
-        .map_err(|e| format!("No s'ha pogut llegir {}: {}", display, e))
+        .map_err(|e| format!("No s'ha pogut llegir {}: {}", display, io_error_ca(&e)))
+}
+
+/// L'error d'E/S en català. L'error cru de Rust («No such file or directory
+/// (os error 2)») no diu res a l'usuari: el motiu sí que helps a distingir
+/// «no existeix» de «no s'hi pot accedir» o «és una carpeta».
+fn io_error_ca(e: &std::io::Error) -> String {
+    match e.kind() {
+        std::io::ErrorKind::NotFound => "el fitxer no existeix".to_string(),
+        std::io::ErrorKind::PermissionDenied => "no s'hi pot accedir (permís denegat)".to_string(),
+        std::io::ErrorKind::IsADirectory => "és una carpeta, no un fitxer".to_string(),
+        _ => e.to_string(),
+    }
 }
 
 #[tauri::command]

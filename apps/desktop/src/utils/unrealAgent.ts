@@ -10,6 +10,7 @@ import type { UnrealMcpTool } from "../core/unreal/client";
 export type UnrealAgentPhase =
   | "eines"
   | "model"
+  | "context"
   | "ronda"
   | "eina"
   | "eina_ok"
@@ -31,6 +32,7 @@ export interface UnrealAgentEvent {
 const KNOWN_PHASES: UnrealAgentPhase[] = [
   "eines",
   "model",
+  "context",
   "ronda",
   "eina",
   "eina_ok",

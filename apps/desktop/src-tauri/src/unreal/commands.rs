@@ -335,3 +335,16 @@ pub async fn unreal_mcp_call(
         .await
         .map_err(|e| e.to_string())
 }
+
+// ── Snippets d'Unreal (comunitat d'Epic + catàleg local) ─────────────────
+
+/// Cerca patrons i snippets d'Unreal Engine: primer la comunitat d'Epic
+/// Games (GraphQL) i, si no hi ha res (sense xarxa, 403, API canviat),
+/// el catàleg local de patrons d'Editor Scripting. Cada snippet porta la
+/// font («epic» o «local») perquè la UI pugui distingir-los.
+#[command]
+pub async fn unreal_search_snippets(
+    query: String,
+) -> Result<Vec<super::snippets::SnippetUnreal>, String> {
+    Ok(super::snippets::cerca(&query).await)
+}

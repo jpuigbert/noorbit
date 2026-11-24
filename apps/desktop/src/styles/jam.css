@@ -487,3 +487,90 @@
   color: var(--accent);
   flex-shrink: 0;
 }
+
+/* ── TEXT EN VIU: el que la IA està escrivint ara mateix ────────────────
+   Abans el panell només mostrava el títol de la tasca: entre notes podien
+   passar minuts en silenci i l'usuari pensava que la Jam s'havia penjat. */
+.jam-live {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.jam-live-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.jam-live-body {
+  margin: 0;
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── MEMÒRIA DE LA IA LOCAL (model carregat + RAM del sistema) ─────────── */
+.jam-mem {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-2);
+  min-width: 0;
+}
+
+.jam-mem-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.jam-mem-row > svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.jam-mem-label {
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.jam-mem-value {
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.jam-mem-bar {
+  flex: 1;
+  min-width: 40px;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  overflow: hidden;
+}
+
+.jam-mem-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}

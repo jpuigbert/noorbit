@@ -10,7 +10,7 @@ static WORKSPACE_ROOT: Lazy<RwLock<Option<PathBuf>>> = Lazy::new(|| RwLock::new(
 /// .gitignore de conveni per als projectes NOUS: sense ell, la Autonomous Jam
 /// (que fa `git add -A` a cada tasca) ompliria l'historial de cachés
 /// (`node_modules`, `.godot`, `__pycache__`…) i els commits serien enormes.
-const DEFAULT_GITIGNORE: &str = "# SO i editors\n.DS_Store\nThumbs.db\n.idea/\n.vscode/\n\n# Dependències i cachés\nnode_modules/\n__pycache__/\n*.pyc\n.venv/\nvenv/\n\n# Motors de joc\n.godot/\n*.import\nLibrary/\nTemp/\nLogs/\nSaved/\nIntermediate/\nBuilds/\n\n# Sortides\ndist/build/\nbuild/\nexport/\n";
+const DEFAULT_GITIGNORE: &str = "# SO i editors\n.DS_Store\nThumbs.db\n.idea/\n.vscode/\n\n# Sidecars AppleDouble (discs exFAT/FAT): macOS crea un fitxer `._X` per\n# a cada fitxer amb metadades. Són brossa que enforma els commits i alenteix\n# cada operació de git en un volum extern.\n._*\n\n# Dependències i cachés\nnode_modules/\n__pycache__/\n*.pyc\n.venv/\nvenv/\n\n# Motors de joc\n.godot/\n*.import\nLibrary/\nTemp/\nLogs/\nSaved/\nIntermediate/\nBuilds/\n\n# Sortides\ndist/build/\nbuild/\nexport/\n";
 
 /// Inicialitza un repo git NET amb un primer commit. Es fa servir perquè la
 /// Autonomous Jam VOL git per desfer feina (el checkpointer torna enrere amb
@@ -71,6 +71,43 @@ pub(crate) fn te_base_commit(dir: &Path) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+/// La carpeta és l'arrel del SEU PROPI repo git?
+///
+/// La Jam fa `git add -A` i `git clean -fd` a la carpeta on treballa. Si aquesta
+/// carpeta és una SUBCARPETA d'un altre repo (el workspace obert en pot ser un:
+/// p. ex. el mateix repositori de NoOrbit), aquells ordres tocarien el projecte
+/// de l'usuari sencer. En aquest cas la Jam ha de fer el seu propi repo (un
+/// `git init` dins la carpeta del joc).
+///
+/// Si la carpeta NO és de cap repo, retorna `true`: no hi ha res aïllar, la Jam
+/// el crea de zero.
+pub(crate) fn te_repo_propi(dir: &Path) -> bool {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["rev-parse", "--show-toplevel"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+    let Ok(out) = out else {
+        return true;
+    };
+    if !out.status.success() {
+        // No és cap repo: res aïllar (la Jam el crea).
+        return true;
+    }
+    let top = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if top.is_empty() {
+        return true;
+    }
+    let mateix = match (std::fs::canonicalize(&top), std::fs::canonicalize(dir)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => top == dir.to_string_lossy(),
+    };
+    mateix
 }
 
 /// Executa git a `dir` sense bloquejar el runtime (aquests comandos van dins

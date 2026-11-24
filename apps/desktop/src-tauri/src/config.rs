@@ -200,6 +200,39 @@ fn default_max_lessons() -> usize {
     120
 }
 
+/// Android: on es posa l'SDK i què es baixa quan cal instal·lar-lo.
+///
+/// La carpeta es tria LLIURE: pot ser un disc extern (avui un volum, demà un
+/// altre). NoOrbit no coneix ni escriu mai cap nom de volum: guarda el camí
+/// que li doni l'usuari i prou — igual que fa amb «ai.models_dir».
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AndroidConfig {
+    /// Carpeta destí de l'SDK (buit = la ruta estàndard del sistema).
+    #[serde(default)]
+    pub sdk_dir: String,
+    /// Nivell d'API que es baixa per defecte (34: àmpliament compatible).
+    #[serde(default = "default_android_api")]
+    pub api: u32,
+    /// Baixa també l'«emulator» i les system images (pesen diversos GB i només
+    /// fan falta per arrencar AVDs). FALSO per defecte: compilar no els needs.
+    #[serde(default)]
+    pub with_emulator: bool,
+}
+
+fn default_android_api() -> u32 {
+    34
+}
+
+impl Default for AndroidConfig {
+    fn default() -> Self {
+        Self {
+            sdk_dir: String::new(),
+            api: default_android_api(),
+            with_emulator: false,
+        }
+    }
+}
+
 impl Default for LearningConfig {
     fn default() -> Self {
         Self {
@@ -210,6 +243,80 @@ impl Default for LearningConfig {
             inject: true,
             model: String::new(),
             max_lessons: default_max_lessons(),
+        }
+    }
+}
+
+/// Bevy (Rust): on viu el «cargo» i on es creen els projectes.
+///
+/// Buides = els valors per defecte del sistema (`~/.cargo`, `~/.rustup` i la
+/// carpeta de l'usuari). L'assistent de Bevy hi desa el que l'usuari ha
+/// triat, i la detecció del «cargo» el busca allà primer: així un Rust
+/// instal·lat en un disc extern continua sent detectable.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BevyConfig {
+    /// Carpeta del «cargo» (CARGO_HOME). Buida = `~/.cargo`.
+    #[serde(default)]
+    pub cargo_home: String,
+    /// Carpeta del «rustup» (RUSTUP_HOME). Buida = `~/.rustup`.
+    #[serde(default)]
+    pub rustup_home: String,
+    /// Carpeta on es creen els projectes Bevy nous. Buida = la carpeta de
+    /// l'usuari.
+    #[serde(default)]
+    pub projects_dir: String,
+}
+
+/// Un projecte que ajudem com a voluntaris de la xarxa altruista (grid):
+/// ens hi connectem directament amb la invitació rebuda del propietari.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GridPeer {
+    /// Nom visible (el projecte, quan el propietari el diu al «Welcome»).
+    #[serde(default)]
+    pub name: String,
+    /// Adreça del propietari («ip:port»).
+    pub addr: String,
+    /// Codi de la invitació («noorbit-grid://codi@ip:port»).
+    pub code: String,
+}
+
+/// Xarxa altruista P2P (grid): el propietari d'un projecte comparteix els
+/// torns de pensament de la Jam i els voluntaris els responen amb el seu
+/// model local. Sense servidor central: connexió directa per QUIC/TLS.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GridConfig {
+    /// Interruptor mestre de la xarxa altruista (donar i rebre).
+    #[serde(default)]
+    pub enabled: bool,
+    /// Port QUIC del servidor quan compartim.
+    #[serde(default = "default_grid_port")]
+    pub port: u16,
+    /// Codi de la invitació (es renova amb «Genera invitació»).
+    #[serde(default)]
+    pub share_code: String,
+    /// Projectes que ajudem com a voluntaris.
+    #[serde(default)]
+    pub peers: Vec<GridPeer>,
+    /// Carpeta on es munten les còpies rebudes (Fase 4). Buida = la carpeta
+    /// de dades de l'app.
+    #[serde(default)]
+    pub copies_dir: String,
+}
+
+fn default_grid_port() -> u16 {
+    crate::ports::GRID_PORT
+}
+
+impl Default for GridConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: default_grid_port(),
+            share_code: String::new(),
+            peers: Vec::new(),
+            copies_dir: String::new(),
         }
     }
 }
@@ -233,6 +340,15 @@ pub struct AppConfig {
     /// Aprenentatge local (lliçons + registre per entrenar un model local).
     #[serde(default)]
     pub learning: LearningConfig,
+    /// Android SDK: carpeta de destí lliure i paquets que es descarreguen.
+    #[serde(default)]
+    pub android: AndroidConfig,
+    /// Bevy (Rust): on viu el «cargo» i on es creen els projectes.
+    #[serde(default)]
+    pub bevy: BevyConfig,
+    /// Xarxa altruista P2P: compartir la Jam i ajudar altres projectes.
+    #[serde(default)]
+    pub grid: GridConfig,
 }
 
 impl AppConfig {

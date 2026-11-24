@@ -15,6 +15,8 @@ export const PROV = "prov|";
 export const NATIVE = "nat|";
 /// IA integrada al binari («noorbit_native»): sense descàrregues ni claus.
 export const NATIVE_ID = "noorbit_native";
+/// Comunitat P2P altruista: `grid|` (els voluntaris responen els torns).
+export const GRID = "grid|";
 
 export interface AiTria {
   /// `null` = «deixa-ho al backend» (Ollama → proveïdor en línia → IA
@@ -36,6 +38,9 @@ export function resolAi(tria: string, providers: ProviderPublic[]): AiTria {
   if (tria.startsWith(PROV)) {
     const p = providers.find((x) => x.id === tria.slice(PROV.length));
     return { provider: p?.id ?? null, model: p?.model ?? null };
+  }
+  if (tria.startsWith(GRID)) {
+    return { provider: "grid", model: null };
   }
   return { provider: null, model: null };
 }

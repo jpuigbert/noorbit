@@ -217,6 +217,10 @@ pub async fn open_tool_download(tool: String) -> Result<String, String> {
         },
         // Rust: l'instal·lador és el mateix a tots els SO (rustup).
         "rust" => "https://rustup.rs/",
+        // Android: la secció «Command line tools only» del lloc oficial, que ja
+        // posa el botó del SO del visitant. NoOrbit baixa tot això sol amb
+        // «android_install_sdk»; aquesta URL és el pla B manual.
+        "android" => "https://developer.android.com/studio#windows-cmdline",
         other => return Err(format!("Eina desconeguda: {}", other)),
     };
     open_externally(url.to_string()).await?;

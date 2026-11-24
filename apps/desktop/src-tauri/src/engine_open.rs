@@ -58,6 +58,34 @@ pub async fn godot_status() -> crate::godot::GodotStatus {
     crate::godot::status().await
 }
 
+/// Arregla la instal·lació de Godot a macOS: li treu la marca de quarantina.
+///
+/// Sense això, macOS executa l'app baixada des d'una *translocació* temporal
+/// (`/private/var/folders/…/AppTranslocation/…`). Quan aquella còpia es
+/// desmunta —cosa que fa macOS sense avisar— el motor es queda sense les
+/// pàgines de codi i mor amb `SIGBUS` («backing vnode was force unmounted»).
+///
+/// Retorna l'estat ja corregit, perquè la UI ho mostri tot seguit.
+#[command]
+pub async fn godot_fix_quarantine() -> Result<crate::godot::GodotStatus, String> {
+    let install = crate::godot::detect_install()
+        .ok_or_else(|| "no trobo cap instal·lació de Godot al sistema".to_string())?;
+    if install.app_path.is_empty() {
+        return Err(
+            "aquesta instal·lació de Godot no és una app de macOS: no cal treure-li la \
+             quarantina."
+                .to_string(),
+        );
+    }
+    let app = PathBuf::from(&install.app_path);
+    if !crate::godot::is_quarantined(&app) {
+        // Ja estava neta: no hi ha res a fer.
+        return Ok(crate::godot::status().await);
+    }
+    crate::godot::remove_quarantine(&app)?;
+    Ok(crate::godot::status().await)
+}
+
 /// Estat d'instal·lació de Rust/cargo (requisit de Bevy).
 #[command]
 pub async fn bevy_status() -> crate::bevy::BevyStatus {
@@ -76,8 +104,8 @@ pub async fn open_project_in_engine(project_path: String, engine: String) -> Res
     }
     let chosen = if engine.trim().is_empty() || engine.trim().eq_ignore_ascii_case("auto") {
         detect_engine(&root).ok_or_else(|| {
-            "no puc detectar el motor del projecte: cal un «project.godot» (Godot), \
-             un «Cargo.toml» amb bevy (Bevy) o un «.uproject» (Unreal)."
+            "no puc detectar el motor del projecte: tria un motor (Godot, Bevy o \
+             Unreal) i NoOrbit hi crearà el projecte."
                 .to_string()
         })?
     } else {
@@ -88,22 +116,41 @@ pub async fn open_project_in_engine(project_path: String, engine: String) -> Res
 
     match chosen {
         Engine::Godot => {
-            let project = crate::godot::find_project(&root).ok_or(
-                "no hi ha cap projecte de Godot (project.godot) dins el projecte",
-            )?;
-            let dir = crate::godot::project_dir(&project);
-            crate::godot::launch_editor(&dir)?;
-            Ok(format!(
-                "S'ha obert l'editor de Godot sobre «{}».",
-                dir.display()
-            ))
+            // Si el projecte encara no existeix, es CREA: l'usuari demana
+            // treballar en Godot i NoOrbit deixa el projecte a punt en lloc de
+            // tornar un error que l'hauria de fer repetir a mà.
+            let ensured = crate::godot::setup::ensure_project(&root)?;
+            let dir = crate::godot::project_dir(&ensured.project_godot);
+            let crea = ensured.created;
+            crate::godot::launch_editor(&dir).map_err(|e| {
+                if crea {
+                    format!(
+                        "{e}. S'ha creat igualment el projecte de Godot a «{}».",
+                        dir.display()
+                    )
+                } else {
+                    e
+                }
+            })?;
+            Ok(if crea {
+                format!(
+                    "S'ha obert l'editor de Godot sobre «{}» (projecte creat per NoOrbit).",
+                    dir.display()
+                )
+            } else {
+                format!("S'ha obert l'editor de Godot sobre «{}».", dir.display())
+            })
         }
         Engine::Bevy => {
-            let manifest = crate::bevy::find_project(&root).ok_or(
-                "no hi ha cap projecte Bevy (Cargo.toml amb la dependència «bevy») dins el projecte",
-            )?;
+            // Mateixa idea que amb Godot: el projecte Bevy es crea si cal.
+            let manifest = crate::bevy::ensure_project(&root)?;
             let dir = crate::bevy::project_dir(&manifest);
-            crate::bevy::launch_project(&dir)?;
+            crate::bevy::launch_project(&dir).map_err(|e| {
+                format!(
+                    "{e}. El projecte Bevy ja és a «{}»: només cal el Rust instal·lat.",
+                    dir.display()
+                )
+            })?;
             Ok(format!(
                 "S'ha obert el projecte Bevy («{}») amb «cargo run» en un Terminal.",
                 dir.display()

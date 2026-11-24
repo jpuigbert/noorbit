@@ -12,6 +12,8 @@ const LS_FUN_CURSOR = "noorbit.fun.cursor";
 const LS_FUN_SOUND = "noorbit.fun.sound";
 const LS_PRO_MODE = "noorbit.professionalMode";
 const LS_ENGINE_MODE = "noorbit.engineMode";
+const LS_SAVER_AUTO = "noorbit.saverAuto";
+const LS_SAVER_AUTO_MIN = "noorbit.saverAutoMinutes";
 
 export type Theme = "dark" | "light" | "gray" | "green" | "yellow" | "gold";
 
@@ -86,6 +88,8 @@ interface UIState {
   /** Assistent d'entorn («Posant NoOrbit en marxa»): s'obre sol si falta
    *  alguna cosa i es pot obrir manualment des de la barra d'estat. */
   showSetupCheck: boolean;
+  /** Assistent de Bevy: on instal·lar Rust i on treballar el projecte. */
+  showBevySetup: boolean;
   terminalOpen: boolean;
 
   // Mides dels panells (arrossegant les nanses de separació): es recorden
@@ -123,6 +127,12 @@ interface UIState {
   // Motor de la IA (local/núvol/auto): preferència persistent de l'usuari.
   engineMode: EngineMode;
 
+  // Estalvi de pantalla automàtic: quan la Jam o el treball autopilotat
+  // corren i no es toca res durant X minuts, la pantalla de feina s'obre
+  // sola (en lloc de l'estalvi/repòs del SO).
+  saverAuto: boolean;
+  saverAutoMinutes: number;
+
   toggleSidebar: () => void;
   toggleRightPanel: () => void;
   setRightPanelOpen: (v: boolean) => void;
@@ -150,6 +160,7 @@ interface UIState {
   setShowAccount: (v: boolean) => void;
   setShowOnboarding: (v: boolean) => void;
   setShowSetupCheck: (v: boolean) => void;
+  setShowBevySetup: (v: boolean) => void;
   setTerminalOpen: (v: boolean) => void;
   toggleTerminal: () => void;
   setSidebarWidth: (px: number) => void;
@@ -171,6 +182,8 @@ interface UIState {
   setFunSound: (v: boolean) => void;
   setProfessionalMode: (v: boolean) => void;
   setEngineMode: (m: EngineMode) => void;
+  setSaverAuto: (v: boolean) => void;
+  setSaverAutoMinutes: (min: number) => void;
 }
 
 /// Tema desat (el llegim directament a les finestres de panells separats,
@@ -232,6 +245,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   /** Assistent de primera arrencada (3 passos): només si no s'ha completat. */
   showOnboarding: false,
   showSetupCheck: false,
+  showBevySetup: false,
   terminalOpen: false,
 
   sidebarWidth: loadNum(LS_SIDEBAR_W, 240),
@@ -249,6 +263,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   funSound: loadBool(LS_FUN_SOUND, true),
   professionalMode: loadProfessionalMode(),
   engineMode: loadEngineMode(),
+  saverAuto: loadBool(LS_SAVER_AUTO, true),
+  saverAutoMinutes: loadNum(LS_SAVER_AUTO_MIN, 5),
 
   toggleSidebar: () => set({ sidebarOpen: !get().sidebarOpen }),
   toggleRightPanel: () => set({ rightPanelOpen: !get().rightPanelOpen }),
@@ -277,6 +293,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setShowAccount: (v) => set({ showAccount: v }),
   setShowOnboarding: (v) => set({ showOnboarding: v }),
   setShowSetupCheck: (v) => set({ showSetupCheck: v }),
+  setShowBevySetup: (v) => set({ showBevySetup: v }),
   setTerminalOpen: (v) => set({ terminalOpen: v }),
   toggleTerminal: () => set({ terminalOpen: !get().terminalOpen }),
 
@@ -396,5 +413,22 @@ export const useUIStore = create<UIState>((set, get) => ({
     }
     set({ engineMode: m });
     void invoke("ai_engine_mode_set", { mode: m }).catch(() => undefined);
+  },
+
+  setSaverAuto: (v) => {
+    try {
+      localStorage.setItem(LS_SAVER_AUTO, v ? "1" : "0");
+    } catch {
+      /* sense persistència */
+    }
+    set({ saverAuto: v });
+  },
+  setSaverAutoMinutes: (min) => {
+    try {
+      localStorage.setItem(LS_SAVER_AUTO_MIN, String(min));
+    } catch {
+      /* sense persistència */
+    }
+    set({ saverAutoMinutes: min });
   },
 }));

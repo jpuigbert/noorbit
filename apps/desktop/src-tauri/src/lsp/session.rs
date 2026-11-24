@@ -35,6 +35,17 @@ pub const QUERY_TIMEOUT: Duration = Duration::from_secs(8);
 /// Arrencada + initialize: rust-analyzer en fred pot trigar (indexació).
 const INIT_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// Una edició de renombrament amb les coordenades crues del servidor
+/// (0-based; caràcter = columna UTF-16, com mana l'especificació LSP).
+#[derive(Debug, Clone)]
+pub struct RenameEdit {
+    pub start_line: usize,
+    pub start_char: usize,
+    pub end_line: usize,
+    pub end_char: usize,
+    pub new_text: String,
+}
+
 /// Diagnòstic amb el contracte exacte de la UI (línia/columna 1-based).
 #[derive(Debug, Clone, Serialize)]
 pub struct Diag {
@@ -553,6 +564,67 @@ impl Session {
         }
     }
 
+    /// Renombrament del símbol sota el cursor (`textDocument/rename`).
+    /// Retorna les edicions per fitxer (ruta absoluta + coordenades 0-based)
+    /// o None si el servidor no respon o no ho suporta. TS: degradació
+    /// honesta (el tsserver retorna ubicacions sense rangs aprofitables).
+    /// El cridador aplica les edicions al disc; ací només es demanen.
+    pub fn rename(
+        &self,
+        abs: &Path,
+        line: usize,
+        col: usize,
+        new_name: &str,
+    ) -> Result<Option<Vec<(PathBuf, Vec<RenameEdit>)>>, String> {
+        self.touch();
+        let text = std::fs::read_to_string(abs).map_err(|e| e.to_string())?;
+        self.ensure_doc(abs, &text)?;
+        match self.proto {
+            Proto::Lsp => {
+                let mut params = self.position_params(abs, line, col);
+                params["newName"] = json!(new_name);
+                let res = self.lsp_request("textDocument/rename", params, QUERY_TIMEOUT)?;
+                let obj = match res.as_object() {
+                    Some(o) => o,
+                    None => return Ok(None),
+                };
+                let mut out: Vec<(PathBuf, Vec<RenameEdit>)> = Vec::new();
+                // Forma clàssica: «changes» (uri → edicions) o la forma
+                // «documentChanges» (edicions de document amb versió).
+                if let Some(changes) = obj.get("changes").and_then(|c| c.as_object()) {
+                    for (uri, edits) in changes {
+                        let Some(p) = uri_to_path(uri) else { continue };
+                        if let Some(parsed) = parse_rename_edits(edits) {
+                            if !parsed.is_empty() {
+                                out.push((p, parsed));
+                            }
+                        }
+                    }
+                } else if let Some(docs) = obj.get("documentChanges").and_then(|d| d.as_array()) {
+                    for d in docs {
+                        let Some(uri) = d
+                            .get("textDocument")
+                            .and_then(|t| t.get("uri"))
+                            .and_then(|u| u.as_str())
+                        else {
+                            continue;
+                        };
+                        let Some(p) = uri_to_path(uri) else { continue };
+                        if let Some(edits) = d.get("edits") {
+                            if let Some(parsed) = parse_rename_edits(edits) {
+                                if !parsed.is_empty() {
+                                    out.push((p, parsed));
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(if out.is_empty() { None } else { Some(out) })
+            }
+            Proto::Ts => Ok(None),
+        }
+    }
+
     /// Diagnòstics REALS del fitxer. LSP: espera el publishDiagnostics nou
     /// (didOpen/didChange el dispara). Ts: «geterr» (syntactic + semantic).
     /// Si el servidor no respon a temps, retorna el que hi ha (o buit):
@@ -604,6 +676,27 @@ impl Session {
             }
         }
     }
+}
+
+/// Converteix l'array JSON d'edicions del servidor en `RenameEdit` nets.
+/// Una edició malformada es descarta (no ha d'espatllar el renombrament).
+fn parse_rename_edits(v: &Value) -> Option<Vec<RenameEdit>> {
+    let arr = v.as_array()?;
+    let mut out = Vec::with_capacity(arr.len());
+    for e in arr {
+        let range = e.get("range")?;
+        let start = range.get("start")?;
+        let end = range.get("end")?;
+        let new_text = e.get("newText")?.as_str()?.to_string();
+        out.push(RenameEdit {
+            start_line: start.get("line")?.as_u64()? as usize,
+            start_char: start.get("character")?.as_u64()? as usize,
+            end_line: end.get("line")?.as_u64()? as usize,
+            end_char: end.get("character")?.as_u64()? as usize,
+            new_text,
+        });
+    }
+    Some(out)
 }
 
 /// Reparteix un missatge LSP entrant: respostes → pending; publishDiagnostics

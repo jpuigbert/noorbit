@@ -22,17 +22,32 @@
 
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::time::{Duration, Instant};
 
 /// Màxim de snapshots per projecte: els més antics es descarten (la pila
 /// és per desfer passos recents, no un historial infinit).
 const MAX_SNAPSHOTS: usize = 50;
 
+/// Sostre de temps d'una operació del shadow git.
+///
+/// El snapshot és una XARXA DE SEGURETAT, no un requisit: si el projecte és en
+/// un volum lent (exFAT sobre USB, on un `add -A` pot trigar minuts), el xat
+/// no es pot quedar penjat esperant-lo. Passat el sostre, es dona el per
+/// perdut i l'escriptura CONTINUA (degradació honesta, com la del mòdul).
+const SHADOW_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// Contingut de `info/exclude` del shadow: la brossa pesada NO es captura
 /// (ni es restaura ni s'esborra en desfer). `.git` ja l'ignora git sempre.
-const SHADOW_EXCLUDES: &str = "node_modules/\ntarget/\ndist/\n.git/\n.noorbit/\n.noorbit-portable\n.DS_Store\n";
+///
+/// `._*` són els sidecars AppleDouble que macOS crea en discs exFAT/FAT: no
+/// tenen cap valor (són les metadades del fitxer original, que ja hi és) i
+/// en un volum extern multipliquen el nombre de fitxers que git ha de
+/// indexar a cada torn de xat.
+const SHADOW_EXCLUDES: &str = "node_modules/\ntarget/\ndist/\n.git/\n.noorbit/\n.noorbit-portable\n.DS_Store\n._*\n.godot/\n";
 
 struct Turn {
     /// Tree-hash de l'estat del projecte ABANS del torn de xat.
@@ -121,8 +136,8 @@ fn shadow_dir(root: &Path) -> PathBuf {
 /// l'usuari que podria falsejar la captura (excludesFile propi,
 /// showUntrackedFiles=no): només mana `info/exclude` del shadow.
 fn git(shadow: &Path, root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
-    let out = Command::new("git")
-        .arg(format!("--git-dir={}", shadow.display()))
+    let mut cmd = Command::new("git");
+    cmd.arg(format!("--git-dir={}", shadow.display()))
         .arg(format!("--work-tree={}", root.display()))
         .arg("-c")
         .arg("core.quotepath=false")
@@ -134,12 +149,61 @@ fn git(shadow: &Path, root: &Path, args: &[&str]) -> Result<std::process::Output
         .arg("status.showUntrackedFiles=all")
         .args(args)
         .current_dir(root)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .output()
+        .env_remove("GIT_INDEX_FILE");
+    let mut child = cmd
+        .spawn()
         .map_err(|e| format!("git no disponible al sistema: {e}"))?;
-    Ok(out)
+    // L' E/S del child es llegeix en fils PARAL·LELS: un `status` de milers de
+    // fitxers omple el pipe i, sense llegir-lo, el procés es quedaria
+    // bloquejat (i el timeout de sota no serviria de res).
+    let stdout_pipe = child.stdout.take();
+    let stderr_pipe = child.stderr.take();
+    let t_out = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut s) = stdout_pipe {
+            let _ = s.read_to_end(&mut buf);
+        }
+        buf
+    });
+    let t_err = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut s) = stderr_pipe {
+            let _ = s.read_to_end(&mut buf);
+        }
+        buf
+    });
+    // Espera amb SOSTRE DE TEMPS (el xat no pot quedar penjat per un volum
+    // lent: el snapshot és una xarxa de seguretat, no un requisit).
+    let deadline = Instant::now() + SHADOW_TIMEOUT;
+    let mut sleep = Duration::from_millis(10);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break s,
+            Ok(None) => {}
+            Err(e) => {
+                let _ = child.kill();
+                return Err(format!("wait git: {e}"));
+            }
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "git (shadow) ha trigat massa (més de {} s) en `{}`",
+                SHADOW_TIMEOUT.as_secs(),
+                args.first().unwrap_or(&"?")
+            ));
+        }
+        std::thread::sleep(sleep);
+        sleep = (sleep * 2).min(Duration::from_millis(100));
+    };
+    let stdout = t_out.join().unwrap_or_default();
+    let stderr = t_err.join().unwrap_or_default();
+    Ok(std::process::Output { status, stdout, stderr })
 }
 
 fn git_ok(shadow: &Path, root: &Path, args: &[&str]) -> Result<String, String> {

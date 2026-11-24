@@ -17,7 +17,9 @@ pub mod engine_open;
 pub mod engine_tools;
 pub mod experts;
 pub mod external_orchestrator;
+pub mod fsutil;
 pub mod godot;
+pub mod grid;
 pub mod imgen;
 pub mod jam;
 pub mod keep_awake;
@@ -199,13 +201,34 @@ pub fn run() {
                 });
             }
 
+            // XARXA ALTRUISTA P2P (grid): el runtime es publica un cop, com
+            // els motors — els fils de la Jam no reben `State<'_, …>`. Els
+            // clients voluntaris arrenquen sols segons la configuració.
+            {
+                use tauri::Manager as _;
+                let st = app.state::<AppState>();
+                let grid_dir = config::AppConfig::data_dir()
+                    .unwrap_or_else(|| std::env::temp_dir().join("no-orbit"))
+                    .join("grid");
+                let grid_cfg = st.config.blocking_read().grid.clone();
+                let rt = grid::Runtime {
+                    app: handle.clone(),
+                    ai: st.ai_manager.clone(),
+                    cfg: st.config.clone(),
+                    jam: st.jam.clone(),
+                    state: grid::GridState::new(&grid_cfg, grid_dir),
+                };
+                grid::set_runtime(rt);
+                tauri::async_runtime::spawn(grid::arranca_segons_config(grid_cfg));
+            }
+
             // PROVEÏDORS LOCALS MORTS: un «llamacpp_11435» desat quan el
             // servidor ja no hi és (l'app es va tancar i el `llama-server`
             // va morir amb ella) es treu de la llista. Sinó, el xat el
             // ofereix al selector i no hi ha res al darrere: l'usuari tria
             // el model i «no deixa fer-lo servir».
             {
-                // El gestor de proveïdors es clona (Arc) per notenir el
+                // El gestor de proveïdors es clona (Arc) per no tenir el
                 // prestat del `State` viu més enllà del bloc.
                 let api_manager = {
                     use tauri::Manager as _;
@@ -339,6 +362,11 @@ pub fn run() {
                     let _ = window
                         .app_handle()
                         .emit("panel://closed", serde_json::json!({ "label": label }));
+                } else if label == "noorbit-screensaver" {
+                    // L'estalvi s'ha tancat: el voluntari deixa de tenir la
+                    // porta triple oberta (els clics van a la seva finestra,
+                    // no a la principal).
+                    crate::grid::nota_estalvi(false);
                 }
             }
             let _ = window;
@@ -386,11 +414,35 @@ pub fn run() {
             jam::commands::jam_start,
             jam::commands::jam_stop,
             jam::commands::jam_state,
+            // Llegir el REPORT.md amb un missatge HONEST quan encara no hi és
+            // (Jam fallida, aturada o projecte en un volum lent).
+            jam::commands::jam_read_report,
             // Canviar la IA de la Jam EN MARXA (sense aturar-la).
             jam::commands::jam_set_ai,
+            // Xarxa altruista P2P (grid): estat, compartició i còpies.
+            grid::commands::grid_status,
+            grid::commands::grid_set_enabled,
+            grid::commands::grid_share_new,
+            grid::commands::grid_share_stop,
+            grid::commands::grid_peer_add,
+            grid::commands::grid_peer_remove,
+            grid::commands::grid_note_saver,
+            grid::commands::grid_distribute_start,
+            grid::commands::grid_distribute_stop,
+            grid::commands::grid_copy_status,
+            grid::commands::grid_copy_set_dir,
             engine_open::open_project_in_engine,
             engine_open::godot_status,
+            // Arregla Godot a macOS: li treu la marca de quarantina (evita el
+            // SIGBUS «backing vnode was force unmounted»).
+            engine_open::godot_fix_quarantine,
             engine_open::bevy_status,
+            // Assistent de Bevy: preguntes (on instal·lar Rust, on treballar),
+            // instal·lació i creació/verificació del projecte.
+            bevy::setup::bevy_setup_info,
+            bevy::setup::bevy_detect_project,
+            bevy::setup::bevy_create_project,
+            bevy::setup::bevy_install_rust,
             commands::workspace::clone_game_studios,
             // Sistema operatiu
             commands::system::open_terminal,
@@ -430,6 +482,8 @@ pub fn run() {
             commands::ai::ollama_unload_models,
             // Allibera la memòria que NoOrbit no necessita (models + motors).
             commands::ai::ai_free_ram,
+            // Memòria que està usant la IA local ara mateix (model + sistema).
+            commands::ai::ai_local_memory,
             commands::ai::ollama_get_keep_alive,
             commands::ai::ollama_set_keep_alive,
             commands::ai::ollama_suggested_models,
@@ -595,6 +649,7 @@ pub fn run() {
             lsp::commands::lsp_hover,
             lsp::commands::lsp_references,
             lsp::commands::lsp_definition,
+            lsp::commands::lsp_rename,
             lsp::commands::lsp_diagnostics,
             lsp::commands::lsp_status,
             // Informe de fallides («crash»): es pot copiar i enviar.
@@ -694,12 +749,17 @@ pub fn run() {
             unreal::commands::unreal_agent_task,
             unreal::commands::unreal_mcp_tools,
             unreal::commands::unreal_mcp_call,
+            unreal::commands::unreal_search_snippets,
             // Mòbil natiu (Android SDK + Xcode/iOS Simulator)
             mobile::commands::mobile_status,
             mobile::commands::mobile_android_list_avds,
             mobile::commands::mobile_android_start,
             mobile::commands::mobile_android_stop,
             mobile::commands::mobile_android_screenshot,
+            mobile::commands::android_get_sdk_dir,
+            mobile::commands::android_set_sdk_dir,
+            mobile::commands::android_install_sdk,
+            mobile::commands::android_project_marker,
             mobile::commands::mobile_ios_list_devices,
             mobile::commands::mobile_ios_boot,
             mobile::commands::mobile_ios_shutdown,

@@ -3,7 +3,7 @@
 /// criden aquestes funcions, com fa VS Code amb els seus comandaments.
 import type { editor as MonacoEditor } from "monaco-editor";
 import { invoke } from "@tauri-apps/api/core";
-import { lspDefinition } from "./lspBridge";
+import { lspDefinition, lspRename } from "./lspBridge";
 
 type Monaco = typeof import("monaco-editor");
 
@@ -273,4 +273,38 @@ export async function findDefinitionHere(
   } catch (e) {
     return { ok: false, error: String(e) };
   }
+}
+
+// --- Renombra el símbol (menú contextual) ------------------------------------
+export interface RenameResult {
+  ok: boolean;
+  files?: number;
+  edits?: number;
+  /// Rutes relatives a l'arrel dels fitxers que el backend ha tocat: la UI
+  /// les rellegeix perquè els editors oberts mostrin el símbol nou.
+  paths?: string[];
+  error?: string;
+}
+
+/// Renombra el símbol sota el cursor amb el servidor LSP real (les edicions
+/// s'apliquen al disc, a tots els fitxers afectats). Sense respall heurístic:
+/// si no hi ha servidor o no respon, error honest perquè la UI ho expliqui.
+export async function renameSymbolHere(
+  path: string,
+  newName: string,
+  projectRoot?: string | null
+): Promise<RenameResult> {
+  if (!_editor) return { ok: false, error: "No hi ha editor." };
+  const pos = _editor.getPosition();
+  if (!pos) return { ok: false, error: "Sense cursor." };
+  if (!projectRoot) return { ok: false, error: "Sense projecte obert." };
+  const r = await lspRename(projectRoot, path, pos.lineNumber, pos.column, newName);
+  if (!r || r.files === 0) {
+    return {
+      ok: false,
+      error:
+        "El servidor de llenguatge no ha respost (o el símbol no es pot reanomenar).",
+    };
+  }
+  return { ok: true, files: r.files, edits: r.edits, paths: r.paths };
 }

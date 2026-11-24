@@ -1,6 +1,6 @@
 /// Tests de la tria d'IA del panell «Autonomous Jam» (lògica pura).
 import { describe, expect, it } from "vitest";
-import { LOCAL, NATIVE, NATIVE_ID, PROV, resolAi } from "./jamAi";
+import { GRID, LOCAL, NATIVE, NATIVE_ID, PROV, resolAi } from "./jamAi";
 import type { ProviderPublic } from "../../stores/providerStore";
 
 function proveidor(over: Partial<ProviderPublic>): ProviderPublic {
@@ -57,5 +57,10 @@ describe("resolAi", () => {
 
   it("un model local sense nom → ollama sense model (el backend tria)", () => {
     expect(resolAi(LOCAL, [])).toEqual({ provider: "ollama", model: null });
+  });
+
+  it("la comunitat P2P → provider grid (els voluntaris responen els torns)", () => {
+    expect(resolAi(GRID, [])).toEqual({ provider: "grid", model: null });
+    expect(resolAi("grid|", [])).toEqual({ provider: "grid", model: null });
   });
 });

@@ -128,6 +128,10 @@ pub struct JamStats {
     pub skipped: u32,
     pub total_attempts: u32,
     pub duration_ms: u64,
+    /// Tasques que s'han FET però que no s'han pogut COMITAR (el git no ha
+    /// arribat a temps en un volum lent, o l'error d'E/S): els fitxers sí que
+    /// són a terra, però no hi ha checkpoint per tirar enrere.
+    pub without_checkpoint: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,6 +186,10 @@ pub enum Progress {
     /// Extracte del raonament del model (prosa + línia RESUM, sense blocs de
     /// codi). És el «procés de pensament» que l'usuari vol veure.
     Thinking { id: String, text: String },
+    /// Text que la IA està ESCRIVINT ara mateix (streaming). Va a la UI perquè
+    /// l'usuari vegi el codi aparèixer en directe: sense això, entre notes
+    /// podien passar minuts sense cap senyal de què feia la IA.
+    Streaming { id: String, text: String },
     Compacted,
     Finished,
 }
@@ -362,7 +370,11 @@ pub async fn run_autonomous_loop_resumable(
     // L'informe s'escriu DESPRÉS de l'últim `reset_hard` de `run_inner`: si no,
     // el `git clean -fd` del rollback s'enduria el REPORT.md (és a terra sense
     // comitar).
-    let _ = deps.reporter.report(&plan, &stats).await;
+    if let Err(e) = deps.reporter.report(&plan, &stats).await {
+        // Abans l'error es s'enfugava: la Jam podia acabar sense REPORT.md i
+        // l'usuari només veia un «no such file or directory» sense cap pista.
+        warn!("no s'ha pogut escriure l'informe (REPORT.md): {e}");
+    }
 }
 
 async fn run_inner(
@@ -398,6 +410,13 @@ async fn run_inner(
     let mut global_quality = QualityLevel::Full;
     let mut last_quality = QualityLevel::Full;
     let mut consecutive_memory_fails: u32 = 0;
+    // EL CHECKPOINT (commit + rollback) pot ser IMPOSIBLE en un volum lent
+    // (exFAT sobre USB: un `git status` trigava 34 s i el timeout era de 30).
+    // Abans això feia que CADA tasca fallés i que el `reset_hard` esborrés
+    // el que l'agent acabava de fer: la Jam cremava el pressupost i no
+    // deixava res. Ara, si el git no dona la talla, es DESACTIVA el
+    // checkpoint i la Jam continua ESCRIVINT fitxers (que es queden a terra).
+    let mut checkpointing = true;
 
     'outer: for (idx, task) in plan.tasks.iter().enumerate().skip(start_idx) {
         if rt.is_stopped() || Instant::now() >= deadline { stats.skipped += (plan.tasks.len() - idx) as u32; break; }
@@ -416,7 +435,23 @@ async fn run_inner(
             last_quality = quality;
             let guard = noorbit_memguard::MemoryGuard::spawn(cfg.task_memory_budget_bytes);
             let ctx = TaskContext { cancel: guard.cancel.clone(), child_registry: guard.registry.clone(), quality, attempt };
-            if let Err(e) = deps.ckpt.reset_hard(&last_good).await { warn!(task = %task.id, attempt, "reset: {e}"); guard.stop(); break; }
+            if checkpointing {
+                if let Err(e) = deps.ckpt.reset_hard(&last_good).await {
+                    warn!(task = %task.id, attempt, "reset: {e}");
+                    // EL GIT NO DONA LA TALLA (volum lent, repo trencat): no es
+                    // pot tirar enrere. Abans la Jam MORIA aquí (amb la feina
+                    // de les tasques anteriors al working tree) i el projecte
+                    // quedava sense res. Ara continua escrivint.
+                    checkpointing = false;
+                    deps.progress(Progress::Note {
+                        id: task.id.clone(),
+                        text: format!(
+                            "el git no deixa tirar enrere ({e}); la Jam continua sense desfer"
+                        ),
+                    })
+                    .await;
+                }
+            }
             let worker_result = tokio::select! {
                 biased;
                 _ = rt.cancelled() => { guard.stop(); stats.skipped += (plan.tasks.len() - idx) as u32; break 'outer; }
@@ -452,7 +487,7 @@ async fn run_inner(
             if !diff.materialized {
                 let apply_result = tokio::select! {
                     biased;
-                    _ = rt.cancelled() => { let _ = deps.ckpt.reset_hard(&last_good).await; stats.skipped += (plan.tasks.len() - idx) as u32; break 'outer; }
+                    _ = rt.cancelled() => { if checkpointing { let _ = deps.ckpt.reset_hard(&last_good).await; } stats.skipped += (plan.tasks.len() - idx) as u32; break 'outer; }
                     r = apply_diff(&deps.repo_path, &diff.patch) => r,
                 };
                 if let Err(e) = apply_result { warn!(task = %task.id, attempt, "apply: {e}"); continue; }
@@ -467,7 +502,7 @@ async fn run_inner(
             }
             let verify_result = tokio::select! {
                 biased;
-                _ = rt.cancelled() => { let _ = deps.ckpt.reset_hard(&last_good).await; stats.skipped += (plan.tasks.len() - idx) as u32; break 'outer; }
+                _ = rt.cancelled() => { if checkpointing { let _ = deps.ckpt.reset_hard(&last_good).await; } stats.skipped += (plan.tasks.len() - idx) as u32; break 'outer; }
                 r = tokio::time::timeout(VERIFY_TIMEOUT, deps.verifier.run_with_files(task, &ctx, &touched)) => r,
             };
             let verify_ok = match verify_result {
@@ -476,9 +511,48 @@ async fn run_inner(
                 Err(_) => { warn!(task = %task.id, attempt, "verify timeout"); deps.progress(Progress::TaskError { id: task.id.clone(), error: "verificació: temps esgotat".into() }).await; false }
             };
             if !verify_ok { continue; }
+            if !checkpointing {
+                // Sense checkpoints: la feina verificada ES QUEDA a terra. Es
+                // compta com a completada (els fitxers existeixen i el
+                // verifier l'ha acceptat) i s'anota que no s'ha commitat.
+                stats.completed += 1;
+                stats.without_checkpoint += 1;
+                task_ok = true;
+                deps.progress(Progress::TaskDone { id: task.id.clone(), files: touched.len() }).await;
+                break;
+            }
             match deps.ckpt.commit(task).await {
                 Ok(sha) => { last_good = sha; stats.completed += 1; task_ok = true; deps.progress(Progress::TaskDone { id: task.id.clone(), files: touched.len() }).await; break; }
-                Err(e) => { warn!(task = %task.id, attempt, "commit: {e}"); deps.progress(Progress::TaskError { id: task.id.clone(), error: format!("commit: {e}") }).await; let _ = deps.ckpt.reset_hard(&last_good).await; continue; }
+                Err(e) => {
+                    warn!(task = %task.id, attempt, "commit: {e}");
+                    // «No hi ha canvis a commitar» és un error de la TASCA (el
+                    // worker no ha escrit res): es reintenta amb el rollback.
+                    if e.contains("no hi ha canvis a commitar") {
+                        deps.progress(Progress::TaskError { id: task.id.clone(), error: format!("commit: {e}") }).await;
+                        let _ = deps.ckpt.reset_hard(&last_good).await;
+                        continue;
+                    }
+                    // Qualsevol altre fallo de commit és del GIT (volum lent,
+                    // error d'E/S, repo trencat): la feina feta NO es pot
+                    // perdre. Abans es feia un `reset_hard` que ESBORRAVA tot
+                    // el que l'agent acabava de fer i la Jam cremava el
+                    // pressupost en reintents que fracassaven igual. Ara els
+                    // fitxers es queden a terra, la tasca es compta com a feta
+                    // i la Jam continua (ja sense commits ni desfer).
+                    checkpointing = false;
+                    stats.completed += 1;
+                    stats.without_checkpoint += 1;
+                    task_ok = true;
+                    deps.progress(Progress::TaskDone { id: task.id.clone(), files: touched.len() }).await;
+                    deps.progress(Progress::Note {
+                        id: task.id.clone(),
+                        text: format!(
+                            "no s'ha pogut commitar ({e}); els fitxers es queden a terra i la Jam continua sense commits"
+                        ),
+                    })
+                    .await;
+                    break;
+                }
             }
         }
         if !task_ok && !rt.is_stopped() {
@@ -500,7 +574,14 @@ async fn run_inner(
             });
         }
     }
-    let _ = deps.ckpt.reset_hard(&last_good).await;
+    // Amb els checkpoints DESACTIVATS no es fa el `reset_hard` final: es
+    // tornaria enrere i ESBORRARIA tot el que s'ha fet sense commit (la feina
+    // que el git no ha pogut guardar). Amb checkpoints actius es manté: així
+    // el working tree acaba net (i el REPORT.md, que és a terra sense
+    // comitar, l'esborra el `git clean -fd`).
+    if checkpointing {
+        let _ = deps.ckpt.reset_hard(&last_good).await;
+    }
     let _ = deps.ckpt.tag("jam-final").await;
     deps.progress(Progress::Finished).await;
     stats
@@ -917,6 +998,147 @@ mod tests {
         assert_eq!(v[1].quality, QualityLevel::Full);
         assert_eq!(v[1].task_id, "t02");
         assert_eq!(v[1].stats.completed, 2);
+    }
+
+    /// REGRESSIÓ: si el COMMIT falla (volum lent: el git no arriba a temps),
+    /// la feina feta NO es pot perdre. Abans es feia un `reset_hard` que
+    /// ESBORRAVA el que l'agent acabava de fer, la tasca quedava bloquejada i
+    /// la Jam cremava el pressupost en reintents que fracassaven igual.
+    #[tokio::test]
+    async fn commit_que_falla_no_esborra_la_feina_i_la_jam_continua() {
+        struct StubWorker;
+        #[async_trait::async_trait]
+        impl Worker for StubWorker {
+            async fn run(&self, task: &Task, _ctx: &TaskContext) -> Result<Diff, String> {
+                Ok(Diff::materialized_files(vec![format!("{}.txt", task.id)], 0))
+            }
+        }
+        /// Checkpointer que el git sempre falla (timeout) i que APUNTA els
+        /// `reset_hard` per poder-los comptar.
+        struct BrokenCheckpointer {
+            resets: std::sync::atomic::AtomicUsize,
+            commits: std::sync::atomic::AtomicUsize,
+        }
+        #[async_trait::async_trait]
+        impl Checkpointer for BrokenCheckpointer {
+            async fn head(&self) -> Result<String, String> {
+                Ok("base".into())
+            }
+            async fn reset_hard(&self, _sha: &str) -> Result<(), String> {
+                self.resets.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }
+            async fn commit(&self, _task: &Task) -> Result<String, String> {
+                self.commits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Err("git timeout (més de 30)".into())
+            }
+            async fn tag(&self, _name: &str) -> Result<(), String> {
+                Ok(())
+            }
+        }
+        let ckpt = Arc::new(BrokenCheckpointer {
+            resets: std::sync::atomic::AtomicUsize::new(0),
+            commits: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let reporter_inner = Arc::new(MemReporter::default());
+        let deps = JamDeps {
+            worker: Arc::new(StubWorker),
+            verifier: Arc::new(StubVerifier) as Arc<dyn Verifier>,
+            ckpt: ckpt.clone() as Arc<dyn Checkpointer>,
+            reporter: reporter_inner.clone() as Arc<dyn Reporter>,
+            cache: Arc::new(NoopCache) as Arc<dyn Cache>,
+            repo_path: std::path::PathBuf::from("/tmp"),
+            progress: None,
+            save_fn: None,
+        };
+
+        run_autonomous_loop(
+            JamRuntime::standalone(),
+            plan(vec![task("t01"), task("t02")]),
+            deps,
+            JamConfig::default(),
+        )
+        .await;
+
+        let stats = reporter_inner.stats.lock().unwrap().clone().unwrap();
+        assert_eq!(stats.completed, 2, "les dues tasques s'han de comptar com a fetes");
+        assert_eq!(stats.blocked, 0, "una tasca verificada no s'ha de bloquejar");
+        assert_eq!(stats.without_checkpoint, 2, "les dues s'han fet sense commit");
+        assert_eq!(
+            ckpt.commits.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "després del primer fall del git no s'ha de tornar a intentar commit"
+        );
+        assert_eq!(
+            ckpt.resets.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "cap rollback després del fall del commit: el rollback ESBORRARIA la feina"
+        );
+    }
+
+    /// REGRESSIÓ: «no hi ha canvis a commitar» és un error de la TASCA (el
+    /// worker no ha escrit res): es reintenta i la tasca acaba bloquejada
+    /// (com abans), NO es desactiva el checkpoint.
+    #[tokio::test]
+    async fn commit_sense_canvis_reintenta_i_no_desactiva_el_checkpoint() {
+        struct StubWorker;
+        #[async_trait::async_trait]
+        impl Worker for StubWorker {
+            async fn run(&self, task: &Task, _ctx: &TaskContext) -> Result<Diff, String> {
+                Ok(Diff::materialized_files(vec![format!("{}.txt", task.id)], 0))
+            }
+        }
+        struct NoChangesCheckpointer {
+            commits: std::sync::atomic::AtomicUsize,
+        }
+        #[async_trait::async_trait]
+        impl Checkpointer for NoChangesCheckpointer {
+            async fn head(&self) -> Result<String, String> {
+                Ok("base".into())
+            }
+            async fn reset_hard(&self, _sha: &str) -> Result<(), String> {
+                Ok(())
+            }
+            async fn commit(&self, _task: &Task) -> Result<String, String> {
+                self.commits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Err("no hi ha canvis a commitar".into())
+            }
+            async fn tag(&self, _name: &str) -> Result<(), String> {
+                Ok(())
+            }
+        }
+        let ckpt = Arc::new(NoChangesCheckpointer {
+            commits: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let reporter_inner = Arc::new(MemReporter::default());
+        let deps = JamDeps {
+            worker: Arc::new(StubWorker),
+            verifier: Arc::new(StubVerifier) as Arc<dyn Verifier>,
+            ckpt: ckpt.clone() as Arc<dyn Checkpointer>,
+            reporter: reporter_inner.clone() as Arc<dyn Reporter>,
+            cache: Arc::new(NoopCache) as Arc<dyn Cache>,
+            repo_path: std::path::PathBuf::from("/tmp"),
+            progress: None,
+            save_fn: None,
+        };
+
+        run_autonomous_loop(
+            JamRuntime::standalone(),
+            plan(vec![task("t01")]),
+            deps,
+            JamConfig::default(),
+        )
+        .await;
+
+        let stats = reporter_inner.stats.lock().unwrap().clone().unwrap();
+        assert_eq!(stats.completed, 0);
+        assert_eq!(stats.blocked, 1, "sense canvis la tasca queda bloquejada");
+        assert_eq!(stats.without_checkpoint, 0, "no és un problema de checkpoint");
+        assert_eq!(
+            ckpt.commits.load(std::sync::atomic::Ordering::SeqCst),
+            MAX_ATTEMPTS_PER_TASK as usize,
+            "s'ha de reintentar el commit de la tasca"
+        );
     }
 
     /// `changed_files` ha de veure fitxers nous (sense `git add`), que és el

@@ -1,6 +1,6 @@
 [package]
 name = "no-orbit"
-version = "0.71.18-alpha"
+version = "0.71.19-alpha"
 description = "NoOrbit — IDE amb agent IA local, Blender i Unreal Engine 5"
 authors = ["NoOrbit"]
 edition = "2021"
@@ -47,6 +47,14 @@ portable-pty = "0.9"
 # Tipus oficials del Language Server Protocol (Fase 3c): diagnòstics,
 # completions i hover tipats per al client LSP persistent (MIT). Vegeu NOTICE.
 lsp-types = "0.95"
+
+# XARXA ALTRUISTA P2P (grid): QUIC amb certificats autofirmats (rcgen). El
+# propietari escolta i els voluntaris es connecten directament amb la
+# invitació; les unitats viatgen per QUIC/TLS. `rustls` amb «ring» per no
+# arrossegar aws-lc-rs (compilació més lleugera).
+quinn = "0.11"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rcgen = "0.13"
 
 noorbit-guardian = { path = "../../../crates/noorbit-guardian" }
 noorbit-jam = { path = "../../../crates/noorbit-jam" }

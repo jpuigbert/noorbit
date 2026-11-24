@@ -46,6 +46,8 @@ const ProjectWorkModal = lazy(() => import("./components/ProjectWork/ProjectWork
 const VideoStudioModal = lazy(() => import("./components/VideoStudio/VideoStudioModal"));
 const VsCodeExtensionsModal = lazy(() => import("./components/Extensions/VsCodeExtensionsModal"));
 const GameStudiosModal = lazy(() => import("./components/GameStudios/GameStudiosModal"));
+// Assistent de Bevy: on instal·lar Rust i on treballar el projecte Bevy.
+const BevySetupModal = lazy(() => import("./components/Bevy/BevySetupModal"));
 // Informe de fallida («crash»): només es carrega quan l'usuari el demana.
 const CrashReportModal = lazy(() => import("./components/CrashReportModal"));
 import ComputerConfirmModal from "./components/Computer/ComputerConfirmModal";
@@ -61,6 +63,7 @@ import { markForPath, resolveMark } from "./stores/editReviewStore";
 import { getEditor } from "./editor/editorApi";
 import { useFunCursor } from "./utils/useFunCursor";
 import { useActivityPulse } from "./utils/useActivityPulse";
+import { useAutoSaver } from "./screensaver/autoSaver";
 import { initFunFx } from "./utils/funFx";
 import StartupScreen from "./components/StartupScreen";
 import Toaster from "./components/Toaster";
@@ -138,6 +141,9 @@ export default function App() {
   // Pol d'activitat: diu al backend cada vegada que toques alguna cosa,
   // perquè l'aprenentatge autònom en repòs no navegui mentre treballes.
   useActivityPulse();
+  // Estalvi automàtic: amb la Jam o la feina autopilotada en marxa i sense
+  // tocar res durant els minuts triats, la pantalla de feina s'obre sola.
+  useAutoSaver();
 
   // Finestres de panells separats: quan es tanquen (creu X o «Torna al
   // programa»), tornen a enganxar-se aquí sense reiniciar el programa.
@@ -546,6 +552,11 @@ export default function App() {
       {/* Detecció d'entorn a l'obrir: es mostra SOL si falta algun component
           (i cada vegada, llevat que l'usuari premi «No tornar-la a mostrar»). */}
       <SetupCheckModal />
+      {/* Assistent de Bevy: es munta DESPRÉS del modal d'entorn perquè,
+          quan s'obre des d'aquest, quedi a dalt (mateix z-index, ordre DOM). */}
+      <Suspense fallback={null}>
+        {useUIStore((s) => s.showBevySetup) && <BevySetupModal />}
+      </Suspense>
       <CommandPalette />
       <QuickOpen />
       <SearchPalette />

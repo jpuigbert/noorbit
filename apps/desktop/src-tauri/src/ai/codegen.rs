@@ -208,6 +208,176 @@ for ob in objectius:
 print("Material {Nom}_Mat aplicat a " + str(len(objectius)) + " objecte(s)")
 "##,
         },
+        // ── UNREAL: patrons concrets de l'Editor Scripting ──
+        // Aquests tres van ABANS del «Projecte Unreal lleuger» i del «Script
+        // Unreal (Python)» perquè, en cas d'empat de punts, guanya el patró
+        // MÉS ESPECÍFIC (el genèric sempre va darrere). Els disparadors són
+        // en minúscules i SENSE accents (els tokens es normalitzen així:
+        // «il·luminació» es converteix en «luminacio»).
+        Snippet {
+            title: "Il·luminació Unreal (Python)",
+            file: "unreal/iluminacio_{nom}.py",
+            lang: "python",
+            triggers: &[
+                "luminacio", "iluminacio", "llum", "llums", "lumina", "lluminar", "iluminar",
+                "lightmap", "lightmaps", "sombra", "ombres", "render", "renderitzar",
+            ],
+            strong: &["unreal", "ue5"],
+            code: r##"""{Nom} — il·luminació i construcció de lightmaps a Unreal amb Python.
+
+La via més lleugera: Python dins l'editor, sense compilar C++ ni fer
+Blueprints. Executa'l a l'editor (Output Log ▸ Python) o deixa que NoOrbit
+l'enviï pel pont Remote Control (directriu RUN|UNREAL|).
+"""
+import unreal
+
+# Subsistemes moderns: els de pestanya obsoleta no fan res via Remote
+# Control, de manera que aquí només s'usen els subsistemes actuals.
+actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+nivell = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
+
+# 1) Llums: sol (ombres), sky light (ambient) i una puntual per donar contrast.
+sol = actors.spawn_actor_from_class(unreal.DirectionalLight, unreal.Vector(0, 0, 600))
+sol.set_actor_label("{Nom}_Sol")
+sol.set_actor_rotation(unreal.Rotator(-45.0, -30.0, 0.0))
+
+cel = actors.spawn_actor_from_class(unreal.SkyLight, unreal.Vector(0, 0, 0))
+cel.set_actor_label("{Nom}_Cel")
+
+llum = actors.spawn_actor_from_class(unreal.PointLight, unreal.Vector(300, 0, 250))
+llum.set_actor_label("{Nom}_Llum")
+comp = llum.get_component_by_class(unreal.PointLightComponent)
+if comp is not None:
+    comp.set_intensity(3000.0)
+    comp.set_attenuation_radius(800.0)
+
+# 2) Lightmaps: la via CORRECTA és build_light_maps del LevelEditorSubsystem
+# (execute_console_command no es pot fer servir des d'un script).
+qualitat = getattr(unreal.LightingBuildQuality, "QUALITY_PRODUCTION", None)
+if qualitat is None:
+    qualitat = getattr(unreal.LightingBuildQuality, "QUALITY_HIGH", None)
+if qualitat is None:
+    raise RuntimeError("Aquesta versió de Unreal no coneix LightingBuildQuality")
+
+if not nivell.build_light_maps(qualitat, False):
+    raise RuntimeError("Unreal ha refusat construir els lightmaps (prova QUALITY_MEDIUM)")
+
+# 3) Desa el nivell amb la il·luminació ja construïda.
+nivell.save_current_level()
+print("{Nom}: il·luminació construïda (3 llums + lightmaps) i nivell desat")
+"##,
+        },
+        Snippet {
+            title: "Importació d'assets Unreal (Python)",
+            file: "unreal/importa_{nom}.py",
+            lang: "python",
+            triggers: &[
+                "importa", "importar", "import", "importacio", "importaciones", "fbx", "glb",
+                "gltf", "obj", "asset", "assets", "malla", "malle", "textura", "model",
+            ],
+            strong: &["unreal", "ue5"],
+            code: r##"""{Nom} — importació d'assets a Unreal amb Python.
+
+Executa'l a l'editor (Output Log ▸ Python) o deixa que NoOrbit l'enviï pel
+pont Remote Control (directriu RUN|UNREAL|).
+
+EDITA les dues constants del capdamunt abans d'executar: RUTA_ORIGEN ha de
+ser el fitxer REAL (FBX, GLB, OBJ…) i DESTINACIO la carpeta dins el projecte
+on es vol guardar.
+"""
+import os
+import unreal
+
+RUTA_ORIGEN = "/ruta/absoluta/al/model.fbx"
+DESTINACIO = "/Game/Imports"
+
+if not os.path.isfile(RUTA_ORIGEN):
+    raise RuntimeError("No existeix el fitxer: " + RUTA_ORIGEN)
+
+assets = unreal.get_editor_subsystem(unreal.EditorAssetSubsystem)
+actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+
+data = unreal.AutomatedAssetImportData()
+data.set_editor_property("filenames", [RUTA_ORIGEN])
+data.set_editor_property("destination_path", DESTINACIO)
+data.set_editor_property("replace_existing", True)
+data.set_editor_property("group_with_root", False)
+
+# import_assets_automated RETORNA els assets importats; import_asset_tasks
+# retorna None, per això no l'fem servir com a via principal.
+importats = list(unreal.AssetToolsHelpers.get_asset_tools().import_assets_automated(data) or [])
+if not importats:
+    raise RuntimeError("Unreal no ha importat res. Revisa el format del fitxer i el log de l'editor.")
+
+noms = []
+for obj in importats:
+    noms.append(obj.get_name())
+    assets.save_loaded_asset(obj)
+    # Si és una malla, la posa a l'escena per veure-la de seguida.
+    if isinstance(obj, unreal.StaticMesh):
+        actor = actors.spawn_actor_from_class(unreal.StaticMeshActor, unreal.Vector(0, 0, 0))
+        actor.set_actor_label(obj.get_name())
+        comp = actor.get_component_by_class(unreal.StaticMeshComponent)
+        if comp is not None:
+            comp.set_static_mesh(obj)
+
+print("{Nom}: importats " + str(len(importats)) + " asset(s) a " + DESTINACIO + " -> " + ", ".join(noms))
+"##,
+        },
+        Snippet {
+            title: "Escena Unreal (Python)",
+            file: "unreal/escena_{nom}.py",
+            lang: "python",
+            triggers: &["escena", "nivel", "nivell", "cub", "plataforma", "sala", "mapa", "geometria"],
+            strong: &["unreal", "ue5"],
+            code: r##"""{Nom} — escena Unreal creada amb Python (Editor Scripting).
+
+La via més lleugera: Python dins l'editor, sense compilar C++ ni fer
+Blueprints. Executa'l a l'editor (Output Log ▸ Python) o deixa que NoOrbit
+l'enviï pel pont Remote Control (directriu RUN|UNREAL|).
+"""
+import unreal
+
+# Subsistemes moderns: els de pestanya obsoleta no fan res via Remote
+# Control, de manera que aquí només s'usen els subsistemes actuals.
+actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+nivell = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
+
+MATERIAL = unreal.load_object(None, "/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial")
+
+
+def crea_mesh(classe, mesh_path, etiqueta, x, y, z, escala=1.0):
+    mesh = unreal.load_object(None, mesh_path)
+    if mesh is None:
+        raise RuntimeError("No he trobat el mesh " + mesh_path)
+    actor = actors.spawn_actor_from_class(classe, unreal.Vector(x, y, z))
+    actor.set_actor_label(etiqueta)
+    actor.set_actor_scale3d(unreal.Vector(escala, escala, escala))
+    comp = actor.get_component_by_class(unreal.StaticMeshComponent)
+    if comp is None:
+        raise RuntimeError("L'actor " + etiqueta + " no te StaticMeshComponent")
+    comp.set_static_mesh(mesh)
+    if MATERIAL is not None:
+        comp.set_material(0, MATERIAL)
+    return actor
+
+
+# Terra + tres volumes: una base llegible sense importar cap asset extern.
+crea_mesh(unreal.StaticMeshActor, "/Engine/BasicShapes/Plane.Plane", "{Nom}_Terra", 0, 0, 0, 4.0)
+crea_mesh(unreal.StaticMeshActor, "/Engine/BasicShapes/Cube.Cube", "{Nom}_Cub", 0, 0, 100)
+crea_mesh(unreal.StaticMeshActor, "/Engine/BasicShapes/Cylinder.Cylinder", "{Nom}_Columna", 300, 0, 150)
+
+# Sol + llum puntual: sense llums l'escena surt negra.
+sol = actors.spawn_actor_from_class(unreal.DirectionalLight, unreal.Vector(0, 0, 600))
+sol.set_actor_label("{Nom}_Sol")
+sol.set_actor_rotation(unreal.Rotator(-45.0, -30.0, 0.0))
+actors.spawn_actor_from_class(unreal.PointLight, unreal.Vector(0, 0, 300))
+
+# Desa el nivell: així els canvis no es perden en sortir de l'editor.
+nivell.save_current_level()
+print("{Nom}: escena creada (3 actors + 2 llums) i nivell desat")
+"##,
+        },
         Snippet {
             title: "Projecte Unreal lleuger",
             file: "{nom}.uproject",
@@ -240,7 +410,7 @@ Executa'l a l'editor (Output Log ▸ Python) o deixa que NoOrbit l'enviï.
 """
 import unreal
 
-# Subsistema modern (EditorLevelLibrary està deprecat des de UE 5.1).
+# Subsistema modern (els de pestanya obsoleta estan deprecats des d'UE 5.1).
 subs = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 
 # Actor bàsic amb el cub del motor: sense assets externs, sense Nanite.
@@ -264,22 +434,10 @@ print("{Nom}: cub i llum creados a l'escena (via Python, sense C++)")
             // «joc»/«videojoc» genèrics → Godot 4 (projecte REAL), MAI
             // l'endevinament Python de consola com a resposta per defecte.
             strong: &["godot", "gdscript", "videojoc", "joc"],
-            code: r#"; {Nom} — projecte Godot 4 generat per la IA nativa de NoOrbit.
-; Renderer «Compatibility» (OpenGL 3.3): ideal per a Mac Intel amb GPU integrada.
-; Obre'l amb l'editor de Godot 4 i prem Play.
-
-config_version=5
-
-[application]
-
-config/name="{Nom}"
-run/main_scene="res://main.tscn"
-
-[rendering]
-
-renderer/rendering_method="gl_compatibility"
-renderer/rendering_method.mobile="gl_compatibility"
-"#,
+            // Mateixa font que el projecte creat automàticament
+            // (`godot::setup`): el projecte de la IA i el projecte creat a mà
+            // són IDÈNTICS i no pod divergir.
+            code: crate::godot::setup::GODOT_PROJECT_GODOT,
         },
         Snippet {
             title: "Projecte Defold",
@@ -781,31 +939,12 @@ fn extras(title: &str) -> &'static [(&'static str, &'static str, &'static str)] 
             (
                 "main.tscn",
                 "text",
-                r#"[gd_scene load_steps=2 format=3]
-
-[ext_resource type="Script" path="res://main.gd" id="1"]
-
-[node name="Main" type="Node2D"]
-script = ExtResource("1")
-"#,
+                crate::godot::setup::GODOT_MAIN_TSCN,
             ),
             (
                 "main.gd",
                 "gdscript",
-                r#"# {Nom} — escena principal generada per la IA nativa de NoOrbit.
-# Una pilota que orbita dibuixada amb `_draw`: sense assets, sense xarxa.
-extends Node2D
-
-var temps := 0.0
-
-func _process(delta: float) -> void:
-    temps += delta
-    queue_redraw()
-
-func _draw() -> void:
-    var centre := Vector2(sin(temps) * 120.0, cos(temps) * 60.0)
-    draw_circle(centre, 20.0, Color(0.2, 0.5, 1.0))
-"#,
+                crate::godot::setup::GODOT_MAIN_GD,
             ),
         ],
         "Projecte Defold" => &[
@@ -881,7 +1020,7 @@ bDeveloperMode=True
 
 Executa'l a l'editor (Output Log ▸ Python) o deixa que NoOrbit l'enviï pel
 pont Remote Control (directriu RUN|UNREAL|). Fa servir els subsistemes
-moderns: EditorLevelLibrary està deprecat des de UE 5.1.
+moderns (els de pestanya obsoleta estan deprecats des d'UE 5.1).
 """
 import unreal
 
@@ -1248,6 +1387,9 @@ fn default_per_titol(s: &Snippet) -> &'static str {
         "Material Blender (bpy)" => "material",
         "Blender → glTF (assets per a jocs)" => "export",
         "Projecte Unreal lleuger" | "Script Unreal (Python)" => "joc",
+        "Escena Unreal (Python)" => "escena",
+        "Il·luminació Unreal (Python)" => "iluminacio",
+        "Importació d'assets Unreal (Python)" => "importa",
         _ => "app",
     }
 }
@@ -1904,5 +2046,42 @@ mod tests {
         // I l'HTML continua guanyant quan es demana html.
         let r = starter("crea una pàgina html").unwrap();
         assert!(r.contains("```html"), "{}", r);
+    }
+
+    /// Els patrons Unreal ESPECÍFICS (escena, il·luminació, importació)
+    /// guanyen al patró genèric quan la petició és concreta, i el `.uproject`
+    /// continua guanyant quan es demana un «projecte» o un «joc».
+    #[test]
+    fn patrons_unreal_especifics_guanyen_el_generic() {
+        let r = starter("fes una escena unreal").unwrap();
+        assert!(r.contains("@file: unreal/escena_"), "{}", r);
+        assert!(r.contains("set_static_mesh"), "{}", r);
+
+        // «importació» i «il·luminació» porten accent: els tokens es
+        // normalitzen, i el «·» fa de separador («il·luminació» → «luminacio»).
+        let r = starter("fes una importació d'un fbx a unreal").unwrap();
+        assert!(r.contains("@file: unreal/importa_"), "{}", r);
+        assert!(r.contains("import_assets_automated"), "{}", r);
+
+        let r = starter("fes la il·luminació de l'escena d'unreal").unwrap();
+        assert!(r.contains("@file: unreal/iluminacio_"), "{}", r);
+        assert!(r.contains("build_light_maps"), "{}", r);
+
+        // «projecte» i «joc» segueixen guanyant el .uproject.
+        assert!(starter("fes un joc en unreal").unwrap().contains(".uproject"));
+        assert!(starter("crea un projecte unreal").unwrap().contains(".uproject"));
+        // El patró genèric es queda per a «script» i «actor».
+        assert!(starter("fes un script unreal").unwrap().contains("@file: unreal/"));
+
+        // Cap patró pot usar les APIs deprecades (fallen en silenci).
+        for p in [
+            "fes una escena unreal",
+            "fes una importació d'un fbx a unreal",
+            "fes la il·luminació de l'escena d'unreal",
+        ] {
+            let r = starter(p).unwrap();
+            assert!(!r.contains("EditorLevelLibrary"), "{}: {}", p, r);
+            assert!(!r.contains("EditorAssetLibrary"), "{}: {}", p, r);
+        }
     }
 }

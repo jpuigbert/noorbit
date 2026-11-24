@@ -3074,6 +3074,120 @@ impl AiManager {
         }
     }
 
+    /// Generació LOCAL (Ollama) amb STREAMING cap a un callback, SENSE
+    /// esdeveniments globals.
+    ///
+    /// La Jam l'usa per ensenyar el text de la IA en viu: un model local
+    /// trigui minuts a escriure un fitxer sencer i, sense fragments, el panell
+    /// semblava penjat («generant codi… (fa 40 s)» i res més). El callback rep
+    /// el text a mida que arriba; el text final sencer només es coneix quan
+    /// el model acaba.
+    ///
+    /// No emet res al xat de l'usuari: els esdeveniments globals són del xat
+    /// i barrejar-hi el text de la Jam hi aniria malament.
+    pub async fn ollama_complete_stream(
+        &self,
+        prompt: &str,
+        system: Option<&str>,
+        model: Option<&str>,
+        on_chunk: &(dyn for<'a> Fn(&'a str) + Send + Sync),
+    ) -> Result<String> {
+        let model = match model {
+            Some(m) if !m.trim().is_empty() => m.trim().to_string(),
+            _ => self.effective_model().await,
+        };
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: prompt.to_string(),
+            thinking: None,
+            images: None,
+        }];
+        let prompt_chars = messages.iter().map(|m| m.content.chars().count()).sum();
+        let options = Self::ctx_options(prompt_chars, system.map_or(0, |s| s.len()));
+        let keep_alive = self.keep_alive.read().await.clone();
+        let req = ChatRequest {
+            model,
+            messages,
+            stream: true,
+            system: system.map(|s| s.to_string()),
+            think: None,
+            keep_alive,
+            options,
+        };
+        let url = self.url("/api/chat");
+        // `http_stream` no té sostre total de temps: un model local en CPU pot
+        // trigar més de quatre minuts i tallar-ho seria un error fals.
+        let resp = self
+            .http_stream
+            .post(&url)
+            .json(&req)
+            .send()
+            .await
+            .map_err(|e| anyhow!("Ollama no respon: {}", e))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Ollama error {}: {}", status, body));
+        }
+        // NDJSON: CURSOR + un sol `drain` per tros de xarxa (drain dins del
+        // bucle de línies és cost quadràtic).
+        use futures::StreamExt;
+        let mut stream = resp.bytes_stream();
+        let mut buf = String::new();
+        let mut cursor = 0usize;
+        let mut out = String::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| anyhow!("Ollama: {}", e))?;
+            buf.push_str(&String::from_utf8_lossy(&chunk));
+            while let Some(rel) = buf[cursor..].find('\n') {
+                let end = cursor + rel;
+                let line = buf[cursor..end].to_string();
+                cursor = end + 1;
+                Self::acumula_ndjson(&line, &mut out, on_chunk)?;
+            }
+            if cursor > 0 {
+                buf.drain(..cursor);
+                cursor = 0;
+            }
+        }
+        // Línia final sense salt de línia.
+        if !buf.trim().is_empty() {
+            Self::acumula_ndjson(&buf, &mut out, on_chunk)?;
+        }
+        Ok(out)
+    }
+
+    /// Parseja una línia NDJSON d'Ollama: afegeix el text al acumulador i
+    /// avisa el callback. Un error del servidor es propaga (la Jam torna al
+    /// camí normal si el streaming local no va).
+    fn acumula_ndjson(
+        line: &str,
+        out: &mut String,
+        on_chunk: &(dyn for<'a> Fn(&'a str) + Send + Sync),
+    ) -> Result<()> {
+        let t = line.trim();
+        if t.is_empty() {
+            return Ok(());
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(t) else {
+            return Ok(());
+        };
+        if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
+            return Err(anyhow!("Ollama: {err}"));
+        }
+        if let Some(content) = v
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+        {
+            if !content.is_empty() {
+                out.push_str(content);
+                on_chunk(content);
+            }
+        }
+        Ok(())
+    }
+
     /// Xat amb **streaming**: emet cada fragment amb l'event «ai://chunk»
     /// mentre el model genera i retorna el text complet al final. A més, emet
     /// l'event unificat «ai://process» (fase + proveïdor + model + temps) per a

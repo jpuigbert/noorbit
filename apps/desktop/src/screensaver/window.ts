@@ -13,6 +13,14 @@
 ///   el pot obrir quantes vegades vulgui).
 /// - `tancaEstalvi()` — la mateixa finestra en clic/tecla.
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { emit } from "@tauri-apps/api/event";
+
+/// Esdeveniment global «l'estalvi s'ha tancat»: el rep el hook `useAutoSaver`
+/// de la finestra principal. Quan l'estalvi es tanca des de DINS (clic/tecla
+/// a la seva pròpia finestra), la finestra principal no ha vist cap toc: sense
+/// aquest avís tornaria a obrir l'estalvi al cap de ~20 s. L'event es diu amb
+/// prefix «saver://» com els altres del programa (jam://, project://, grid://).
+export const SAVER_CLOSED_EVENT = "saver://closed";
 
 export const SAVER_LABEL = "noorbit-screensaver";
 
@@ -58,6 +66,10 @@ export async function obrirEstalvi(): Promise<void> {
 export async function tancaEstalvi(): Promise<void> {
   try {
     const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+    // Primer avisem la finestra principal (l'espera garanteix el lliurament)
+    // i DESPRÉS destruïm aquesta finestra: el tancament compta com a toc de
+    // l'usuari per al rellotge d'inactivitat de l'estalvi automàtic.
+    await emit(SAVER_CLOSED_EVENT);
     await getCurrentWebviewWindow().destroy();
   } catch {
     /* si no es pot destruir, l'usuari pot fer força la sortida (cmd+Q no: la

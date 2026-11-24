@@ -51,6 +51,7 @@ import { ArtEmpty } from "../Illustrations";
 import { getEditor } from "../../editor/editorApi";
 import AiSelectionModal from "./AiSelectionModal";
 import ReferencesOverlay from "./ReferencesOverlay";
+import EditorContextMenu from "./EditorContextMenu";
 import Breadcrumbs from "./Breadcrumbs";
 
 const EXT_LANG: Record<string, string> = {
@@ -313,10 +314,12 @@ function EditorGroup({
   group,
   file,
   onOpenAiSel,
+  onCtxMenu,
 }: {
   group: EditorGroupKind;
   file: OpenFile;
   onOpenAiSel: () => void;
+  onCtxMenu: (x: number, y: number) => void;
 }) {
   const { t } = useT();
   const theme = useUIStore((s) => s.theme);
@@ -378,7 +381,16 @@ function EditorGroup({
     <div className="editor-group" onFocusCapture={focusHere} onMouseDownCapture={focusHere}>
       {isSplit && <GroupBar file={file} isSplit />}
       {review && <ReviewBar mark={review} />}
-      <div className="editor-content">
+      <div
+        className="editor-content"
+        onContextMenu={(e) => {
+          // Menú contextual propi en català: el natiu de Monaco (en anglès)
+          // està desactivat amb `contextmenu: false`.
+          e.preventDefault();
+          focusHere();
+          onCtxMenu(e.clientX, e.clientY);
+        }}
+      >
         <div className={"editor-host" + (reviewing ? " hidden" : "")}>
           <Editor
             theme={monacoThemeFor(theme)}
@@ -443,6 +455,7 @@ function EditorGroup({
               automaticLayout: true,
               tabSize: 2,
               inlineSuggest: { enabled: true },
+              contextmenu: false,
             }}
           />
         </div>
@@ -467,6 +480,7 @@ function EditorGroup({
                   automaticLayout: true,
                   tabSize: 2,
                   originalEditable: false,
+                  contextmenu: false,
                 } as object
               }
             />
@@ -624,6 +638,8 @@ export default function EditorPane() {
 
   // Menú contextual d'una pestanya (obri al costat, tanca, tanca les altres…).
   const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
+  // Menú contextual de l'editor (clic dret sobre el text): propi, en català.
+  const [edMenu, setEdMenu] = useState<{ x: number; y: number } | null>(null);
   // Diàleg «Edita la selecció amb la IA» (sobre l'editor amb focus).
   const [aiSel, setAiSel] = useState(false);
   const [aiSelEmpty, setAiSelEmpty] = useState(false);
@@ -704,8 +720,8 @@ export default function EditorPane() {
       {/* Ruta del fitxer actiu (carpeta > … > fitxer), segments clicables. */}
       <Breadcrumbs />
       <div className={"editor-groups" + (splitFile ? " split" : "")}>
-        <EditorGroup group="main" file={mainFile} onOpenAiSel={openAiSel} />
-        {splitFile && <EditorGroup group="split" file={splitFile} onOpenAiSel={openAiSel} />}
+        <EditorGroup group="main" file={mainFile} onOpenAiSel={openAiSel} onCtxMenu={(x, y) => setEdMenu({ x, y })} />
+        {splitFile && <EditorGroup group="split" file={splitFile} onOpenAiSel={openAiSel} onCtxMenu={(x, y) => setEdMenu({ x, y })} />}
       </div>
 
       {/* Menú contextual de pestanya: «Obre al costat» i tancaments. */}
@@ -765,6 +781,17 @@ export default function EditorPane() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Menú contextual de l'EDITOR (clic dret sobre el codi): propi, en
+          català — el natiu de Monaco no es pot localitzar. */}
+      {edMenu && (
+        <EditorContextMenu
+          x={edMenu.x}
+          y={edMenu.y}
+          onClose={() => setEdMenu(null)}
+          onAiSel={openAiSel}
+        />
       )}
 
       {/* Referències LSP (⌥F12): llista navegable amb salt al fitxer. */}

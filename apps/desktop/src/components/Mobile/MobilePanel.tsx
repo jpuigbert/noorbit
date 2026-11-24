@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   Smartphone,
   Apple,
@@ -12,11 +13,15 @@ import {
   AlertTriangle,
   CheckCircle2,
   XCircle,
+  Download,
+  FolderOpen,
 } from "lucide-react";
 import { useT } from "../../i18n";
+import { useWorkspaceStore } from "../../stores/workspaceStore";
 import {
   useMobileStore,
   type AndroidAvd,
+  type AndroidStatus,
   type IosDevice,
   type IosRuntimeGroup,
 } from "../../stores/mobileStore";
@@ -36,6 +41,9 @@ export default function MobilePanel() {
     livePlatform,
     liveTarget,
     liveError,
+    sdkBusy,
+    sdkMsg,
+    projectMarker,
     refreshStatus,
     refreshAndroid,
     refreshIos,
@@ -46,6 +54,9 @@ export default function MobilePanel() {
     openIos,
     startLive,
     stopLive,
+    installSdk,
+    setSdkDir,
+    checkProject,
   } = useMobileStore(
     useShallow((st) => ({
       status: st.status,
@@ -57,6 +68,9 @@ export default function MobilePanel() {
       livePlatform: st.livePlatform,
       liveTarget: st.liveTarget,
       liveError: st.liveError,
+      sdkBusy: st.sdkBusy,
+      sdkMsg: st.sdkMsg,
+      projectMarker: st.projectMarker,
       refreshStatus: st.refreshStatus,
       refreshAndroid: st.refreshAndroid,
       refreshIos: st.refreshIos,
@@ -67,6 +81,9 @@ export default function MobilePanel() {
       openIos: st.openIos,
       startLive: st.startLive,
       stopLive: st.stopLive,
+      installSdk: st.installSdk,
+      setSdkDir: st.setSdkDir,
+      checkProject: st.checkProject,
     }))
   );
 
@@ -76,8 +93,14 @@ export default function MobilePanel() {
     void refreshStatus();
   }, [refreshStatus]);
   useEffect(() => {
-    if (status?.android.installed) void refreshAndroid();
+    if (status?.android.compile_ok) void refreshAndroid();
   }, [status, refreshAndroid]);
+  // «Segons el projecte»: mirem si el projecte obert és d'Android, per a OFERIR
+  // la baixada de l'SDK només quan cal (mai a tot arreu, mai per defecte).
+  const projectRoot = useWorkspaceStore((st) => st.root);
+  useEffect(() => {
+    void checkProject(projectRoot);
+  }, [projectRoot, checkProject]);
   useEffect(() => {
     if (status?.ios.installed) void refreshIos();
   }, [status, refreshIos]);
@@ -106,7 +129,9 @@ export default function MobilePanel() {
         <button className="btn sm" disabled={loading} onClick={() => void refreshStatus()}>
           <RefreshCw size={12} className={loading ? "spin" : undefined} /> {t("mobile.rescan")}
         </button>
-        {sub === "android" && <SdkBadge ok={!!status?.android.installed} hint={status?.android.hint ?? null} />}
+        {sub === "android" && (
+          <SdkBadge ok={!!status?.android.compile_ok} hint={status?.android.hint ?? null} />
+        )}
         {sub === "ios" && (
           <SdkBadge
             ok={!!status?.ios.installed}
@@ -122,17 +147,35 @@ export default function MobilePanel() {
       )}
 
       {sub === "android" ? (
-        <AndroidSection
-          avds={avds}
-          installed={!!status?.android.installed}
-          onStart={(n) => void startAvd(n)}
-          onStop={(n) => void stopAvd(n)}
-          onLive={(n) => void startLive("android", n)}
-          onStopLive={stopLive}
-          liveActive={isLiveHere && liveTarget === null}
-          busyLive={isLiveHere}
-          t={t}
-        />
+        <>
+          <AndroidSdkSection
+            status={status?.android ?? null}
+            projectMarker={projectMarker}
+            busy={sdkBusy}
+            msg={sdkMsg}
+            t={t}
+            onInstall={async (dest) => {
+              if (dest) return void installSdk(dest);
+              installSdk();
+            }}
+            onPickDir={async () => {
+              const sel = await open({ directory: true, multiple: false });
+              if (typeof sel === "string" && sel) void setSdkDir(sel);
+            }}
+          />
+          <AndroidSection
+            avds={avds}
+            installed={!!status?.android.compile_ok}
+            emulatorOk={!!status?.android.emulator_ok}
+            onStart={(n) => void startAvd(n)}
+            onStop={(n) => void stopAvd(n)}
+            onLive={(n) => void startLive("android", n)}
+            onStopLive={stopLive}
+            liveActive={isLiveHere && liveTarget === null}
+            busyLive={isLiveHere}
+            t={t}
+          />
+        </>
       ) : (
         <IosSection
           groups={iosGroups}
@@ -237,9 +280,88 @@ function SdkBadge({ ok, hint }: { ok: boolean; hint: string | null }) {
   );
 }
 
+/**
+ * Bloc d'SDK de COMPILACIÓ d'Android. Existeix perquè la baixada siga SOTA
+ * DEMANDA i al LLOC QUE L'USUARI VOLGA: cap ruta escrita a codi, cap nom de
+ * volum. Quan el projecte obert és d'Android i no hi ha SDK, ací apareix
+ * l'oferta; en un projecte que no ho és, el bloc es queda discret.
+ */
+function AndroidSdkSection({
+  status,
+  projectMarker,
+  busy,
+  msg,
+  t,
+  onInstall,
+  onPickDir,
+}: {
+  status: AndroidStatus | null;
+  projectMarker: string | null;
+  busy: boolean;
+  msg: string | null;
+  t: (k: string) => string;
+  onInstall: (dest?: string) => void;
+  onPickDir: () => void;
+}) {
+  const compileOk = !!status?.compile_ok;
+  const desti = status?.sdk_path || status?.sdk_dir_configured || "";
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        padding: 8,
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 12, fontWeight: 600 }}>{t("mobile.android.sdkTitle")}</span>
+        <span style={{ fontSize: 11, color: compileOk ? "var(--success)" : "var(--warning)" }}>
+          {compileOk ? t("mobile.android.sdkPresent") : t("mobile.android.sdkMissing")}
+        </span>
+      </div>
+      <div style={{ fontSize: 11, color: "var(--text-3)", fontFamily: "var(--font-mono)" }}>
+        {desti || "—"} · API {status?.api ?? 34}
+      </div>
+      {projectMarker && !compileOk && (
+        <div style={{ fontSize: 11, color: "var(--text-2)" }}>
+          {t("mobile.android.projectIsAndroid")}: {projectMarker}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {!compileOk && (
+          <button
+            className="btn sm primary"
+            disabled={busy || !status?.one_click_supported}
+            onClick={() => onInstall()}
+          >
+            <Download size={12} /> {busy ? t("mobile.android.downloading") : t("mobile.android.installSdk")}
+          </button>
+        )}
+        <button className="btn sm" disabled={busy} onClick={onPickDir}>
+          <FolderOpen size={12} /> {t("mobile.android.chooseDir")}
+        </button>
+      </div>
+      <div style={{ fontSize: 11, color: "var(--text-3)" }}>
+        {status?.one_click_supported
+          ? t("mobile.android.sdkWeightHint")
+          : t("mobile.android.noOneClick")}
+      </div>
+      {msg && (
+        <div className="si-error" style={{ fontSize: 11 }}>
+          {msg}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AndroidSection({
   avds,
   installed,
+  emulatorOk,
   onStart,
   onStop,
   onLive,
@@ -249,6 +371,7 @@ function AndroidSection({
 }: {
   avds: AndroidAvd[];
   installed: boolean;
+  emulatorOk: boolean;
   onStart: (n: string) => void;
   onStop: (n: string) => void;
   onLive: (n?: string) => void;
@@ -259,6 +382,11 @@ function AndroidSection({
 }) {
   if (!installed) {
     return <div style={{ fontSize: 12, color: "var(--text-3)" }}>{t("mobile.android.needSdk")}</div>;
+  }
+  // Sense el paquet «emulator» no hi ha AVDs, però SÍ es pot compilar i provar
+  // en un telèfon per USB: ja no ho fem passar per SDK absent.
+  if (!emulatorOk) {
+    return <div style={{ fontSize: 12, color: "var(--text-3)" }}>{t("mobile.android.noEmulator")}</div>;
   }
   if (avds.length === 0) {
     return (
@@ -282,7 +410,7 @@ function AndroidSection({
             borderRadius: 6,
           }}
         >
-          <span style={{ flex: 1, fontFamily: "var(--mono)", fontSize: 12 }}>{a.name}</span>
+          <span style={{ flex: 1, fontFamily: "var(--font-mono)", fontSize: 12 }}>{a.name}</span>
           {a.running && (
             <span style={{ color: "var(--success)", fontSize: 11 }}>● {t("mobile.android.running")}</span>
           )}

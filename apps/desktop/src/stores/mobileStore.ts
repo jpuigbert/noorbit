@@ -2,10 +2,22 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 
 export interface AndroidStatus {
+  /** SDK usable per COMPILAR (abans exigia l'emulador: era el defecte). */
   installed: boolean;
+  compile_ok: boolean;
+  /** Paquet «emulator» present (només cal per a AVDs). */
+  emulator_ok: boolean;
+  /** «cmdline-tools» present: es pot actualitzar l'SDK sol. */
+  cmdline_ok: boolean;
   sdk_path: string | null;
   emulator_bin: string | null;
   adb_bin: string | null;
+  sdkmanager_bin: string | null;
+  /** Carpeta triada per l'usuari (buida = ruta estàndard del sistema). */
+  sdk_dir_configured: string;
+  api: number;
+  /** Un clic d'instal·lació disponible en este SO (POSIX). */
+  one_click_supported: boolean;
   hint: string | null;
 }
 export interface IosStatus {
@@ -47,6 +59,12 @@ interface MobileState {
   loading: boolean;
   error: string | null;
 
+  /** Instal·lació sota demanda de l'SDK d'Android. */
+  sdkBusy: boolean;
+  sdkMsg: string | null;
+  /** Marcador que indica que el projecte obert és d'Android (si n'hi ha). */
+  projectMarker: string | null;
+
   /** Screenshot en viu (base64 PNG) i interval de refresc. */
   liveShot: string | null;
   livePlatform: Platform | null;
@@ -66,6 +84,12 @@ interface MobileState {
 
   startLive: (platform: Platform, target?: string) => Promise<void>;
   stopLive: () => void;
+
+  /** Baixa l'SDK de compilació (o en canvia la carpeta) — destí LLIURE. */
+  installSdk: (dest?: string) => Promise<void>;
+  setSdkDir: (path: string) => Promise<void>;
+  /** Demana si el projecte indicat és d'Android (per oferir-ho, no per global). */
+  checkProject: (root: string | null) => Promise<void>;
 }
 
 export const useMobileStore = create<MobileState>((set, get) => ({
@@ -79,6 +103,9 @@ export const useMobileStore = create<MobileState>((set, get) => ({
   liveTarget: null,
   liveTimer: null,
   liveError: null,
+  sdkBusy: false,
+  sdkMsg: null,
+  projectMarker: null,
 
   refreshStatus: async () => {
     set({ loading: true, error: null });
@@ -94,6 +121,14 @@ export const useMobileStore = create<MobileState>((set, get) => ({
 
   refreshAndroid: async () => {
     try {
+      // Sense paquet «emulator» NO hi ha AVDs: cal preguntar-ho abans, si no
+      // el panell mostraria un error d'«emulator no disponible» com si
+      // l'SDK no hi fora.
+      const st = get().status;
+      if (st && !st.android.emulator_ok) {
+        set({ avds: [] });
+        return;
+      }
       const list = await invoke<AndroidAvd[]>("mobile_android_list_avds");
       set({ avds: list, error: null });
     } catch (e) {
@@ -198,5 +233,44 @@ export const useMobileStore = create<MobileState>((set, get) => ({
     const s = get();
     if (s.liveTimer) clearInterval(s.liveTimer);
     set({ liveTimer: null, liveShot: null, livePlatform: null, liveTarget: null });
+  },
+
+  installSdk: async (dest) => {
+    set({ sdkBusy: true, sdkMsg: null, error: null });
+    try {
+      const msg = await invoke<string>("android_install_sdk", { dest: dest ?? null });
+      set({ sdkMsg: msg });
+      // El Terminal va a la seua lentura: refresquem l'estat una vegada i dejà
+      // que siga l'usuari qui prema «Revisa» quan el script haja acabat.
+      setTimeout(() => void get().refreshStatus(), 20_000);
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ sdkBusy: false });
+    }
+  },
+
+  setSdkDir: async (path) => {
+    set({ sdkBusy: true, sdkMsg: null, error: null });
+    try {
+      set({ sdkMsg: await invoke<string>("android_set_sdk_dir", { path }) });
+      await get().refreshStatus();
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ sdkBusy: false });
+    }
+  },
+
+  checkProject: async (root) => {
+    if (!root) {
+      set({ projectMarker: null });
+      return;
+    }
+    try {
+      set({ projectMarker: await invoke<string | null>("android_project_marker", { root }) });
+    } catch {
+      set({ projectMarker: null });
+    }
   },
 }));

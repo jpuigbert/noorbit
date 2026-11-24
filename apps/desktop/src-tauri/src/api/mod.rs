@@ -105,6 +105,27 @@ pub fn model_version(model: &str) -> (u32, u32) {
     (maj, min)
 }
 
+/// El servei de MiniMax (sèrie M3) té tres peculiaritats que trencen les
+/// suposicions generals d'aquest mòdul i que, sense tenir-les en compte, es
+/// llegien com «la clau no funciona»:
+///
+/// 1. Pensa SEMPRE: el M3.1-Flash rebutja `thinking: disabled` amb un 400 i
+///    els tokens de pensament compten DINS de `max_tokens`, de manera que un
+///    sostre massa petit deixa el text BUIT.
+/// 2. Al camí compatible amb Anthropic només accepta `thinking: adaptive`
+///    (mai `enabled`, que és el que el nom del model deixa deduir).
+/// 3. El camí compatible amb Anthropic documenta `Authorization: Bearer`, no
+///    pas el `x-api-key` que exigeix l'oficial d'Anthropic.
+pub fn is_minimax_model(model: &str) -> bool {
+    model.to_ascii_lowercase().contains("minimax")
+}
+
+/// URL del servei de MiniMax (api.minimax.io o minimax.chat).
+pub fn is_minimax_url(url: &str) -> bool {
+    let low = url.to_ascii_lowercase();
+    low.contains("minimax.io") || low.contains("minimax.chat")
+}
+
 /// Com demana NoOrbit el RAONAMENT i quants tokens de sortida admet, segons el
 /// model d'Anthropic. Regles de la documentació oficial (nov 2026):
 /// · 4.6, 4.7, 5.x i posteriors → `adaptive`; el mode manual amb
@@ -115,6 +136,13 @@ pub fn model_version(model: &str) -> (u32, u32) {
 ///   Anthropic de DeepSeek) → mode manual amb un sostre ample.
 /// Retorna (mode, max_tokens); «none» vol dir «no enviïs el bloc thinking».
 pub fn anthropic_shape(model: &str) -> (&'static str, u64) {
+    // MiniMax (sèrie M3): el seu camí compatible amb Anthropic només accepta
+    // «adaptive» (enviar «enabled» — que és el que el nom del model deixa
+    // deduir — donava un 400) i el sostre ha de ser ample perquè els tokens
+    // de pensament hi compten dins.
+    if is_minimax_model(model) {
+        return ("adaptive", 32_768);
+    }
     let (maj, min) = model_version(model);
     if maj == 0 {
         return ("enabled", 32_000);
@@ -153,6 +181,12 @@ pub fn openai_output_tokens(model: &str) -> Option<u64> {
     let m = model.to_lowercase();
     if m.contains("deepseek") {
         return Some(32_000);
+    }
+    // MiniMax: el sostre del servei són 32.768 tokens I els tokens de
+    // pensament hi compten dins. Amb el 8.192 genèric de la cua, un pensament
+    // llarg es menjava el pressupost i el text tornava BUIT.
+    if m.contains("minimax") {
+        return Some(32_768);
     }
     if m.starts_with("o1") || m.starts_with("o3") || m.starts_with("o4") || m.contains("gpt-5") {
         return None;
@@ -357,6 +391,16 @@ impl AiProvider {
                 req.header(name, self.token_clean().to_string())
             }
             AuthScheme::Bearer => req.header("x-api-key", self.token_clean().to_string()),
+        };
+        // El camí compatible amb Anthropic de MiniMax documenta
+        // «Authorization: Bearer» i no pas el «x-api-key» que exigeix l'oficial
+        // d'Anthropic: amb només el x-api-key hi havia un 401 que es llegia
+        // com «la clau no funciona». S'hi envien LES dues capçaleres perquè
+        // cada servei compatible n'exigeixi una.
+        let req = if is_minimax_url(&self.base_url) {
+            req.header("Authorization", format!("Bearer {}", self.token_clean()))
+        } else {
+            req
         };
         req.header("anthropic-version", ANTHROPIC_VERSION)
     }
@@ -576,16 +620,19 @@ impl ApiManager {
             );
             seeded = true;
         }
-        // MINIMAX (gratuït): API compatible amb OpenAI (api.minimax.io/v1),
-        // models potents amb 1M de context. Lloc fixe per si l'usuari hi vol
-        // enganxar el seu token gratuït; també serveix de teacher de la IA
-        // nativa quan no hi ha model local. No queda configurat fins al token.
+        // MINIMAX (gratuït): API compatible amb OpenAI (api.minimax.io/v1).
+        // Sèrie M3: pesos oberts, context d'1M i entrada multimodal (text,
+        // imatge i vídeo). Lloc fixe per si l'usuari hi vol enganxar el seu
+        // token gratuït; també serveix de teacher de la IA nativa quan no hi
+        // ha model local. No queda configurat fins al token.
         if !providers.iter().any(|p| p.id == "minimax") {
             providers.push(AiProvider {
                 id: "minimax".into(),
                 name: "MiniMax (gratuït)".into(),
                 base_url: "https://api.minimax.io/v1".into(),
-                model: "MiniMax-M3.1-Flash".into(),
+                // La M3 és la insígnia (context d'1M); la M3.1-Flash és la
+                // variant més lleugera i barata, al mateix servei.
+                model: "MiniMax-M3".into(),
                 kind: "openai".into(),
                 auth: AuthScheme::Bearer,
                 header_name: String::new(),
@@ -628,6 +675,11 @@ impl ApiManager {
                 p.kind = "anthropic".into();
                 p.auth = AuthScheme::ApiKeyHeader;
                 p.header_name = "x-api-key".into();
+                migrated = true;
+            }
+            // MiniMax sense URL no serveix de res: el servei el posa.
+            if p.id == "minimax" && p.base_url.trim().is_empty() {
+                p.base_url = "https://api.minimax.io/v1".into();
                 migrated = true;
             }
             let tk = p.token.trim().to_string();
@@ -1057,7 +1109,16 @@ fn build_request(
         // adequat al model (DeepSeek tallava a ~4K per defecte; la resta té
         // sostres propis). La sèrie «o»/gpt-5 el rebutja: no se'ls posa.
         if quick {
-            body["max_tokens"] = serde_json::json!(QUICK_MAX_TOKENS);
+            // MiniMax pensa per defecte i els seus tokens de pensament
+            // compten dins del sostre: amb els 1.024 del mode curt el text
+            // sortia buit. I en un autocompletat el pensament ha de ser CURT
+            // («low»), no el «max» que és el default del servei.
+            if is_minimax_model(&provider.model) {
+                body["max_tokens"] = serde_json::json!(8_192);
+                body["reasoning_effort"] = serde_json::json!("low");
+            } else {
+                body["max_tokens"] = serde_json::json!(QUICK_MAX_TOKENS);
+            }
         } else if let Some(mt) = openai_output_tokens(&provider.model) {
             body["max_tokens"] = serde_json::json!(mt);
         }

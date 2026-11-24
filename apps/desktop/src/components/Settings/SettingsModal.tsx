@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { X, Globe, Info, SlidersHorizontal, Plug, RefreshCw, Download, HardDrive, Volume2 } from "lucide-react";
+import { X, Globe, Info, SlidersHorizontal, Plug, RefreshCw, Download, HardDrive, Volume2, Network } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { useT } from "../../i18n";
@@ -12,10 +12,15 @@ import { useEscapeToClose } from "../../utils/useEscapeToClose";
 import LanguagePanel from "../Language/LanguagePanel";
 import IntegrationsPanel from "./IntegrationsPanel";
 import PortablePanel from "./PortablePanel";
+import GridPanel from "./GridPanel";
 
-type Tab = "general" | "integracions" | "language" | "about" | "usb";
+type Tab = "general" | "integracions" | "language" | "xarxa" | "about" | "usb";
 
 const DELAYS = [500, 1000, 2000, 5000];
+
+/// Minuts d'inactivitat per obrir sol l'estalvi de pantalla (1 per a la
+/// prova manual, 5 per defecte, fins a mitja hora per a qui el vol tard).
+const SAVER_MINUTES = [1, 3, 5, 10, 15, 30];
 
 /// Secció «Actualitzacions» del panell Informació: pregunta a GitHub si hi ha
 /// una versió nova publicada (releases del repo) i, si n'hi ha, oferix la
@@ -72,6 +77,10 @@ export default function SettingsModal() {
   const autoSaveDelay = useUIStore((s) => s.autoSaveDelay);
   const setAutoSave = useUIStore((s) => s.setAutoSave);
   const setAutoSaveDelay = useUIStore((s) => s.setAutoSaveDelay);
+  const saverAuto = useUIStore((s) => s.saverAuto);
+  const saverAutoMinutes = useUIStore((s) => s.saverAutoMinutes);
+  const setSaverAuto = useUIStore((s) => s.setSaverAuto);
+  const setSaverAutoMinutes = useUIStore((s) => s.setSaverAutoMinutes);
   const zoom = useUIStore((s) => s.zoom);
   const setZoom = useUIStore((s) => s.setZoom);
   const theme = useUIStore((s) => s.theme);
@@ -133,6 +142,12 @@ export default function SettingsModal() {
             <Globe size={14} /> {t("settings.language")}
           </button>
           <button
+            className={"pm-tab" + (tab === "xarxa" ? " active" : "")}
+            onClick={() => setTab("xarxa")}
+          >
+            <Network size={14} /> {t("settings.gridTab")}
+          </button>
+          <button
             className={"pm-tab" + (tab === "usb" ? " active" : "")}
             onClick={() => setTab("usb")}
           >
@@ -171,6 +186,37 @@ export default function SettingsModal() {
                   {DELAYS.map((d) => (
                     <option key={d} value={d}>
                       {d} ms
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Estalvi de pantalla automàtic: s'obre sol quan la Jam o la
+                  feina autopilotada corre i no es toca res (en lloc de
+                  l'estalvi del SO, que amagaria la feina). */}
+              <div className="setting-row">
+                <label className="setting-check">
+                  <input
+                    type="checkbox"
+                    checked={saverAuto}
+                    onChange={(e) => setSaverAuto(e.target.checked)}
+                  />
+                  {t("settings.saverAuto")}
+                </label>
+                <div className="lp-hint">{t("settings.saverAutoHint")}</div>
+              </div>
+
+              <div className="setting-row">
+                <span>{t("settings.saverMinutes")}</span>
+                <select
+                  className="setting-select"
+                  value={saverAutoMinutes}
+                  disabled={!saverAuto}
+                  onChange={(e) => setSaverAutoMinutes(Number(e.target.value))}
+                >
+                  {SAVER_MINUTES.map((m) => (
+                    <option key={m} value={m}>
+                      {m} min
                     </option>
                   ))}
                 </select>
@@ -277,6 +323,11 @@ export default function SettingsModal() {
           {tab === "usb" && <PortablePanel />}
 
           {tab === "integracions" && <IntegrationsPanel />}
+
+          {/* XARXA ALTRUISTA P2P: compartir els torns de la Jam i donar
+              inferència a projectes d'altri (estil SETI@home, sense servidor
+              central: invitacions directes per QUIC). */}
+          {tab === "xarxa" && <GridPanel />}
 
           {tab === "about" && (
             <div className="about-block">

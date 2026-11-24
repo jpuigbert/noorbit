@@ -6,7 +6,7 @@ origin: ECC
 
 # Godot 4 GDScript Patterns
 
-Idiomatic patterns for Godot 4.x projects written in GDScript. Verified against the Godot 4.7 documentation; most guidance applies to every 4.x release.
+Idiomatic patterns for Godot 4.x projects written in GDScript. The code blocks below were parsed with Godot 4.7.2 (`--headless --check-only`) and the prose follows the 4.7 documentation; anything that needs a newer engine says so where it is used.
 
 ## When to Activate
 
@@ -31,11 +31,11 @@ class_name Inventory
 extends RefCounted
 ## A bag of item counts. Pure data and rules: no Node, so tests can run headlessly.
 
-signal item_added(item_id: StringName, new_count: int)  ## typed signal parameters
+signal item_added(item_id: StringName, new_count: int)  # typed signal parameters
 
-const MAX_STACK: int = 99           ## typed constant
+const MAX_STACK: int = 99           # typed constant
 
-var _counts: Dictionary[StringName, int] = {}  ## typed Dictionary (Godot 4.4+)
+var _counts: Dictionary[StringName, int] = {}  # typed Dictionary (Godot 4.4+)
 
 
 ## Adds `amount` of an item and returns how many were actually added.
@@ -51,6 +51,7 @@ func add(item_id: StringName, amount: int) -> int:
 
 Rules of thumb:
 
+- A doc comment (`##`) must **immediately precede** a member, on its own line. A trailing `##` at the end of a code line does not document that line — it becomes the documentation of whatever comes next. Use `#` for end-of-line notes.
 - Annotate parameters and return types (`-> void` included).
 - Use `:=` when the type is obvious from the right-hand side, and an explicit type when it is not.
 - Use typed arrays (`Array[Enemy]`) and, on 4.4+, typed dictionaries.
@@ -68,7 +69,9 @@ Rules of thumb:
 | Constants, enum values | `CONSTANT_CASE` | `MAX_LIVES` |
 | Signals | past-tense `snake_case` | `health_changed` |
 
-Order inside a script (from the official style guide): `class_name`, `extends`, doc comment, signals, enums, constants, `@export` vars, public vars, private vars, `@onready` vars, then methods. Put built-in callbacks (`_init`, `_ready`, `_process`) before your own methods.
+Order inside a script (from the official style guide): `@tool`/`@icon`, `class_name`, `extends`, doc comment; then signals, enums, constants, static vars, `@export` vars, the remaining vars (public before private) and `@onready` vars. After the data: `_static_init()`, static methods, the built-in callbacks in engine order (`_init`, `_enter_tree`, `_ready`, `_process`, `_physics_process`), then your own methods, then inner classes.
+
+Indent with **tabs**. A file that uses only spaces parses, a file that uses only tabs parses, but a file that mixes the two does not: Godot 4.7 stops with `Parse Error: Used space character for indentation instead of tab as used before in the file.` Pick the editor default and keep it.
 
 ## Scene and Node Design
 
@@ -101,7 +104,16 @@ signal changed(current: int, maximum: int)
 
 @export var maximum: int = 10                  # tweakable per scene in the inspector
 
-var current: int = maximum
+# Deliberately not `= maximum`: exported values are applied after member
+# initializers run, so initialising here would store the script default (10)
+# instead of the value set in the scene (measured: 10 vs 5).
+# The price of `_ready` is that `current` is 0 until the node enters the tree:
+# add it to the tree before calling `damage()`.
+var current: int
+
+
+func _ready() -> void:
+	current = maximum                            # now `maximum` holds the scene's value
 
 
 func damage(amount: int) -> void:
@@ -143,10 +155,12 @@ extends Resource
 
 ## Damage per second, derived so it is never stored twice and cannot drift.
 func dps() -> float:
+	if cooldown_seconds <= 0.0:
+		return 0.0                               # a 0 cooldown is bad data, not a division by zero
 	return damage / cooldown_seconds
 ```
 
-- Share one `.tres` for read-only data. Call `duplicate()` before mutating it per instance, otherwise every user of that file changes together.
+- Share one `.tres` for read-only data. Call `duplicate()` before mutating it per instance, otherwise every user of that file changes together. `duplicate()` is shallow: pass `true` when the resource also holds nested resources you mean to change.
 - Use Resources for save data too, but never load a `.tres` or `.res` from an untrusted path: Resources can embed scripts. For user-provided saves use JSON or `ConfigFile`.
 
 ## Autoloads (Singletons)
@@ -184,7 +198,7 @@ func _physics_process(delta: float) -> void:
 - Scale by `delta` for anything you add per frame (`position += velocity * delta`) but not for `move_and_slide()`.
 - Define input as InputMap actions in Project Settings, never as hard-coded keys, so rebinding and gamepads work.
 - Use `await get_tree().create_timer(1.0).timeout` for short delays. Use a `Timer` node when you need to stop or restart it.
-- Turn off processing on idle nodes with `set_process(false)`.
+- Turn off processing on idle nodes with `set_process(false)`; `set_physics_process(false)` is a separate switch, so turning off one leaves the other running.
 
 ## Lifecycle Safety
 
@@ -216,6 +230,8 @@ if is_instance_valid(enemy):
 | Mutating a shared Resource | Changes every instance | `duplicate()` first |
 | Gameplay in autoloads | Leaks state across restarts | Scene-owned nodes, reset on load |
 | Hard-coded `KEY_*` checks | No rebinding or gamepad | InputMap actions |
+| Tabs and spaces in one file | The script does not parse at all | One indentation style per file (tabs) |
+| `var x: int = exported_var` | Captures the script default, not the scene's value | Assign it in `_ready` |
 
 ## Related
 

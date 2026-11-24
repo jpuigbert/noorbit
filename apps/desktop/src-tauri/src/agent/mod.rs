@@ -1650,17 +1650,25 @@ Scripting > Console):\n```python\n{}\n```",
         prompt: &str,
         config: &crate::unreal::commands::UnrealConfig,
     ) -> Result<(String, bool)> {
-        let system = "ETS L'AGENT DE NOORBIT per a UNREAL ENGINE 5. L'usuari et dona un \
-texte i t'explica què hi ha de fer (crear o moure actors, editar un text/títol, \n\
+        // El prompt porta els patrons de l'API REAL d'Editor Scripting: sense
+        // ells, els models locals escriuen `EditorLevelLibrary` o
+        // `EditorAssetLibrary` (deprecades des d'UE 5.0/5.1) que, executades
+        // pel pont Remote Control, NO fan res: l'usuari veu «✅ canvis
+        // aplicats» i l'escena no ha canviat.
+        let system = format!(
+            "ETS L'AGENT DE NOORBIT per a UNREAL ENGINE 5. L'usuari et dona un \
+texte i t'explica què hi ha de fer (crear o moure actors, editar un text/títol, \
 importar un FBX/GLB, il·luminar…). Respon NOMÉS amb un script Python per a Unreal Editor \
-(un bloc ```python) que comenci per `import unreal` i usi l'API actual d'Editor \
+(un sol bloc ```python) que comenci per `import unreal` i usi l'API actual d'Editor \
 Scripting: `unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)`, \
 `unreal.EditorActorSubsystem`, `unreal.EditorAssetSubsystem` (NO `EditorLevelLibrary` \
 ni `EditorAssetLibrary`, deprecades). Acaba sempre amb un `print()` amb el que has fet. \
 Sense explicacions ni prosa. Si una cosa NO es pot fer des de script, digues-ho en una \
-línia que comenci per «NOORBIT_IMPOSSIBLE: ».";
+línia que comenci per «NOORBIT_IMPOSSIBLE: ».\n\n{}",
+            crate::unreal::snippets::PATRONS_PYTHON
+        );
         progress(app, "ia", "La IA està escrivint l'script per a Unreal…", true);
-        let reply = ai.chat(prompt, Some(system)).await?;
+        let reply = ai.chat(prompt, Some(&system)).await?;
         let mut code = Self::extract_code(&reply);
         if let Err(e) = crate::unreal::guard_python(&code) {
             // Mateix tractament que Blender: si el model ha explicat en prosa
@@ -1673,7 +1681,7 @@ línia que comenci per «NOORBIT_IMPOSSIBLE: ».";
                 e,
                 prompt
             );
-            let reply2 = ai.chat(&retry, Some(system)).await?;
+            let reply2 = ai.chat(&retry, Some(&system)).await?;
             let code2 = Self::extract_code(&reply2);
             if let Err(e2) = crate::unreal::guard_python(&code2) {
                 progress(app, "unreal", "El 2n intent tampoc és codi Python", false);
@@ -1728,7 +1736,7 @@ línia que comenci per «NOORBIT_IMPOSSIBLE: ».";
                 "L'script anterior ha fallat a Unreal amb aquest error:\n{}\n\nTasca original:\n{}\n\nReescriu NOMÉS l'script corregit.",
                 errs, prompt
             );
-            let reply2 = ai.chat(&retry_prompt, Some(system)).await?;
+            let reply2 = ai.chat(&retry_prompt, Some(&system)).await?;
             let mut code2 = Self::extract_code(&reply2);
             if let Err(e) = crate::unreal::guard_python(&code2) {
                 progress(app, "unreal", "El 2n intent tampoc és codi Python", false);

@@ -9,9 +9,12 @@
 //! està disponible (p. ex. `caffeinate` esborrat), la Jam continua igualment.
 //!
 //! Mecanismes (tots del propi SO — cap dependència externa):
-//! - macOS: `caffeinate -i -s -w <pid>` — blocat d'idle; sobreviu a la
-//!   pantalla apagada i, quan el pare mor (encara que sigui per SIGKILL), el
-//!   `caffeinate` es tanca sol perquè vetlla el pid del pare.
+//! - macOS: `caffeinate -i -s -d -w <pid>` — blocat d'idle + pantalla encesa
+//!   (l'estalvi propi de NoOrbit es mostra mentre la Jam corre, i sense `-d`
+//!   el Mac apagaria el monitor al cap del temps triat a l'Estalvi de
+//!   pantalla); sobreviu a la pantalla apagada manual i, quan el pare mor
+//!   (encara que sigui per SIGKILL), el `caffeinate` es tanca sol perquè
+//!   vetlla el pid del pare.
 //! - Linux: `systemd-inhibit --what=idle:sleep --mode=block` (falla net si no
 //!   hi ha systemd: aleshores no fem res, com abans).
 //! - Windows: `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED |
@@ -83,7 +86,7 @@ fn macos(_who: &str) -> Result<(Option<std::sync::mpsc::Sender<()>>, Option<std:
     // `-w <pid>`: caffeinate mor quan mor AQUEST procés, encara que el matin
     // sense Don't-Ask (el guardian fa killpg al fill, no al pare).
     let child = std::process::Command::new("caffeinate")
-        .args(["-i", "-s", "-w", &me.to_string()])
+        .args(["-i", "-s", "-d", "-w", &me.to_string()])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

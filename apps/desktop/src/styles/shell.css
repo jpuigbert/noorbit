@@ -643,6 +643,30 @@ body.resizing iframe {
   margin: 3px 6px;
   background: var(--border);
 }
+/* Renombrament del símbol: el menú es converteix en un camp de text. */
+.ctx-rename {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  min-width: 220px;
+}
+.ctx-rename-input {
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-size: 12.5px;
+  padding: 6px 8px;
+  outline: none;
+}
+.ctx-rename-input:focus {
+  border-color: var(--accent);
+}
+.ctx-rename-hint {
+  font-size: 10.5px;
+  color: var(--text-2);
+}
 
 /* ---- Llista de referències LSP (⌥F12, Fase 3c) ---- */
 .refs-panel {

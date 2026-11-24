@@ -13,7 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Gamepad2, Rocket, Folder, Brain, Wrench } from "lucide-react";
+import { Gamepad2, Rocket, Folder, Brain, Wrench, Activity, HeartHandshake } from "lucide-react";
 import { useT } from "../i18n";
 import WorkProgress from "../components/WorkProgress";
 import { clockText } from "../components/AutonomousClock";
@@ -56,6 +56,22 @@ interface JamEvent {
   ok: boolean;
 }
 
+/// Unitat de la xarxa altruista que aquest ordinador està processant com a
+/// VOLUNTARI (torna dins de `grid_status.treball`).
+interface GridWork {
+  projecte: string;
+  label: string;
+  detail: string;
+}
+
+/// Esdeveniment de la xarxa altruista (`grid://event`).
+interface GridEvent {
+  kind: string;
+  detail: string;
+  projecte: string;
+  ok: boolean;
+}
+
 /// Estrelles del fons: generades una sola vegada (sempre les mateixes durant
 /// la vida de la finestra; un estalvi no ha de canviar de fons cada segon).
 const STARS = Array.from({ length: 70 }, (_, i) => ({
@@ -79,6 +95,35 @@ export default function ScreensaverApp() {
   // Feed viu de «què fa la IA» + pensament (només la Jam ho emet).
   const [feed, setFeed] = useState<{ kind: string; text: string }[]>([]);
   const feedRef = useRef<HTMLDivElement>(null);
+  // XARXA ALTRUISTA: unitat que aquest ordinador processa com a voluntari
+  // (es pinta amb la mateixa estètica de feina) i el darrer avís de còpia.
+  const [treball, setTreball] = useState<GridWork | null>(null);
+  const [copiMsg, setCopiMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    // PORTA TRIPLE: en obrir-se, l'estalvi avisa el backend que la porta
+    // del voluntari queda oberta (inactivitat + estalvi + res en marxa);
+    // en tancar-se, es torna a tancar.
+    void invoke("grid_note_saver", { obert: true }).catch(() => undefined);
+    void invoke<{ treball: GridWork | null }>("grid_status")
+      .then((s) => setTreball(s?.treball ?? null))
+      .catch(() => undefined);
+    const unGrid = listen<GridEvent>("grid://event", (e) => {
+      const ev = e.payload;
+      if (ev.kind === "copi") {
+        setCopiMsg(ev.detail || null);
+        return;
+      }
+      // «feina»/«fet»: l'estat de la unitat canvia — es torna a preguntar.
+      void invoke<{ treball: GridWork | null }>("grid_status")
+        .then((s) => setTreball(s?.treball ?? null))
+        .catch(() => undefined);
+    });
+    return () => {
+      void invoke("grid_note_saver", { obert: false }).catch(() => undefined);
+      void unGrid.then((u) => u());
+    };
+  }, []);
 
   useEffect(() => {
     void invoke<JamState>("jam_state").then(setJam).catch(() => undefined);
@@ -87,6 +132,20 @@ export default function ScreensaverApp() {
     const u2 = listen<WorkState>("project://work", (e) => setWork(e.payload));
     const u3 = listen<JamEvent>("jam://event", (e) => {
       const ev = e.payload;
+      // TEXT EN VIU: el que la IA està escrivint ara mateix. Ocupa sempre
+      // la ÚLTIMA línia del feed (es substitueix, no s'apila: el text pot
+      // ser llarg i el feed és el que l'usuari mira de lluny).
+      if (ev.kind === "stream") {
+        const text = ev.detail.slice(-700);
+        setFeed((prev) => {
+          const ult = prev[prev.length - 1];
+          if (ult && ult.kind === "stream") {
+            return [...prev.slice(0, -1), { kind: "stream", text }];
+          }
+          return [...prev.slice(-30), { kind: "stream", text }];
+        });
+        return;
+      }
       if (ev.kind !== "note" && ev.kind !== "thinking") return;
       // La feina de la Jam es reinicia entre tasques: buidem el feed
       // quan comenca una Jam nova (un «thinking» és el senyal de vida).
@@ -162,16 +221,32 @@ export default function ScreensaverApp() {
             <Gamepad2 size={13} />
           ) : workRunning ? (
             <Rocket size={13} />
+          ) : treball ? (
+            <HeartHandshake size={13} />
           ) : null}
           {jamRunning
             ? t("jam.title")
             : workRunning
               ? t("projectWork.title")
-              : t("screensaver.idle")}
+              : treball
+                ? t("screensaver.volunteer")
+                : t("screensaver.idle")}
         </span>
       </div>
 
-      {actiu ? (
+      {/* VISTA DEL VOLUNTARI: aquest ordinador està ajudant un projecte
+          d'altri (la porta triple s'ha obert: estalvi + inactivitat real +
+          cap generació local en curs). Mateixa estètica que la feina. */}
+      {treball ? (
+        <>
+          <div className="saver-title">{treball.projecte || t("screensaver.volunteer")}</div>
+          <div className="saver-clock">{t("screensaver.volunteerDoing")}</div>
+          <div className="saver-detail">{treball.label}</div>
+          <div className="saver-project" style={{ color: "var(--accent)" }}>
+            <HeartHandshake size={14} /> {treball.detail}
+          </div>
+        </>
+      ) : actiu ? (
         <>
           <div className="saver-title">{jamRunning ? jam?.title || t("jam.title") : t("projectWork.title")}</div>
           <div className="saver-clock">{clockText(elapsedMs)}</div>
@@ -206,6 +281,8 @@ export default function ScreensaverApp() {
                   <div key={i} className={"saver-feed-row " + f.kind}>
                     {f.kind === "thinking" ? (
                       <Brain size={12} />
+                    ) : f.kind === "stream" ? (
+                      <Activity size={12} />
                     ) : (
                       <Wrench size={12} />
                     )}
@@ -223,6 +300,14 @@ export default function ScreensaverApp() {
         </>
       ) : (
         <div className="saver-title idle">{t("screensaver.done")}</div>
+      )}
+
+      {/* AVÍS DE CÒPIA (Fase 4): el propietari ha concedit una còpia del
+          projecte acabat o la baixada avança. */}
+      {copiMsg && (
+        <div className="saver-project" style={{ color: "var(--accent)" }}>
+          <HeartHandshake size={14} /> {copiMsg}
+        </div>
       )}
 
       <div className="saver-hint">{t("screensaver.hint")}</div>

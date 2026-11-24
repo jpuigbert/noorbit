@@ -46,6 +46,14 @@ export interface LspDef {
   preview: string;
 }
 
+/// Resultat d'un renombrament aplicat (`lsp_rename`): quants fitxers s'han
+/// tocat i quines rutes (relatives a l'arrel) perquè la UI els rellegesqui.
+export interface LspRenameResp {
+  files: number;
+  edits: number;
+  paths: string[];
+}
+
 export interface LspDiag {
   line: number;
   col: number;
@@ -121,6 +129,29 @@ export async function lspDefinition(
       ),
       PROVIDER_TIMEOUT_MS,
       null as LspDef | null
+    );
+  } catch {
+    return null;
+  }
+}
+
+/// Renombrament del símbol sota el cursor (`lsp_rename`): el backend demana
+/// les edicions al servidor i les aplica al disc. Null = sense servidor,
+/// sense resposta o res a canviar: mai un error cap a l'editor.
+export async function lspRename(
+  projectPath: string,
+  path: string,
+  line: number,
+  col: number,
+  newName: string
+): Promise<LspRenameResp | null> {
+  try {
+    return await withTimeout(
+      invoke<LspRenameResp | null>("lsp_rename", { projectPath, path, line, col, newName }).then(
+        (d) => d ?? null
+      ),
+      PROVIDER_TIMEOUT_MS,
+      null as LspRenameResp | null
     );
   } catch {
     return null;

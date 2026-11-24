@@ -19,6 +19,10 @@ pub const BLENDER_BRIDGE_PORT: u16 = 9876;
 /// Port del servidor HTTP de Remote Control d'Unreal.
 pub const UNREAL_RC_PORT: u16 = 30010;
 
+/// Port QUIC de la xarxa altruista P2P (grid): el propietari hi escolta i
+/// els voluntaris s'hi connecten directament amb la invitació.
+pub const GRID_PORT: u16 = 38441;
+
 /// Port del servidor WebSocket de Remote Control d'Unreal.
 pub const UNREAL_RC_WS_PORT: u16 = 30020;
 

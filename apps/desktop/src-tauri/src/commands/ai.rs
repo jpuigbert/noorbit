@@ -1120,6 +1120,48 @@ pub async fn ai_free_ram(state: State<'_, AppState>) -> Result<RamFreed, String>
     })
 }
 
+/// MEMÒRIA que està usant la IA LOCAL ara mateix.
+///
+/// L'usuari ha de poder veure quanta RAM es consumeix de veritat: el pes del
+/// model que està carregat a memòria (Ollama), els motors locals (llama.cpp)
+/// i el consum TOTAL del sistema. Sense aquestes dades el panell només
+/// mostrava el nom de la IA i l'usuari no podia saber si el model es menjava
+/// 2 GB o 16 GB.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalMemory {
+    /// RAM total del sistema (bytes).
+    pub total: u64,
+    /// RAM usada pel sistema ara mateix (bytes).
+    pub used: u64,
+    /// Models d'Ollama que són a la memòria ara mateix.
+    pub models: Vec<crate::ai::LoadedModel>,
+    /// Pes total dels models carregats (bytes).
+    pub model_bytes: u64,
+    /// Motors locals (llama.cpp) en marxa.
+    pub engines: usize,
+    /// L'IA activa és local (Ollama)?
+    pub local: bool,
+}
+
+#[command]
+pub async fn ai_local_memory(state: State<'_, AppState>) -> Result<LocalMemory, String> {
+    let mem = crate::commands::system::system_memory_status().await?;
+    // Si Ollama no respon, la llista és buida: el panell ho mostra com a
+    // «cap model carregat» en lloc de fallar (la memòria del sistema encara
+    // es pot ensenyar).
+    let models = state.ai_manager.loaded_models().await.unwrap_or_default();
+    let model_bytes = models.iter().map(|m| m.size).sum();
+    Ok(LocalMemory {
+        total: mem.total,
+        used: mem.used,
+        models,
+        model_bytes,
+        engines: crate::ai::llamacpp::servers().len(),
+        local: state.ai_manager.active_provider().await == "ollama",
+    })
+}
+
 /// Quant de temps Ollama manté els models a la memòria (buit = «1m» recomanat).
 #[command]
 pub async fn ollama_get_keep_alive(state: State<'_, AppState>) -> Result<String, String> {

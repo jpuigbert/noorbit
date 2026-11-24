@@ -17,6 +17,7 @@
 
 pub mod agent;
 pub mod commands;
+pub mod game;
 #[cfg(test)]
 mod agent_tests;
 #[cfg(test)]
@@ -185,12 +186,25 @@ impl LlmClient for NoOrbitLlm {
         // `provider`/`model`: la IA triada per l'usuari al panell de la Jam.
         // Sense això la Jam parlava sempre amb el proveïdor actiu de l'app i
         // l'usuari no podia triar amb qui treballava el seu joc.
+        //
+        // «grid» = la xarxa altruista P2P: el torn surt a la cua del
+        // servidor i, si cap voluntari el respon abans de la data límit, cau
+        // a la IA local (fallback transparent).
+        let provider = match &self.provider {
+            Some(p) => p.clone(),
+            None => self.ai.active_provider().await,
+        };
+        if provider == "grid" {
+            if let Some(text) = crate::grid::submet_unitat(prompt, None, self.model.as_deref()).await {
+                return Ok(text);
+            }
+        }
         self.ai
             .chat_opts(
                 prompt,
                 None,
                 &ChatOpts {
-                    provider: self.provider.clone(),
+                    provider: if provider == "grid" { None } else { self.provider.clone() },
                     model: self.model.clone(),
                     long_run: true,
                     ..Default::default()
@@ -199,16 +213,85 @@ impl LlmClient for NoOrbitLlm {
             .await
             .map_err(|e| e.to_string())
     }
+
+    /// Generació amb FRAGMENTS: el motor LOCAL (Ollama) fa streaming de
+    /// veritat, de manera que la Jam pot ensenyar el text de la IA EN VIU
+    /// (paraula a paraula) en lloc d'esperar el text sencer al final. Els
+    /// proveïdors remots cauen al camí normal: el text arriba sencer quan
+    /// acaba, com sempre.
+    async fn complete_streaming(
+        &self,
+        prompt: &str,
+        on_chunk: &(dyn for<'a> Fn(&'a str) + Send + Sync),
+    ) -> Result<String, String> {
+        let provider = match &self.provider {
+            Some(p) => p.clone(),
+            None => self.ai.active_provider().await,
+        };
+        if provider == "ollama" {
+            match self
+                .ai
+                .ollama_complete_stream(prompt, None, self.model.as_deref(), on_chunk)
+                .await
+            {
+                Ok(t) if !t.trim().is_empty() => return Ok(t),
+                Ok(_) => {}
+                Err(e) => {
+                    // El streaming local pot fallar (Ollama aturat, model
+                    // absent, error de xarxa): es torna al camí normal, que té
+                    // reintents i caiguda a la IA en línia o a la integrada.
+                    eprintln!("noorbit --jam-agent: el streaming local no ha anat: {e}");
+                }
+            }
+        }
+        let s = self.complete(prompt).await?;
+        on_chunk(&s);
+        Ok(s)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  WORKER: demana codi i materialitza els fitxers
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Longitud màxima del brief que s'injecta al prompt del worker.
+///
+/// El brief original pot ser llarg (l'usuari hi posa totes les explicacions),
+/// i el model només en llegeix una part: es retalla pel FINAL (que és on hi ha
+/// els requisits) però es conserva l'inici, que és el que diu què és el joc.
+const MAX_BRIEF_CHARS: usize = 6000;
+
+/// Retalla un text a `max` caràcters, per la FI, sense trencar paraules.
+fn retalla(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let cut: String = text.chars().take(max).collect();
+    let fi = cut
+        .rfind(|c: char| c.is_whitespace())
+        .map(|i| i + 1)
+        .unwrap_or(cut.len());
+    format!("{}\n[… el brief continua, però ja n'has rebut prou …]", cut[..fi].trim_end())
+}
+
 /// Prompt del worker: es demana codi amb blocs `@file:` (el mateix format
 /// que usa el xat de NoOrbit), i el model ha de llistar els criteris que
 /// pot comprovar.
-fn worker_prompt(task: &Task, root: &Path, lessons: &str, quality: noorbit_jam::QualityLevel, engine_help: &str) -> String {
+///
+/// Rep el BRIEF ORIGINAL de l'usuari i el MOTOR triat a més de la tasca: sense
+/// el brief, la IA només veia un resum del pla i construïa «una altra cosa»
+/// (com més s'explicava el joc, més es perdia pel camí); sense el motor,
+/// escrivia en el llenguatge que li sembla i el resultat no era del motor
+/// triat.
+fn worker_prompt(
+    task: &Task,
+    root: &Path,
+    lessons: &str,
+    quality: noorbit_jam::QualityLevel,
+    engine_help: &str,
+    brief: &str,
+    motor: &str,
+) -> String {
     let acceptance = task
         .acceptance
         .iter()
@@ -227,8 +310,31 @@ fn worker_prompt(task: &Task, root: &Path, lessons: &str, quality: noorbit_jam::
         })
         .unwrap_or_default();
 
+    // L'objectiu (el brief original) va PRIMER: és el que mana, i la tasca
+    // només és una peça seva.
+    let objectiu = if brief.trim().is_empty() {
+        String::new()
+    } else {
+        format!(
+            "OBJECTIU DEL JOC (brief original de l'usuari; el pla de tasques només és un \
+             resum — el que mana és això):
+-----
+{}
+-----
+
+",
+            retalla(brief.trim(), MAX_BRIEF_CHARS)
+        )
+    };
+    let motor = if motor.trim().is_empty() {
+        String::new()
+    } else {
+        format!("{motor}\n\n")
+    };
+
     format!(
         "Ets un programador expert. Implementa aquesta tasca en el projecte obert.\n\n\
+         {objectiu}{motor}\
          TASCA: {title}\n\
          DESCRIPCIÓ: {description}\n\n\
          CRITERIS D'ACCEPTACIÓ (ha de complir):\n{acceptance}\n\n\
@@ -246,7 +352,17 @@ fn worker_prompt(task: &Task, root: &Path, lessons: &str, quality: noorbit_jam::
             correcte, NO emetis res d'ell (no cal tocar el que ja funciona).\n\
          5. Si la tasca no es pot fer, explica-ho en 3 línies i no escriguis fitxers.\n\
          6. Al final, escriu una línia «RESUM: …» amb què has fet.\n\
+         7. La tasca és una PEÇA del joc de l'OBJECTIU: el codi ha de servir \
+            AQUEST joc, no un de semblant ni un de genèric. Si el que escriu no \
+            es connecta amb l'objectiu, no ho escriuis: ho expliques al RESUM.\n\
+         8. El joc ha de ser JUGABLE: entrada del jugador, bucle de joc i \
+            condició de guanya o perdre. Si el projecte encara no en té, la \
+            teva tasca ha de deixar-los (un joc que no es pot jugar no serveix).\n\
+         9. Si el fitxer ja existeix al projecte, MODIFICA'l amb «@edit:» — \
+            tornar-lo a escriure amb «@file:» esborraria el que ja hi ha.\n\
          {lessons}",
+        objectiu = objectiu,
+        motor = motor,
         title = task.title,
         description = task.description,
         acceptance = acceptance,
@@ -273,6 +389,18 @@ pub struct NoOrbitWorker {
     /// corre al SUBPROCÉS, així que l'únic canal és el `ProgressSink` (que
     /// `StdoutProgress` tradueix a línies `JAM|`).
     progress: Option<Arc<dyn ProgressSink>>,
+    /// BRIEF ORIGINAL de l'usuari (el text que ha escrit).
+    ///
+    /// Sense això el worker només veia la TASCA (un resum del planificador) i
+    /// la IA construïa «una altra cosa»: com més s'explicava el joc, més
+    /// informació es perdia pel camí. Aquest text arriba sencer (retallat).
+    brief: Option<String>,
+    /// MOTOR triat per l'usuari al panell de la Jam.
+    ///
+    /// El worker detectava el motor pel DISCO, i en un projecte nou no hi ha
+    /// res a detectar: la IA escrivia en el llenguatge que li sembla. Aquí
+    /// el motor arriba DECIDIT per l'usuari.
+    engine: Option<Engine>,
 }
 
 impl NoOrbitWorker {
@@ -283,7 +411,25 @@ impl NoOrbitWorker {
             lessons: None,
             research: None,
             progress: None,
+            brief: None,
+            engine: None,
         }
+    }
+
+    /// Injecta el BRIEF ORIGINAL de l'usuari: és l'objectiu del joc i ha de
+    /// arribar a cada tasca (no només al pla).
+    pub fn with_brief(mut self, brief: impl Into<String>) -> Self {
+        let b = brief.into();
+        if !b.trim().is_empty() {
+            self.brief = Some(b);
+        }
+        self
+    }
+
+    /// Injecta el MOTOR triat per l'usuari (GDScript, Rust, C#…).
+    pub fn with_engine(mut self, engine: Engine) -> Self {
+        self.engine = Some(engine);
+        self
     }
 
     pub fn with_lessons(mut self, lessons: Arc<noorbit_lessons::LessonsStore>) -> Self {
@@ -308,6 +454,66 @@ impl NoOrbitWorker {
         if let Some(sink) = &self.progress {
             sink.on_progress(ev).await;
         }
+    }
+
+    /// Genera el codi i en Shows EN VIU el text que va sortint de la IA.
+    ///
+    /// Sense això el panell pot quedar MUT MINUTS sense dir res (un model
+    /// local trigui minuts a escriure un fitxer sencer) i l'usuari no sap si
+    /// la Jam s'ha penjat o si encara treballa. Cada ~1,5 s s'emet el text
+    /// nou com a `Progress::Streaming`: el registre el mostra sencer i la
+    /// línia d'activitat en dona compte.
+    async fn genera_en_viu(&self, prompt: &str, task_id: &str) -> Result<String, String> {
+        let Some(sink) = self.progress.clone() else {
+            return self.llm.complete_streaming(prompt, &|_| {}).await;
+        };
+        // El callback és SÍNCRON: no pot esperar. Acumula el text nou i avisa
+        // per un canal; una tasca fa el volcado a la UI (sense bloquejar la
+        // generació).
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let tx2 = tx.clone();
+        let on_chunk = move |chunk: &str| {
+            let _ = tx2.send(chunk.to_string());
+        };
+        let id = task_id.to_string();
+        let sink2 = sink.clone();
+        let emisor = tokio::spawn(async move {
+            // Text ACUMULAT de la crida: el que s'emét és sempre el text
+            // sencer fins ara, de manera que la UI pot mostrar-lo sencer (i
+            // el frontend el substitueix, no l'encadena).
+            let mut acumulat = String::new();
+            let mut ultim = std::time::Instant::now();
+            while let Some(chunk) = rx.recv().await {
+                acumulat.push_str(&chunk);
+                // Una línia nova cada ~1,5 s: prou per veure que s'escriu,
+                // prou poca per no inundar el registre.
+                if ultim.elapsed() >= std::time::Duration::from_millis(1500) {
+                    ultim = std::time::Instant::now();
+                    let txt = acumulat.clone();
+                    if !txt.trim().is_empty() {
+                        sink2.on_progress(Progress::Streaming {
+                            id: id.clone(),
+                            text: txt,
+                        })
+                        .await;
+                    }
+                }
+            }
+            // Remat: el text final de la crida.
+            let txt = acumulat.trim().to_string();
+            if !txt.is_empty() {
+                sink2.on_progress(Progress::Streaming {
+                    id: id.clone(),
+                    text: txt,
+                })
+                .await;
+            }
+        });
+        let res = self.llm.complete_streaming(prompt, &on_chunk).await;
+        // Es tanca el canal perquè la tasca del volcado acabi sola.
+        drop(tx);
+        let _ = emisor.await;
+        res
     }
 }
 
@@ -370,7 +576,11 @@ fn thinking_excerpt(response: &str) -> String {
 }
 
 /// Cada quant temps el fill avisa que continua treballant (en segons).
-pub const HEARTBEAT_SECS: u64 = 20;
+///
+/// Curt (10 s) a propòsit: amb la IA local hi ha text EN VIU, però amb la
+/// IA integrada o un proveïdor en línia l'única senyal és aquest cor
+/// batent; si és massa espaiat, l'usuari creu que la Jam s'ha penjat.
+pub const HEARTBEAT_SECS: u64 = 10;
 
 /// Avisa periòdicament que la IA continua treballant mentre espera.
 ///
@@ -433,7 +643,22 @@ impl Worker for NoOrbitWorker {
         } else {
             String::new()
         };
-        let prompt = worker_prompt(task, &self.root, &lessons, ctx.quality, &engine_help);
+        // El MOTOR triat per l'usuari (i el BRIEF original) van al prompt:
+        // són el que fa que la IA construeixi AQUEST joc i no un altre.
+        let motor = match self.engine {
+            Some(e) => crate::jam::game::engine_spec(e),
+            None => String::new(),
+        };
+        let brief = self.brief.clone().unwrap_or_default();
+        let prompt = worker_prompt(
+            task,
+            &self.root,
+            &lessons,
+            ctx.quality,
+            &engine_help,
+            &brief,
+            &motor,
+        );
         // AUTOPILOTATGE: la IA cerca informació fresca a internet (documentació,
         // APIs, solucions) abans d'escriure codi. Headless: mai obri finestres
         // ni demana res a l'usuari. Amb timeout perquè una cerca lenta no
@@ -467,7 +692,7 @@ impl Worker for NoOrbitWorker {
             self.progress.clone(),
             task.id.clone(),
             "la IA genera el codi",
-            self.llm.complete(&prompt),
+            self.genera_en_viu(&prompt, &task.id),
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -530,7 +755,7 @@ Si et calen més eines de motor, emet més directrius."
                     self.progress.clone(),
                     task.id.clone(),
                     "la IA continua amb les eines de motor",
-                    self.llm.complete(&follow),
+                    self.genera_en_viu(&follow, &task.id),
                 )
                 .await
                 {
@@ -715,36 +940,47 @@ impl NoOrbitVerifier {
             }
         }
         // Bevy / Rust: `cargo check` NOMÉS si hi ha un Cargo.toml al projecte.
+        // El «cargo» es resol amb la RUTA ABSOLUTA: l'app llançada des del
+        // Finder (a macOS) no té el PATH de la shell i un «cargo» a dit
+        // no es trobaria — el control de qualitat fallaria sense motiu.
         if self.root.join("Cargo.toml").is_file() {
-            let check = tokio::time::timeout(
-                Duration::from_secs(600),
-                tokio::process::Command::new("cargo")
-                    .arg("check")
-                    .arg("--quiet")
-                    .current_dir(&self.root)
-                    .stdin(std::process::Stdio::null())
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .kill_on_drop(true)
-                    .output(),
-            )
-            .await;
-            match check {
-                Ok(Ok(out)) if !out.status.success() => {
-                    return Err(format!(
-                        "cargo check fallà: {}",
-                        crate::agent::runtools::clip_head_tail(
-                            String::from_utf8_lossy(&out.stderr).trim(),
-                            400,
-                            1200,
-                        )
-                    ));
+            let cargo = crate::bevy::detect_cargo();
+            match cargo {
+                None => {
+                    nota_verificacio_omesa("Rust (cargo) no instal·lat".to_string());
                 }
-                Ok(Err(e)) => {
-                    nota_verificacio_omesa(format!("cargo no disponible ({e})"));
+                Some(cargo) => {
+                    let check = tokio::time::timeout(
+                        Duration::from_secs(600),
+                        tokio::process::Command::new(&cargo)
+                            .arg("check")
+                            .arg("--quiet")
+                            .current_dir(&self.root)
+                            .stdin(std::process::Stdio::null())
+                            .stdout(std::process::Stdio::piped())
+                            .stderr(std::process::Stdio::piped())
+                            .kill_on_drop(true)
+                            .output(),
+                    )
+                    .await;
+                    match check {
+                        Ok(Ok(out)) if !out.status.success() => {
+                            return Err(format!(
+                                "cargo check fallà: {}",
+                                crate::agent::runtools::clip_head_tail(
+                                    String::from_utf8_lossy(&out.stderr).trim(),
+                                    400,
+                                    1200,
+                                )
+                            ));
+                        }
+                        Ok(Err(e)) => {
+                            nota_verificacio_omesa(format!("cargo no disponible ({e})"));
+                        }
+                        Err(_) => return Err("cargo check: temps exhaurit (10 min)".into()),
+                        _ => {}
+                    }
                 }
-                Err(_) => return Err("cargo check: temps exhaurit (10 min)".into()),
-                _ => {}
             }
         }
         // Godot: check headless dels .gd tocats NOMÉS si el binari es detecta

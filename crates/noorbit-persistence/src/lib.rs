@@ -34,9 +34,9 @@ impl From<PersistedQuality> for QualityLevel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PersistedStats { pub completed: u32, pub blocked: u32, pub skipped: u32, pub total_attempts: u32, pub duration_ms: u64 }
-impl From<&JamStats> for PersistedStats { fn from(s: &JamStats) -> Self { Self { completed: s.completed, blocked: s.blocked, skipped: s.skipped, total_attempts: s.total_attempts, duration_ms: s.duration_ms } } }
-impl From<PersistedStats> for JamStats { fn from(s: PersistedStats) -> Self { Self { completed: s.completed, blocked: s.blocked, skipped: s.skipped, total_attempts: s.total_attempts, duration_ms: s.duration_ms } } }
+pub struct PersistedStats { pub completed: u32, pub blocked: u32, pub skipped: u32, pub total_attempts: u32, pub duration_ms: u64, #[serde(default)] pub without_checkpoint: u32 }
+impl From<&JamStats> for PersistedStats { fn from(s: &JamStats) -> Self { Self { completed: s.completed, blocked: s.blocked, skipped: s.skipped, total_attempts: s.total_attempts, duration_ms: s.duration_ms, without_checkpoint: s.without_checkpoint } } }
+impl From<PersistedStats> for JamStats { fn from(s: PersistedStats) -> Self { Self { completed: s.completed, blocked: s.blocked, skipped: s.skipped, total_attempts: s.total_attempts, duration_ms: s.duration_ms, without_checkpoint: s.without_checkpoint } } }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistedPlan { pub title: String, pub duration_secs: u64, pub task_count: usize, pub task_ids: Vec<String>, pub budget_secs: [u64; 4] }

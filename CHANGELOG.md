@@ -3,7 +3,203 @@
 Totes les releases amb els seus binaris: <https://github.com/jpuigbert/noorbit/releases>.
 Les notes completes de cada release són a la pàgina del release corresponent.
 
+## 0.71.19-alpha (en curs)
+
+**La Jam construïa «una altra cosa»: el brief original no arribava a la IA**
+
+«Li dic que faci un joc i no fa un joc» — i com més s'explicava el joc, pitjor:
+sortia un projecte diferent del demanat o, pitjor encara, un grapat de fitxers
+soltos sense res a obrir ni a executar. El problema no era la IA: eren tres
+forats del NoOrbit, tots el mateix efecte.
+
+- *el brief original no arribava al worker* (`jam/mod.rs`): el prompt de cada
+  tasca només portava la TASCA — un resum del planificador. Tota l'explicació
+  del joc que havia escrit l'usuari es quedava al planner i es perdia pel camí,
+  i la IA construïa el que se li demanava a la tasca, no el joc demanat. Ara el
+  brief i el motor arriben al prompt de cada tasca, amb l'objectiu marcat com a
+  tal («OBJECTIU DEL JOC») i amb la regla de no escriure res que no connecti amb
+  aquest objectiu.
+- *el motor triat no arribava al worker* (`jam/game.rs`): el worker detectava el
+  motor PEL DISCO (`.uproject`, `project.godot`, `Cargo.toml`) i en un projecte
+  nou no hi ha res a detectar: la IA escrivia en el llenguatge que li sembla
+  (GDScript? Rust? C#?). El motor que tria l'usuari arriba ara decidit, amb els
+  fitxers que ja existeixen al projecte i els que no s'han de tocar.
+- *no es creava el projecte de joc* (`jam/game.rs`, `jam/commands.rs`): la Jam
+  escrivia fitxers solts dins el workspace obert. Ara, si el workspace no és un
+  projecte del motor triat, el joc es crea a `prototypes/<nom>/` amb l'estructura
+  executable (Godot: `project.godot` + `main.tscn` + `main.gd`; Bevy:
+  `Cargo.toml` + `src/main.rs`; Unity: `Assets/`), i la Jam hi treballa amb el
+  seu PROPI repo git: amb el repo del pare, el `git add -A` i el `git clean -fd`
+  del checkpointer tocaven el projecte de l'usuari sencer.
+- *el pla demanava «un joc»* (`noorbit-planner`): el prompt del planner insisteix
+  que les tasques cobreixin el brief sencer (ni una mecànica inventada, ni una
+  de callada) i que la PRIMERA tasca deixi el projecte en un estat executable:
+  entrada del jugador, bucle de joc i condició de guanya o perdre.
+- *proves*: sis tests de regressió nous (el worker dona el brief i el motor a la
+  IA; sense brief no n'inventa cap; el nom de la carpeta del joc; l'estructura de
+  Godot i de Bevy; la carpeta del joc té repo propi) i un al planner (el prompt
+  demana fidelitat al brief i un joc jugable); `cargo test` de l'app (427) i dels
+  crates en verd.
+
+**En un disc extern la Jam no acabava mai: el git no arribava a temps i la feina es perdia**
+
+Treballar en un projecte de `/Volumes/...` (un disc exFAT sobre USB) donava sempre el mateix error cru:
+«No s'ha pogut llegir /Volumes/Toshi/programes/forestin the sky/REPORT.md: No such file or directory
+(os error 2)». El REPORT.md no era el problema: era la **consequència**.
+
+- *el diagnòstic*: el volum és patològicament lent (un `stat` trigava 0,1-0,3 s i un `git status
+  --porcelain` trigava 34,7 s). El timeout del checkpointer eren 30 s FIXES: tots els `add -A`,
+  `status` i `commit` de la Jam es quedaven penjats i fallaven. Cada tasca acabava amb error i el
+  `reset_hard` de rollback **esborrava el que l'agent acabava de fer**; la Jam cremava el pressupost
+  en reintents que fracassaven igual i no arribava mai a escriure l'informe. El xat patia el mateix
+  problema: el snapshot «shadow git» capturava l'arbre sencer (`add -A`) sense cap sostre de temps i
+  cada torn de xat es quedava penjat.
+- *el timeout adaptatiu* (`noorbit-git`): el timeout següent és `max(30 s, 3 × el que va trigar
+  l'ordre anterior)`, amb un sostre de 10 min. En un disc ràpid no canvia res; en un disc extern
+  creix sol, sense que l'usuari hagi de configurar res.
+- *la feina ja no es perd* (`noorbit-jam`): si el commit falla, la Jam **no fa rollback**: els
+  fitxers es queden a terra, la tasca es compta com a feta, es desactiva el checkpoint per al resta
+  de l'execució i la Jam continua escrivint. «No hi ha canvis a commitar» (un error de la tasca, no
+  del git) sí que es reintenta com abans. L'informe acaba amb un avís de quantes tasques s'han
+  fet sense commit.
+- *el xat no es queda penjat* (`agent/snapshot.rs`): les operacions del shadow git tenen un sostre
+  de 120 s; passat el sostre, el snapshot es dona per perdut i l'escriptura continua (el snapshot
+  és una xarxa de seguretat, no un requisit).
+- *el missatge és honest* (`jam_read_report`, `commands/fs.rs`): el panell de la Jam llegeix
+  l'informe a través d'un comandament nou que explica què està passant de veritat (Jam fallida,
+  encara en marxa, volum lent) en lloc de l'error cru de Rust. I `read_file` tradueix l'error d'E/S
+  al català («el fitxer no existeix» en lloc de «No such file or directory (os error 2)»).
+- *sempre hi ha un informe* (`jam/commands.rs`): si el fill de la Jam mor sense deixar-ne cap, el
+  pare escriu un REPORT.md mínim que explica per què. I si l'informe del bucle falla, es reporta en
+  lloc d'escapar-se en silenci.
+- *higiene d'exFAT* (`workspace.rs`, `agent/snapshot.rs`, `jam/commands.rs`): els sidecars
+  AppleDouble (`._*`) que macOS crea en discs exFAT/FAT s'exclouen del `.gitignore` per defecte, del
+  `info/exclude` del shadow i de l'exclusió de la Jam: no tenen cap valor i en un volum extern
+  multiplicaven el nombre de fitxers que git havia d'indexar a cada torn.
+- *proves*: dos tests de regressió nous a `noorbit-jam` (el commit que falla no esborra la feina i
+  la Jam continua; «no hi ha canvis a commitar» es reintenta) i dos a `noorbit-git` (el timeout
+  s'adapta al volum i el timeout configurat és el mínim); `cargo test` dels crates, `cargo check
+  --all-targets` del backend, `tsc --noEmit`, ESLint i Vitest (359) en verd.
+
+**El menú de l'editor en català, la pantalla de feina que s'obre sola i la xarxa altruista P2P**
+
+Tres peces que feien falta per treballar hores sense por: el menú del botó dret de l'editor ara és
+en català; quan la Jam treballa i no es toca res, en lloc d'apagar-se la pantalla s'obre l'estalvi
+propi de NoOrbit; i qui vulgui pot donar inferència de la seva IA a projectes d'altri — i rebre'n —
+sense cap servidor central.
+
+- *el menú contextual en català* (`Editor/EditorPane.tsx` + nou `Editor/EditorContextMenu.tsx`):
+  Monaco 0.52 no porta localització catalana i el seu mecanisme intern no és estable per injectar-ne
+  una de parcial, així que el menú natiu es desactiva i se'n munta un de propi amb el patró que ja
+  fa servir l'app: Desfés, Refés, Retalla, Copia, Enganxa, Selecciona-ho tot, Cerca, Substitueix,
+  Vés a la definició, Reanomena el símbol, Formata el document i «Edita la selecció amb la IA».
+- *la pantalla de feina s'obre sola* (nou `screensaver/autoSaver.ts`): quan la Jam o el treball
+  autopilotat corre i la inactivitat supera el límit (5 minuts per defecte, configurable als
+  Ajustos), s'obre l'estalvi de NoOrbit en lloc de parar-se l'ordinador: es veu de lluny què fa la
+  IA i en quin projecte, i un clic o qualsevol tecla torna a la feina. I `keep_awake` afegeix `-d`
+  al `caffeinate` de macOS perquè la pantalla no s'apagui mentre la Jam corre i l'estalvi es mostra.
+- *la xarxa altruista P2P* (mòdul nou `src-tauri/src/grid/` + secció «Xarxa altruista» als Ajustos):
+  sense servidor central — el propietari del projecte escolta amb QUIC (certificat autofirmat
+  generat un cop i desat a l'appdata) i els voluntaris s'hi connecten amb una invitació
+  (`noorbit-grid://…`). El voluntari només aporta INFERÈNCIA: respon els torns de pensament de la
+  Jam amb el seu model local (mai executa codi), i només quan passa la porta triple — inactivitat
+  real, estalvi obert i cap generació local en curs —. Si cap voluntari respon abans de la data
+  límit, la IA local del propietari respon el torn: res no es perd.
+- *la distribució estil torrent* (`grid/` + botó «Distribueix als participants» al panell de la
+  Jam): quan la Jam acaba, el desenvolupador principal pot — explícitament, mai automàtic — oferir
+  una còpia del projecte acabat als voluntaris que hi han donat almenys un torn. El projecte es
+  parteix en peces de 256 KB amb hashes SHA-256 (mateixes exclusions que els snapshots), es
+  descarrega amb represa per bitfield si l'estalvi es tanca i es torna a obrir, es verifica peça a
+  peça i es munta a la carpeta triada; cada còpia queda verificada pel manifest.
+- *fora d'abast (MVP honest)*: el P2P funciona en xarxa local o amb el port del propietari obert
+  (el voluntari inicia la connexió, així que només el propietari ha de ser accessible): sense
+  NAT traversal ni descobriment, sense reputació, sense tasques de CPU ni execució de codi remot.
+- *proves*: `cargo check --all-targets` i `cargo test --lib` del backend (416 tests: protocol,
+  codis d'invitació, caducitat de la cua, manifest i peces amb verificació SHA-256 i represa,
+  edicions de renombrament LSP),
+  `cargo check --workspace` dels crates, `tsc --noEmit`, ESLint i Vitest (360) en verd.
+
 ## 0.71.18-alpha (2026-11-23)
+
+**Godot es moria sol al Mac: era la «translocació» de macOS, no el projecte**
+
+Godot 4 es va instal·lar, es va obrir i, al cap d'una hora, va petar amb `EXC_BAD_ACCESS
+(SIGBUS)`. No era un error del projecte ni de la GPU: era macOS.
+
+- *el diagnòstic* (`godot/mod.rs`): l'informe de fallada deia, al final, «backing vnode was force
+  unmounted», i el procés que havia petat corria des de `/private/var/folders/…/Godot.app/…`, no
+  des de `/Applications`. Això és la **translocació**: una app baixada del navegador (amb la marca
+  `com.apple.quarantine`) no s'executa on és, sinó des d'una còpia temporal de només lectura. Quan
+  macOS desmunta aquella còpia —cosa que fa quan el sistema netja la carpeta temporal— el procés
+  que hi ha corrent es queda sense les pàgines de codi i mor amb SIGBUS. En aquest cas el motor
+  s'havia baixat amb l'Opera, que és el que posa la marca.
+- *el problema real*: NoOrbit deia «Godot no està instal·lat» tot i que el motor era obert al
+  costat de la finestra, perquè la detecció només mirava `/Applications`, Homebrew i el `PATH`.
+- *detecció de debò* (`detect_install`, `apps_in`, `app_binary`): es busquen les apps `Godot*.app`
+  de `/Applications`, `~/Applications` i `/Applications/Godot`, el ZIP descomprimit de les
+  Descàrregues i, finalment, la **translocació** (el lloc on macOS executa de debò l'app baixada).
+  L'ordre és a propòsit: la instal·lació estable sempre guanya a la còpia temporal, perquè les dues
+  últimes es poden desmuntar sota els peus del motor.
+- *s'ha de poder arreglar* (`is_quarantined`, `remove_quarantine`, `godot_fix_quarantine`): la interfície
+  detecta la marca de quarantina i ofereix un botó **«Arregla»** que la treu, de manera que macOS
+  deixi de transplantar l'app. Un clic i el motor ja s'executa des de la seva ruta real.
+- *l'estat de la instal·lació* (`GodotStatus`): ara diu on és el motor, si viu en un lloc volàtil
+  (temporal o Descàrregues) i si té la marca de quarantina, en lloc de dir només «instal·lat».
+- *proves*: tests Rust nous de la detecció (rutes temporals = volàtils, app instal·lada = estable,
+  binari dins de l'app, només es filtren les `Godot*.app`); `cargo test --lib` (399), `tsc --noEmit`,
+  ESLint i Vitest (359) en verd.
+
+**Godot: el projecte es crea sol. I la plantilla de Bevy, de fet, compilava?**
+
+Treballar en Godot quan el projecte encara no existia era un carreró sense sortida: NoOrbit
+deia «no hi ha cap projecte de Godot (project.godot) dins el projecte» i deixava a l'usuari
+la feina de muntar l'escena a mà. Ara el projecte **neix sol**, i el mateix passa amb Bevy.
+
+- *el projecte de Godot es crea automàticament* (`godot/setup.rs`, `ensure_project`): quan
+  l'usuari demana treballar en Godot i no hi ha cap `project.godot`, NoOrbit crea el
+  `project.godot`, el `main.tscn` i el `main.gd`, i afegeix `.godot/` al `.gitignore`.
+  L'error ja no apareix: el que hi ha abans és un projecte **que s'obre**.
+- *una sola font de veritat* (`godot/setup.rs` + `ai/codegen.rs`): les constants
+  `GODOT_PROJECT_GODOT`, `GODOT_MAIN_TSCN` i `GODOT_MAIN_GD` són les que fa servir també la IA
+  nativa, de manera que un projecte creat automàticament i un projecte generat per l'IA són
+  **idèntics** i no pod divergir mai. El `project.godot` nou va amb `config_version=5`,
+  `run/main_scene="res://main.tscn"` i el renderer «Compatibility» (OpenGL 3.3), que és el
+  que funciona amb la GPU integrada dels Mac Intel.
+- *tres punts d'entrada, el mateix comportament* (`engine_open.rs`, `engine_tools.rs`,
+  `engine_bridge.rs`): «Obre al motor», les directrius `@godot:` i `@bevy:` i el pont d'actius
+  `@import:`. Tots tres busquen el projecte i, si no hi ha, el creen abans de continuar.
+- *mai no es pisa res* (`godot/setup.rs`, `bevy/mod.rs`, `fsutil.rs`): la creació és
+  **idempotent** (crear dues vegades no fa res), un `project.godot` existent no s'overescriu,
+  i si a la carpeta ja hi ha `main.tscn`/`main.gd` (o un `Cargo.toml` que no és de Bevy) el
+  projecte nou va a una **subcarpeta** en lloc d'esborrar el treball de l'usuari. El
+  `.gitignore` s'hi **afegeix**, mai no se substitueix.
+- *la detecció continua sent innocent*: `EngineContext::detect()` no crea res (només mira el
+  disc); la creació només passa per les rutes d'acció, que és on l'usuari ha demanat un motor.
+- *la plantilla de Bevy NO compilava* (`bevy/setup.rs`): el `src/main.rs` que es generava feia
+  servir `Assets<Material>` —a la 0.14 `Material` és un *trait*, no el tipus de l'actiu— i
+  `Cube`, que a la 0.14 no existeix. El projecte que creava NoOrbit no es podia compilar.
+  Ara la plantilla és l'exemple oficial `3d_scene` de Bevy 0.14: `Assets<Mesh>`,
+  `Assets<StandardMaterial>`, `Cuboid::new(1.0, 1.0, 1.0)` i `Color::srgb(…)`. **Verificat
+  compilant de debò** el projecte generat (`cargo check`: 0 errors).
+- *proves*: tests Rust nous de l'auto-creació (projecte de Godot creat i detectat, coherència
+  entre manifest i escena, idempotència, `.gitignore` de l'usuari respectat, projecte Bevy
+  garantit, `Cargo.toml` alien no pisat) i un test que **vigila l'API de Bevy 0.14** perquè
+  la plantilla no torni a quedar obsoleta; `cargo test --lib` (395), `tsc --noEmit`, ESLint i
+  Vitest (359) en verd.
+
+**Bevy a macOS: es detecta de veritat, i l'assistent fa les preguntes (on instal·lar Rust i on treballar)**
+
+Treballar en Bevy al Mac era mig cremador: el `cargo` es cercava només pel `PATH` i
+per `~/.cargo`, el `Cargo.toml` es llegia a text lliure (així que `bevy_ecs` feia
+creure que un projecte era de Bevy) i, quan el Terminal no s'obria, el botó no donava
+cap error. Ara el flux és complet i verificable:
+
+- *detecció real del «cargo»* (`bevy/mod.rs`, `detect_cargo`): es proven la carpeta de l'entorn (`CARGO_HOME`), la que l'usuari ha triat a l'assistent, `~/.cargo/bin`, les rutes de Homebrew i, al final, el `PATH`. L'app llançada des del Finder (que no té el `PATH` de la shell) troba el `cargo` igual. La `Jam` ja no crida `cargo` a dit (`jam/mod.rs`): feia el control de qualitat fallar sense motiu en un Mac.
+- *el manifest es parseja, no es busca* (`manifest_has_bevy` / `manifest_bevy_version`): només compta la dependència `bevy` exacte, es detecten `[dependencies.bevy]`, `[dev-dependencies]` i `[target.'…'.dependencies]`, i `bevy_ecs`/`bevy_render` ja no fan false positius.
+- *errors que arriben a l'usuari* (`launch_project`): l'«osascript» s'espera i, si macOS denega el permís d'automatització, el motiu real torna a la interfície en català en lloc de deixar un botó que no fa res.
+- *assistent de Bevy* (`bevy/setup.rs` + `BevySetupModal.tsx`): l'instal·lador de Rust deixa de ser una pàgina de descàrrega i es converteix en **preguntes**: on viu el `cargo` (per defecte o en una carpeta triada, fins i tot en un disc extern) i on treballar el projecte (nom + carpeta). La instal·lació és l'oficial de rustup en un Terminal **transparent**, i la carpeta triada es desa a la configuració perquè la detecció la trobi sempre.
+- *projecte nou verificat* (`bevy_create_project`): es crea el `Cargo.toml`, el `src/main.rs` (API de Bevy 0.14) i el `.gitignore`, i tot seguit es **detecta** amb el mateix detector que fa servir l'IA: si no es reconeix, es crea igual però l'assistent ho diu.
+- *proves*: tests Rust nous de la detecció (`bevy_ecs` no compta, taules de dependències, versió llegida, el `cargo` detectat existeix al disc, noms de projecte vàlids) i de l'assistent (projecte creat i detectat, nom invàlid rebutjat, `Cargo.toml` sense `bevy` no detectat); `tsc --noEmit` i ESLint nets.
 
 **El motor llama.cpp dins del bundle universal: les dues arquitectures, i res en silenci**
 
@@ -19,6 +215,18 @@ ja publicat.
 - *què porta realment l'instal·lador, escrit al log* (`.github/workflows/release.yml`, pas `Verify bundled model + engine`): comprova el `.gguf` i cada slice del motor i ho converteix en anotació visible, perquè un `continue-on-error` no torni a amagar res.
 - *docs que no caduquen* (`README.md`, `INSTALL.md`): els noms d'instal·lador no porten una versió escrita a mà (el README deia 0.71.13 i l'INSTALL 0.71.6); ara `<VERSIÓ>`, globs o `releases/latest`.
 - *proves*: 3 tests Rust nous de la selecció per arquitectura (bundle amb les dues slices, slice absent, motor pla i bundle sense motor); verificat de punta a punta amb la descàrrega real dels dos binaris: la slice x64 arrenca (`Darwin x86_64`) i l'arm64 dona «bad CPU type» en aquest mateix Mac — per això escollir la bona no és un detall cosmètic. `cargo test --lib` (368), `cargo check --all-targets`, `tsc --noEmit`, ESLint, Vitest (359) i `vite build` en verd.
+
+**Els snippets d'Epic Games, a la IA local d'Unreal**
+
+La comunitat d'Epic Games publica els millors exemples d'Editor Scripting d'UE5, i eren justament el que li faltava a la IA local de NoOrbit: sense referència, els models locals escrivien `EditorLevelLibrary` i `EditorAssetLibrary`, deprecades des d'UE 5.0/5.1, que executades pel pont Remote Control **no fallen** — l'usuari veu «✅ canvis aplicats» i l'escena no ha canviat. Ara els patrons enters, amb les signatures reals, arriben al prompt per quatre vies.
+
+- *skill ECC* (`skills-builtin/unreal/SKILL.md`): 12 patrons numerats (subsistemes, actor amb malla, moure/girar/escalar, llums, text 3D, importació FBX/GLB/OBJ, Blueprint, material amb color, reixilla procedural, lightmaps, llistar i esborrar) amb les regles d'or i les fonts. La carpeta es diu `unreal` i no `unreal-engine` perquè `ai/ecc_native.rs::llista_skills` tokenitza el nom de la carpeta: amb «unreal» cal un sol token perquè la skill aparegui.
+- *catàleg de codi* (`ai/codegen.rs`): tres plantilles noves — «Il·luminació Unreal (Python)», «Importació d'assets Unreal (Python)» i «Escena Unreal (Python)» — que guanyen el patró genèric quan la petició és específica (el desempatge del catàleg resol cap al patró més específic i l'ordre del `vec!` el decideix). Cada títol té el seu braç a `default_per_titol` perquè el fitxer es digui `iluminacio_…`, `importa_…` i `escena_…` en lloc de `app`.
+- *prompt de l'agent* (`agent/mod.rs::apply_unreal`): el block `PATRONS_PYTHON` s'afegeix al final del missatge de sistema, de manera que el model veu les signatures exactes (`build_light_maps`, `import_assets_automated`, `unreal.Rotator`…) abans de decidir què escriure.
+- *mòdul nou* (`unreal/snippets.rs`): consulta l'API GraphQL de la comunitat d'Epic (8 s d'espera, agent de navegador i extracció tolerant del JSON) i, si no hi ha resposta, torna el catàleg local de 10 patrons: l'agent mai es queda sense referència. Un circuit obert 5 minuts després d'un fracàs evita que cada torn pagui l'espera quan l'usuari no té xarxa. La comanda `unreal_search_snippets` l'exposa al frontend (`core/unreal/client.ts`) i el bucle MCP (`unreal/agent.rs`) injecta els snippets a cada torn, amb un esdeveniment «context» que en deixa el rastre a la interfície.
+- *les APIs deprecades, fora* (`ai/codegen.rs`, `unreal/snippets.rs`): ni el codi generat ni el block de patrons en porten el nom — un model local copia el que llegeix, i un nom de classe dins d'un comentari és una invitació a cridar-la. Els avisos de «subsistema obsolet» s'han reescrit sense el nom de les classes.
+- *de pas, un error de la creació de projectes Bevy* (`bevy/setup.rs::bevy_create_project`): el nom es validava DESPRÉS de crear la carpeta pare, de manera que una petició amb un nom invàlid deixava una carpeta buida al sistema de fitxers. Ara el nom es valida primer i el disc no s toca.
+- *proves*: 8 tests Rust nous (els patrons no contenen APIs deprecades, el circuit obert després d'un fracàs, el catàleg local té codi útil, el filtre per consulta, el parseo d'una resposta GraphQL, la resposta sense snippets, el prompt de context i els patrons d'Unreal guanyant el genèric al catàleg); `cargo test --lib` (395), `cargo check --all-targets`, `tsc --noEmit`, ESLint, Vitest (359) i `vite build` en verd.
 
 ## 0.71.17-alpha (2026-11-22)
 

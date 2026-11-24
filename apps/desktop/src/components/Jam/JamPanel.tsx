@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Gamepad2, Square, ListChecks, AlertTriangle, CheckCircle2, Loader2, X, Trophy, Rocket, Folder, MonitorPlay, Brain, Bot, MemoryStick, Activity } from "lucide-react";
+import { Gamepad2, Square, ListChecks, AlertTriangle, CheckCircle2, Loader2, X, Trophy, Rocket, Folder, MonitorPlay, Brain, Bot, MemoryStick, Activity, Cpu, Share2, ClipboardCopy } from "lucide-react";
 import { useT } from "../../i18n";
 import WorkProgress from "../WorkProgress";
 import { obrirEstalvi } from "../../screensaver/window";
 import { customMinutes, formatDuration, type TimeUnit } from "../../utils/workTime";
 import { useProviderStore, type ProviderPublic } from "../../stores/providerStore";
+import { useGridStore } from "../../stores/gridStore";
 import type { OllamaModel } from "../../stores/aiStore";
-import { LOCAL, NATIVE, NATIVE_ID, PROV, resolAi } from "./jamAi";
+import { LOCAL, NATIVE, NATIVE_ID, PROV, GRID, resolAi } from "./jamAi";
 
 interface JamTask {
   id: string;
@@ -78,6 +79,25 @@ interface RamFreed {
   freed: number;
 }
 
+/// Memòria que està usant la IA LOCAL ara mateix: el pes del model que
+/// Ollama té carregat a RAM i el consum TOTAL del sistema.
+interface LocalMemory {
+  total: number;
+  used: number;
+  models: { name: string; size: number }[];
+  modelBytes: number;
+  engines: number;
+  local: boolean;
+}
+
+/// Mida en bytes amb unitat llegible i coma decimal (català).
+function fmtBytes(b: number): string {
+  if (!b || b <= 0) return "0 MB";
+  const gb = b / 1024 ** 3;
+  if (gb >= 1) return `${gb.toFixed(1).replace(".", ",")} GB`;
+  return `${Math.round(b / 1024 / 1024)} MB`;
+}
+
 /// Presets de jocs per a nens (un clic i a jugar).
 const PRESETS = [
   { emoji: "🎣", label: "Un joc de pesca", brief: "un joc de pesca on el peix rar només pica a la posta de sol" },
@@ -119,6 +139,7 @@ const KIND_LABEL: Record<string, string> = {
   task_error: "no ho aconsegueixo",
   note: "fent",
   thinking: "pensament",
+  stream: "escrivint",
   memory: "memòria",
   restart: "reinici",
   compact: "neteja de memòria",
@@ -174,6 +195,9 @@ function AiPicker({
           ))}
         </optgroup>
       )}
+      <optgroup label={t("jam.aiGridGroup")}>
+        <option value={GRID}>{t("jam.aiGridOption")}</option>
+      </optgroup>
     </select>
   );
 }
@@ -185,11 +209,71 @@ function timeText(at: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+/// COMPARTIR AMB LA COMUNITAT: commutador que engega el servidor P2P per a
+/// la Jam actual i mostra la invitació perquè els voluntaris s'hi connectin.
+function GridShareBox({
+  compartint,
+  invitacio,
+  busy,
+  onToggle,
+}: {
+  compartint: boolean;
+  invitacio: string;
+  busy: boolean;
+  onToggle: (on: boolean) => void;
+}) {
+  const { t } = useT();
+  const [copiat, setCopiat] = useState(false);
+  const copia = async () => {
+    try {
+      await navigator.clipboard.writeText(invitacio);
+      setCopiat(true);
+      window.setTimeout(() => setCopiat(false), 2000);
+    } catch {
+      // El porta-retalls pot estar bloquejat: el text queda seleccionable.
+    }
+  };
+  return (
+    <div className="field">
+      <label className="setting-check">
+        <input
+          type="checkbox"
+          checked={compartint}
+          disabled={busy}
+          onChange={(e) => onToggle(e.target.checked)}
+        />
+        <Share2 size={12} style={{ verticalAlign: -2, marginRight: 4 }} />
+        {t("jam.gridShare")}
+      </label>
+      <div className="lp-hint">{t("jam.gridShareHint")}</div>
+      {compartint && invitacio && (
+        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+          <input
+            readOnly
+            style={{ flex: 1 }}
+            value={invitacio}
+            onFocus={(e) => e.currentTarget.select()}
+            title={t("jam.gridInvitacioHint")}
+          />
+          <button className="btn sm" onClick={() => void copia()} title={t("jam.gridCopyHint")}>
+            <ClipboardCopy size={12} /> {copiat ? t("jam.gridCopied") : t("jam.gridCopy")}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /// Registre VIU compartit entre muntatges del panell: si l'usuari canvia de
 /// sub-pestanya (Agent ▸ xat/Jam/integracions) mentre la Jam treballa, el
 /// panell es desmunta i tornava buit, fent pensar que «no fa res». Viure
 /// fora del component (mòdul) ho conserva mentre la finestra estigui oberta.
 let registreCompartit: JamEvent[] = [];
+
+/// Text que la IA està ESCRIVINT ara mateix, compartit fora del component
+/// pel mateix motiu que el registre: en canviar de sub-pestanya el text en
+/// viu no es pot perdre (és la prova que la IA treballa).
+let liveCompartit = "";
 
 /// PANELL «JAM» — l'agent autònom que construeix el joc sol, en hores,
 /// sense que el Mac es pengi (supervisió de memòria al backend).
@@ -221,8 +305,16 @@ export default function JamPanel() {
   const [ramMsg, setRamMsg] = useState<string | null>(null);
   // Rellotge (ms): serveix per dir «fa X s» del darrer esdeveniment.
   const [ara, setAra] = useState(() => Date.now());
+  // Text que la IA està ESCRIVINT ara mateix (streaming del model local):
+  // sense això el panell semblava mort mentre la IA treballava de debò.
+  const [liveText, setLiveText] = useState(liveCompartit);
+  // Memòria que està usant la IA local (model carregat + consum del sistema).
+  const [mem, setMem] = useState<LocalMemory | null>(null);
   // Referència al registre: hi fem autoscroll a cada esdeveniment nou.
   const logRef = useRef<HTMLDivElement | null>(null);
+  // Referència al requadre «en viu»: autoscroll al final (el text nou és
+  // sempre a sota).
+  const liveRef = useRef<HTMLPreElement | null>(null);
   // La Jam està treballant? (el backend ho diu; «stopping» és l'aturada
   // demanada que encara no s'ha completat).
   const running = state?.running ?? false;
@@ -237,6 +329,63 @@ export default function JamPanel() {
   // ell ho demani).
   const [models, setModels] = useState<OllamaModel[]>([]);
 
+  // ── XARXA ALTRUISTA P2P: compartir la Jam i distribuir la còpia final ──
+  const gridStatus = useGridStore((s) => s.status);
+  const gridLoad = useGridStore((s) => s.load);
+  const [gridBusy, setGridBusy] = useState(false);
+  const [gridErr, setGridErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    void gridLoad();
+    const un = listen("grid://event", () => void gridLoad());
+    return () => {
+      void un.then((u) => u());
+    };
+  }, [gridLoad]);
+
+  /// Engega/atura el servidor P2P per a la Jam actual.
+  const canviaCompartir = async (on: boolean) => {
+    setGridBusy(true);
+    setGridErr(null);
+    try {
+      if (on) await invoke("grid_share_new");
+      else await invoke("grid_share_stop");
+      await gridLoad();
+    } catch (e) {
+      setGridErr(String(e));
+    } finally {
+      setGridBusy(false);
+    }
+  };
+
+  /// El projecte ha acabat: ofereix la còpia als participants (MAI sol).
+  const distribueix = async () => {
+    setGridBusy(true);
+    setGridErr(null);
+    try {
+      await invoke("grid_distribute_start");
+      await gridLoad();
+    } catch (e) {
+      setGridErr(String(e));
+    } finally {
+      setGridBusy(false);
+    }
+  };
+
+  /// Revoca la distribució (les còpies a mitges queden a mitges).
+  const revocaDist = async () => {
+    setGridBusy(true);
+    setGridErr(null);
+    try {
+      await invoke("grid_distribute_stop");
+      await gridLoad();
+    } catch (e) {
+      setGridErr(String(e));
+    } finally {
+      setGridBusy(false);
+    }
+  };
+
   // Estat inicial + esdeveniments en viu.
   useEffect(() => {
     void invoke<JamState>("jam_state").then(setState).catch(() => undefined);
@@ -245,6 +394,14 @@ export default function JamPanel() {
       // Marca de temps: quan ha arribat l'esdeveniment (per pintar l'hora
       // de cada línia del registre i dir «fa X s» del darrer).
       const ev: JamEvent = { ...e.payload, at: Date.now() };
+      // El TEXT EN VIU va a la seva caixa i NO al registre: si hi anés,
+      // inundaria el registre i es perdrían les notes que expliquen què fa
+      // la IA (tasca, eines, errors).
+      if (ev.kind === "stream") {
+        liveCompartit = ev.detail.slice(-2500);
+        setLiveText(liveCompartit);
+        return;
+      }
       registreCompartit = [...registreCompartit.slice(-200), ev];
       setEvents((prev) => [...prev.slice(-200), ev]);
     });
@@ -293,6 +450,34 @@ export default function JamPanel() {
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [events]);
+
+  // Autoscroll del text en viu: el que escriu la IA és sempre al final.
+  useEffect(() => {
+    const el = liveRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [liveText]);
+
+  // MEMÒRIA DE LA IA LOCAL: es refresca sovint mentre la Jam treballa.
+  // L'usuari ha de veure quanta RAM consumeix el model (i el sistema) per
+  // adivinar si li convé un model més lleuger o aturar la Jam.
+  useEffect(() => {
+    let viu = true;
+    const refresca = async () => {
+      try {
+        const m = await invoke<LocalMemory>("ai_local_memory");
+        if (viu) setMem(m);
+      } catch {
+        // Ollama aturat o error puntual: es manté el darrer valor conegut.
+      }
+    };
+    void refresca();
+    const id = setInterval(() => void refresca(), running ? 3000 : 15000);
+    return () => {
+      viu = false;
+      clearInterval(id);
+    };
+  }, [running]);
 
   // Rellotge: un tic per segon mentre la Jam treballa (per «fa X s»).
   useEffect(() => {
@@ -376,10 +561,15 @@ export default function JamPanel() {
   };
 
   const openReport = async () => {
-    if (!state?.reportPath) return;
+    // El backend llegeix el REPORT.md i, si encara no hi és, explica QUÈ
+    // està passant (Jam fallida, encara en marxa, volum lent...). Abans es
+    // llegia el fitxer directament i l'error cru de Rust s'escampava a
+    // pantalla: «No s'ha pogut llegir /Volumes/…/REPORT.md: No such file or
+    // directory (os error 2)».
     try {
-      const text = await invoke<string>("read_file", { path: state.reportPath });
+      const text = await invoke<string>("jam_read_report");
       setReportText(text);
+      setErr(null);
     } catch (e) {
       setErr(String(e));
     }
@@ -493,6 +683,8 @@ export default function JamPanel() {
     totalTasks,
     (state?.completed ?? 0) + (state?.blocked ?? 0) + (state?.skipped ?? 0),
   );
+  // Percentatge de RAM usada del sistema (barra del requadre de memòria).
+  const memPct = mem && mem.total > 0 ? Math.round((mem.used / mem.total) * 100) : 0;
 
   return (
     <div className="jam-panel">
@@ -620,6 +812,21 @@ export default function JamPanel() {
             </div>
           </div>
 
+          {/* COMPARTIR AMB LA COMUNITAT: engega el servidor P2P per a la
+              Jam actual (els voluntaris responen els torns amb el seu
+              model local i, si cap no respon, la IA local ho fa). */}
+          <GridShareBox
+            compartint={gridStatus?.compartint ?? false}
+            invitacio={gridStatus?.invitacio ?? ""}
+            busy={gridBusy}
+            onToggle={(on) => void canviaCompartir(on)}
+          />
+          {gridErr && (
+            <div className="si-error" style={{ marginTop: 8 }}>
+              <AlertTriangle size={12} /> {gridErr}
+            </div>
+          )}
+
           <div className="jam-actions">
             <button className="btn sm" disabled={busy} onClick={() => void doPlan()}>
               <ListChecks size={12} /> {t("jam.plan")}
@@ -712,12 +919,55 @@ export default function JamPanel() {
               <Trophy size={11} /> <b>{t("jam.title")}</b> {t("jam.finished")}
             </div>
           )}
+          {/* DISTRIBUCIÓ ESTIL TORRENT: quan la Jam ha acabat, el
+              desenvolupador principal pot donar una còpia verificada als
+              participants (MAI s'activa sola). */}
+          {!running && state.finishedAt && (
+            !gridStatus?.distribucio?.activa ? (
+              <div className="jam-current">
+                <Share2 size={11} />
+                <button
+                  className="btn sm primary"
+                  style={{ marginLeft: 6 }}
+                  disabled={gridBusy}
+                  onClick={() => void distribueix()}
+                >
+                  {gridBusy ? <Loader2 size={12} className="spin" /> : <Share2 size={12} />}{" "}
+                  {t("jam.gridDistribute")}
+                </button>
+              </div>
+            ) : (
+              <div className="jam-current">
+                <Share2 size={11} />
+                {t("jam.gridDistActive", {
+                  peces: gridStatus?.distribucio?.peces ?? 0,
+                  baixades: gridStatus?.distribucio?.baixades ?? 0,
+                })}
+                <button className="btn sm" style={{ marginLeft: 8 }} disabled={gridBusy} onClick={() => void revocaDist()}>
+                  {t("jam.gridDistStop")}
+                </button>
+              </div>
+            )
+          )}
           {running && (
             <div className="jam-activity">
               <Activity size={11} />
               <b>{state.currentTask || t("jam.workingNow")}</b>
               <span className="jam-activity-detail">{state.currentDetail}</span>
               {fa != null && <em>{t("jam.ago", { n: fa })}</em>}
+            </div>
+          )}
+          {/* QUÈ ESTÀ FENT LA IA ARA MATEIX: el text que el model local està
+              escrivint, en directe. Abans el panell només mostrava el títol
+              de la tasca i l'usuari pensava que la Jam s'havia penjat. */}
+          {liveText && (
+            <div className="jam-live">
+              <div className="jam-live-head">
+                <Activity size={11} /> {t("jam.liveWriting")}
+              </div>
+              <pre className="jam-live-body" ref={liveRef}>
+                {liveText}
+              </pre>
             </div>
           )}
           {/* Canvi d'IA EN MARXA: el backend el desa i el procés fill el
@@ -737,6 +987,22 @@ export default function JamPanel() {
               />
             </div>
           )}
+          {/* COMPARTIR EN MARXA: el commutador també es pot prémer mentre
+              la Jam treballa (els torns comencen a sortir a la xarxa a
+              partir d'aquell moment). */}
+          {running && (
+            <GridShareBox
+              compartint={gridStatus?.compartint ?? false}
+              invitacio={gridStatus?.invitacio ?? ""}
+              busy={gridBusy}
+              onToggle={(on) => void canviaCompartir(on)}
+            />
+          )}
+          {gridErr && (
+            <div className="si-error" style={{ marginTop: 8 }}>
+              <AlertTriangle size={12} /> {gridErr}
+            </div>
+          )}
           {running && (
             <button className="btn sm" disabled={stopping} onClick={() => void doStop()}>
               {stopping ? <Loader2 size={12} className="spin" /> : <Square size={12} />}{" "}
@@ -754,6 +1020,31 @@ export default function JamPanel() {
           >
             <MonitorPlay size={12} /> {t("jam.workScreen")}
           </button>
+        </div>
+      )}
+
+      {/* ── MEMÒRIA DE LA IA LOCAL: quanta RAM està usant ara mateix ── */}
+      {mem && (
+        <div className="jam-mem" title={t("jam.memHint")}>
+          <div className="jam-mem-row">
+            <MemoryStick size={11} />
+            <span className="jam-mem-label">{t("jam.memLocal")}</span>
+            <span className="jam-mem-value">
+              {mem.models.length > 0
+                ? `${mem.models.map((m) => m.name).join(", ")} · ${fmtBytes(mem.modelBytes)}`
+                : t("jam.memNone")}
+            </span>
+          </div>
+          <div className="jam-mem-row">
+            <Cpu size={11} />
+            <span className="jam-mem-label">{t("jam.memSystem")}</span>
+            <span className="jam-mem-bar">
+              <i style={{ width: `${memPct}%` }} />
+            </span>
+            <span className="jam-mem-value">
+              {fmtBytes(mem.used)} / {fmtBytes(mem.total)} · {memPct} %
+            </span>
+          </div>
         </div>
       )}
 

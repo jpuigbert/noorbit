@@ -8,6 +8,16 @@
 //!
 //! NoOrbit NO inclou cap SDK propietari: només invoca el que l'usuari haja
 //! instal·lat (Android Studio o cmdline-tools).
+//!
+//! DES DE 0.71.19 l'SDK es pot **baixar sota demanda**: si el projecte obert
+//! és d'Android i no hi ha SDK, el panell ofereix un sol clic que executa
+//! `scripts/install-android-sdk.sh` (embotit al binari) amb la carpeta que
+//! l'usuari tria — cap ruta escrita a codi, cap nom de volum.
+//!
+//! COMPILAR ≠ EMULAR (era el defecte que feia baixar gigabytes de més): un SDK
+//! sense el paquet «emulator» ni «system images» compila APK i fa servir un
+//! telèfon connect per USB perfectament. Per això «installed» ara significa
+//! «serveix per compilar» i l'emulador va al camp «emulator_ok».
 
 use serde::{Deserialize, Serialize};
 use std::io::Read;
@@ -16,14 +26,28 @@ use std::process::{Command, Stdio};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AndroidStatus {
-    /// Cert si s'ha trobat un SDK (ANDROID_HOME o una ruta estàndard).
+    /// Cert si hi ha un SDK **usable per compilar** (abans exigia l'emulador).
     pub installed: bool,
+    /// Mateix que «installed», amb el nom explícit per a la UI.
+    pub compile_ok: bool,
+    /// Cert si hi ha el paquet «emulator» (només cal per a AVDs).
+    pub emulator_ok: bool,
+    /// Cert si hi ha «cmdline-tools»: amb ell es pot actualitzar l'SDK sol.
+    pub cmdline_ok: bool,
     /// Ruta de l'SDK (si s'ha trobat).
     pub sdk_path: Option<String>,
     /// Ruta del binari `emulator` (si existeix).
     pub emulator_bin: Option<String>,
     /// Ruta del binari `adb` (si existeix).
     pub adb_bin: Option<String>,
+    /// Ruta de `sdkmanager` (si existeix).
+    pub sdkmanager_bin: Option<String>,
+    /// Carpeta d'SDK que l'usuari ha configurat (buida = ruta estàndard).
+    pub sdk_dir_configured: String,
+    /// Nivell d'API que es baixarà si cal instal·lar.
+    pub api: u32,
+    /// Si es pot oferir el clic d'instal·lació (POSIX: hi ha bash + curl).
+    pub one_click_supported: bool,
     /// missatge llegible quan no està instal·lat (per a la UI).
     pub hint: Option<String>,
 }
@@ -54,8 +78,17 @@ fn candidate_sdk_roots() -> Vec<PathBuf> {
     out
 }
 
-/// Intenta resoldre la ruta de l'SDK. Prèvia: ANDROID_HOME / ANDROID_SDK_ROOT.
+/// Intenta resoldre la ruta de l'SDK. Ordre: carpeta configurada per
+/// l'usuari («android.sdk_dir», pot ser un disc extern) → ANDROID_HOME /
+/// ANDROID_SDK_ROOT → rutes estàndard.
 pub fn detect_sdk_root() -> Option<PathBuf> {
+    let cfg_dir = configured_sdk_dir();
+    if !cfg_dir.is_empty() {
+        let p = PathBuf::from(&cfg_dir);
+        if p.exists() {
+            return Some(p);
+        }
+    }
     for key in ["ANDROID_HOME", "ANDROID_SDK_ROOT"] {
         if let Ok(v) = std::env::var(key) {
             let p = PathBuf::from(&v);
@@ -70,33 +103,71 @@ pub fn detect_sdk_root() -> Option<PathBuf> {
 /// Detecta l'SDK + els binaris rellevants.
 pub fn detect() -> AndroidStatus {
     let root = detect_sdk_root();
-    let (sdk_path, emulator_bin, adb_bin) = match root.as_ref() {
+    let (sdk_path, emulator_bin, adb_bin, sdkmanager_bin) = match root.as_ref() {
         Some(r) => {
-            let emu = r.join("emulator").join(binary("emulator"));
-            let adb = r.join("platform-tools").join(binary("adb"));
+            let pick = |p: PathBuf| p.exists().then(|| p.to_string_lossy().into_owned());
             (
                 Some(r.to_string_lossy().into_owned()),
-                emu.exists().then(|| emu.to_string_lossy().into_owned()),
-                adb.exists().then(|| adb.to_string_lossy().into_owned()),
+                pick(r.join("emulator").join(binary("emulator"))),
+                pick(r.join("platform-tools").join(binary("adb"))),
+                pick(r.join("cmdline-tools").join("latest").join("bin").join(binary("sdkmanager"))),
             )
         }
-        None => (None, None, None),
+        None => (None, None, None, None),
     };
-    let installed = sdk_path.is_some() && emulator_bin.is_some();
-    let hint = if installed {
-        None
-    } else if sdk_path.is_some() {
-        Some("S'ha trobat l'Android SDK però falta el component «emulator». Obre Android Studio ▸ SDK Manager i instal·la «Android Emulator» i «Android SDK Platform-Tools».".to_string())
+    // Compilació: amb `adb` (platform-tools) o amb `build-tools` ja es pot
+    // fabricar un APK; l'emulador NO hi té res a veure.
+    let build_tools = root
+        .as_ref()
+        .map(|r| r.join("build-tools").is_dir())
+        .unwrap_or(false);
+    let compile_ok = sdk_path.is_some() && (adb_bin.is_some() || build_tools);
+    let emulator_ok = emulator_bin.is_some();
+    let cmdline_ok = sdkmanager_bin.is_some();
+    let installed = compile_ok;
+    let cfg = crate::config::AppConfig::load().ok();
+    let sdk_dir_configured = cfg
+        .as_ref()
+        .map(|c| c.android.sdk_dir.trim().to_string())
+        .unwrap_or_default();
+    let api = cfg.as_ref().map(|c| c.android.api).unwrap_or(34);
+    let hint = if sdk_path.is_none() {
+        Some(format!(
+            "No s'ha trobat cap Android SDK. Es pot baixar només el que cal per compilar (API {api}, sense emulator) a la carpeta que tu triïs."
+        ))
+    } else if !compile_ok {
+        Some(format!(
+            "Hi ha una carpeta d'SDK a {} però no és usable per compilar (hi falta «platform-tools» o «build-tools»). Es pot reparar des d'aquí.",
+            sdk_path.as_deref().unwrap_or("")
+        ))
+    } else if !emulator_ok {
+        Some(
+            "L'SDK de compilació és correcte. Sense el paquet «emulator» no hi haurà dispositius virtuals (AVDs); per compilar i instal·lar en un telèfon per USB no en cal.".to_string(),
+        )
     } else {
-        Some("No s'ha trobat cap Android SDK. Instal·la Android Studio (o els «cmdline-tools») i exporta ANDROID_HOME.".to_string())
+        None
     };
     AndroidStatus {
         installed,
+        compile_ok,
+        emulator_ok,
+        cmdline_ok,
         sdk_path,
         emulator_bin,
         adb_bin,
+        sdkmanager_bin,
+        sdk_dir_configured,
+        api,
+        one_click_supported: cfg!(unix),
         hint,
     }
+}
+
+/// Carpeta d'SDK triada per l'usuari (buida = sense configurar).
+pub fn configured_sdk_dir() -> String {
+    crate::config::AppConfig::load()
+        .map(|c| c.android.sdk_dir.trim().to_string())
+        .unwrap_or_default()
 }
 
 fn binary(name: &str) -> String {
@@ -316,4 +387,96 @@ fn strip_lf_inflate(bytes: &[u8]) -> Vec<u8> {
 /// Ruta a l'SDK on es desen els AVD (per a futurs «crear AVD»).
 pub fn avd_home(root: &Path) -> PathBuf {
     root.join(".android").join("avd")
+}
+
+// ── Instal·lador sota demanda ───────────────────────────────────────────────
+
+/// El script oficial d'instal·lació, EMBOTIT al binari. Viu al repo en
+/// `scripts/install-android-sdk.sh` (auditable i provable per l'usuari), però
+/// inclòs així funciona també dins el `.app` distribuït, on no hi ha repo.
+pub const INSTALLER_SCRIPT: &str = include_str!("../../../../../scripts/install-android-sdk.sh");
+
+/// Escriu (o refresca) el script a la carpeta de dades de NoOrbit i en retorna
+/// la ruta. Només reescriu si el contingut ha canviat, i el deixa executable.
+pub fn installer_script_path() -> anyhow::Result<PathBuf> {
+    let dir = crate::config::AppConfig::data_dir()
+        .ok_or_else(|| anyhow::anyhow!("No es pot resoldre la carpeta de dades"))?;
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("install-android-sdk.sh");
+    let actual = std::fs::read_to_string(&path).unwrap_or_default();
+    if actual != INSTALLER_SCRIPT {
+        std::fs::write(&path, INSTALLER_SCRIPT)?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
+    }
+    Ok(path)
+}
+
+/// Carpetes que MAI no es recorren en buscar marques d'Android: són dependències
+/// o sortides de build que farien l'escaneig lent (i donaria falsos positius).
+const SCAN_SKIP: &[&str] = &[
+    "node_modules", ".git", "target", "build", "dist", ".gradle", ".venv", "venv",
+    "__pycache__", "Library", "DerivedData", "Intermediate", "Saved", "Pods", ".next",
+    ".qoder", "cache",
+];
+
+/// Cert si el projecte indicat és (o conté) un projecte Android. Retorna el
+/// marcador trobat perquè la UI ho puga explicar. Es fa servir per a OFERIR la
+/// descàrrega de l'SDK només quan el projecte realment el demana — no abans.
+pub fn android_project_marker(root: &Path) -> Option<String> {
+    if !root.is_dir() {
+        return None;
+    }
+    // Marques definitives (nom de fitxer exacte).
+    const DEFINITIVE: &[&str] = &["AndroidManifest.xml"];
+    // Marques de Gradle: soles no ho garanteixen (pot ser JVM pur), però amb un
+    // mòdul «app» o «android» a prop ja ho són.
+    const GRADLE: &[&str] = &[
+        "build.gradle",
+        "build.gradle.kts",
+        "settings.gradle",
+        "settings.gradle.kts",
+        "gradlew",
+    ];
+    let mut queue: Vec<(PathBuf, usize)> = vec![(root.to_path_buf(), 0)];
+    let mut visited = 0usize;
+    let mut gradle_vist = false;
+    let mut moduls_android = false;
+    while let Some((dir, depth)) = queue.pop() {
+        if depth > 4 || visited > 3000 {
+            continue;
+        }
+        visited += 1;
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for entry in rd.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let path = entry.path();
+            let is_dir = path.is_dir();
+            if is_dir {
+                if SCAN_SKIP.contains(&name.as_str()) || name.starts_with('.') {
+                    continue;
+                }
+                if name == "app" || name == "android" {
+                    moduls_android = true;
+                }
+                if depth < 4 {
+                    queue.push((path, depth + 1));
+                }
+                continue;
+            }
+            if DEFINITIVE.contains(&name.as_str()) {
+                return Some(name);
+            }
+            if GRADLE.contains(&name.as_str()) {
+                gradle_vist = true;
+            }
+        }
+    }
+    if gradle_vist && moduls_android {
+        return Some("projecte Gradle amb mòdul Android".to_string());
+    }
+    None
 }

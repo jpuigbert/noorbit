@@ -821,18 +821,42 @@ async fn run_godot(payload: &str, ctx: &EngineContext) -> EngineOutcome {
         summary: msg,
         artifacts: Vec::new(),
     };
-    let Some(project) = ctx.godot.as_ref() else {
-        return fail("no hi ha cap projecte de Godot (project.godot) dins el projecte".into());
+    let (action, arg) = split_command(payload);
+    // Sense projecte, es CREA: l'usuari demana treballar en Godot i la IA no
+    // es queda bloquejada. «version» és l'única ordre que no en necessita
+    // (només pregunta la versió del binari).
+    //
+    // El projecte es crea ABANS de comprovar el binari (igual que fa «Obre al
+    // motor»): així l'usuari sempre es queda amb el projecte a punt, encara que
+    // el motor encara no estigui instal·lat.
+    let project: Option<PathBuf> = match ctx.godot.as_ref() {
+        Some(p) => Some(p.clone()),
+        None if action == "version" => None,
+        None => match crate::godot::setup::ensure_project(&ctx.root) {
+            Ok(p) => Some(p.project_godot),
+            Err(e) => return fail(format!("no s'ha pogut crear el projecte de Godot: {e}")),
+        },
     };
     let Some(bin) = crate::godot::detect_binary() else {
+        let extra = match project.as_deref() {
+            Some(p) => format!(
+                " El projecte de Godot és a «{}».",
+                p.parent().unwrap_or(p).display()
+            ),
+            None => String::new(),
+        };
         return fail(
             "Godot no està instal·lat (no s'ha trobat el binari «godot»). \
              Instal·la'l des de l'assistent d'instal·lació de NoOrbit."
-                .into(),
+                .to_string()
+                + &extra,
         );
     };
-    let dir = project.parent().unwrap_or(&ctx.root).to_path_buf();
-    let (action, arg) = split_command(payload);
+    let dir = project
+        .as_deref()
+        .and_then(|p| p.parent())
+        .unwrap_or(&ctx.root)
+        .to_path_buf();
     let mut cmd = Command::new(&bin);
     cmd.current_dir(&dir).arg("--headless").arg("--path").arg(&dir);
     let timeout = match action.as_str() {
@@ -842,7 +866,7 @@ async fn run_godot(payload: &str, ctx: &EngineContext) -> EngineOutcome {
         }
         "run" => {
             let scene = if arg.is_empty() {
-                godot_main_scene(project)
+                project.as_deref().map(godot_main_scene).unwrap_or_default()
             } else {
                 arg.clone()
             };
@@ -914,17 +938,25 @@ async fn run_bevy(payload: &str, ctx: &EngineContext) -> EngineOutcome {
         summary: msg,
         artifacts: Vec::new(),
     };
-    let Some(cargo_toml) = ctx.bevy.as_ref() else {
-        return fail("no hi ha cap projecte Bevy (Cargo.toml amb «bevy») dins el projecte".into());
+    // Sense projecte, es CREA: l'usuari demana treballar en Bevy i la IA no
+    // es queda bloquejada davant un error que no té solució automàtica.
+    //
+    // El projecte es crea ABANS de comprovar el «cargo» (igual que fa «Obre al
+    // motor»): l'usuari es queda sempre amb el projecte a punt, encara que el
+    // Rust encara no estigui instal·lat.
+    let cargo_toml = match crate::bevy::ensure_project(&ctx.root) {
+        Ok(p) => p,
+        Err(e) => return fail(format!("no s'ha pogut crear el projecte Bevy: {e}")),
     };
+    let dir = cargo_toml.parent().unwrap_or(&ctx.root).to_path_buf();
     let Some(cargo) = crate::bevy::detect_cargo() else {
         return fail(
             "Rust (cargo) no està instal·lat: cal per compilar Bevy. \
              Instal·la'l des de l'assistent d'instal·lació de NoOrbit (rustup.rs)."
-                .into(),
+                .to_string()
+                + &format!(" El projecte Bevy ja és a «{}».", dir.display()),
         );
     };
-    let dir = cargo_toml.parent().unwrap_or(&ctx.root).to_path_buf();
     let (action, _arg) = split_command(payload);
     let action = if action.is_empty() { "check".to_string() } else { action };
     let timeout = match action.as_str() {

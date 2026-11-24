@@ -185,17 +185,20 @@ async fn import_godot(ctx: &EngineContext, src: &Path) -> ImportReport {
         summary: msg,
         artifacts: Vec::new(),
     };
-    let Some(project) = ctx.godot.as_ref() else {
-        return fail("no hi ha cap projecte de Godot (project.godot) dins el projecte".into());
+    // Sense projecte, es CREA: la IA ha demanat importar a Godot, així que el
+    // projecte ha d'existir i el detector l'ha de confirmar.
+    let project = match crate::godot::setup::ensure_project(&ctx.root) {
+        Ok(p) => p.project_godot,
+        Err(e) => return fail(format!("Godot: no s'ha pogut crear el projecte ({e})")),
     };
-    match crate::godot::import_asset(project, src).await {
+    match crate::godot::import_asset(&project, src).await {
         Ok(r) => {
             let mut summary = format!("Godot: asset a «{}»", r.res_path);
             if let Some(scene) = &r.scene_path {
                 summary.push_str(&format!(" (escena «{scene}» per instanciar-la)"));
             }
             // Reimport en headless: sense això Godot no crea els `.import`.
-            match crate::godot::reimport(project).await {
+            match crate::godot::reimport(&project).await {
                 Ok(()) => summary.push_str("; assets reimportats"),
                 Err(e) => summary.push_str(&format!("; AVÍS: no s'han reimportat els assets ({e})")),
             }
@@ -223,10 +226,13 @@ fn import_bevy(ctx: &EngineContext, src: &Path) -> ImportReport {
         summary: msg,
         artifacts: Vec::new(),
     };
-    let Some(cargo) = ctx.bevy.as_ref() else {
-        return fail("no hi ha cap projecte Bevy (Cargo.toml amb «bevy») dins el projecte".into());
+    // Sense projecte, es CREA: la IA ha demanat importar a Bevy, així que el
+    // projecte ha d'existir i el detector l'ha de confirmar.
+    let cargo = match crate::bevy::ensure_project(&ctx.root) {
+        Ok(p) => p,
+        Err(e) => return fail(format!("Bevy: no s'ha pogut crear el projecte ({e})")),
     };
-    match crate::bevy::import_asset(cargo, src) {
+    match crate::bevy::import_asset(&cargo, src) {
         Ok(r) => ImportReport {
             target: Target::Bevy,
             ok: true,

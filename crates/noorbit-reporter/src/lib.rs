@@ -54,6 +54,11 @@ impl MarkdownReporter {
         md.push_str(&format!("| Bloquejades | {} |\n", stats.blocked));
         md.push_str(&format!("| Saltades | {} |\n", stats.skipped));
         md.push_str(&format!("| Intents totals | {} |\n", stats.total_attempts));
+        // Tasques fetes però NO commitejades (volum lent): l'informe ho diu
+        // clarament perquè el fitxer existeix però no hi ha checkpoint.
+        if stats.without_checkpoint > 0 {
+            md.push_str(&format!("| Fetes sense commit | {} |\n", stats.without_checkpoint));
+        }
         let total = plan.tasks.len() as u32;
         let ratio = if total == 0 { 0.0 } else { 100.0 * stats.completed as f64 / total as f64 };
         md.push_str(&format!("| Èxit | {ratio:.1}% |\n\n"));
@@ -69,6 +74,15 @@ impl MarkdownReporter {
             md.push('\n');
         }
         if !commits.is_empty() { md.push_str("## Commits\n\n```\n"); for c in &commits { md.push_str(c); md.push('\n'); } md.push_str("```\n\n"); }
+        if stats.without_checkpoint > 0 {
+            md.push_str("## Avís\n\n");
+            md.push_str(&format!(
+                "{} tasca(es) es van fer però NO es van poder commitar (el git no ha arribat a temps \
+                 o el volum és massa lent). Els fitxers SÓN al projecte, però no hi ha commit per \
+                 tirar enrere.\n\n",
+                stats.without_checkpoint
+            ));
+        }
         if let Some(g) = guardian {
             md.push_str("## Memòria del guardian\n\n| Mètrica | Valor |\n|---|---|\n");
             md.push_str(&format!("| Mostres | {} |\n", g.samples));
@@ -131,6 +145,7 @@ mod tests {
             skipped: 0,
             total_attempts: 1,
             duration_ms: 12345,
+            without_checkpoint: 0,
         }
     }
 

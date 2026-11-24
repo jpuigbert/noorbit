@@ -14,6 +14,7 @@ pub mod launcher;
 pub mod mcp;
 pub mod python;
 pub mod remote_control;
+pub mod snippets;
 
 use anyhow::{anyhow, Result};
 

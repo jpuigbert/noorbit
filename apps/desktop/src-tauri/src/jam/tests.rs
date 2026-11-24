@@ -20,20 +20,26 @@ use crate::jam::{NoOrbitVerifier, NoOrbitWorker};
 struct FakeLlm {
     response: String,
     calls: std::sync::atomic::AtomicUsize,
+    /// Últim prompt rebut: per comprovar què ha vist REALMENT la IA.
+    last_prompt: std::sync::Mutex<String>,
 }
 impl FakeLlm {
     fn new(response: &str) -> Self {
         Self {
             response: response.to_string(),
             calls: std::sync::atomic::AtomicUsize::new(0),
+            last_prompt: std::sync::Mutex::new(String::new()),
         }
     }
 }
 #[async_trait::async_trait]
 impl LlmClient for FakeLlm {
-    async fn complete(&self, _prompt: &str) -> Result<String, String> {
+    async fn complete(&self, prompt: &str) -> Result<String, String> {
         self.calls
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if let Ok(mut g) = self.last_prompt.lock() {
+            *g = prompt.to_string();
+        }
         Ok(self.response.clone())
     }
 }
@@ -562,5 +568,104 @@ fn el_sostre_del_pla_i_al_pressupost_del_planner() {
     assert!(
         crate::jam::commands::PLAN_TIMEOUT > std::time::Duration::from_secs(3 * 20 * 60),
         "el sostre del pla ha de ser més gran que el total del planner"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  REGRESSIÓ: «li dic que faci un joc i no fa un joc»
+//
+//  El worker només rebia la TASCA (un resum del planificador): el brief
+//  original de l'usuari no hi arribava i la IA construïa «una altra cosa»
+//  (com més s'explicava el joc, pitjor). Ara el brief i el motor arriben al
+//  prompt de cada tasca.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// L'IA ha de VEURE el brief original i el motor triat: sense això construeix
+/// un joc que no és el demanat.
+#[tokio::test]
+async fn el_worker_dona_el_brief_original_i_el_motor_a_la_ia() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let llm = Arc::new(FakeLlm::new("@file: src/nau.gd\nextends Node2D\n"));
+    let worker = NoOrbitWorker::new(
+        llm.clone() as Arc<dyn LlmClient>,
+        dir.path().to_path_buf(),
+    )
+    .with_brief("Fes un joc de nauxes que es mouen amb les fletxes del teclado")
+    .with_engine(noorbit_planner::Engine::Godot4);
+
+    let diff = worker.run(&task("t01"), &ctx_de_prova()).await.unwrap();
+    assert!(diff.materialized);
+
+    let prompt = llm.last_prompt.lock().unwrap().clone();
+    assert!(
+        prompt.contains("nauxes"),
+        "el brief original ha d'arribar al prompt:\n{prompt}"
+    );
+    assert!(
+        prompt.contains("GDScript"),
+        "el motor triat ha d'arribar al prompt:\n{prompt}"
+    );
+    assert!(
+        prompt.contains("OBJECTIU DEL JOC"),
+        "el brief ha de quedar marcat com l'objectiu:\n{prompt}"
+    );
+}
+
+/// Sense brief injectat (cas antic), el prompt NO pot contenir l'objectiu: és
+/// la garantia de la regressió (que es veu quan algú treu el `with_brief`).
+#[tokio::test]
+async fn sense_brief_el_prompt_no_inventa_cap_objectiu() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let llm = Arc::new(FakeLlm::new("@file: a.txt\nhola\n"));
+    let worker = NoOrbitWorker::new(
+        llm.clone() as Arc<dyn LlmClient>,
+        dir.path().to_path_buf(),
+    );
+    worker.run(&task("t01"), &ctx_de_prova()).await.unwrap();
+    let prompt = llm.last_prompt.lock().unwrap().clone();
+    assert!(!prompt.contains("OBJECTIU DEL JOC"), "{prompt}");
+}
+
+/// La carpeta del joc ha de tenir el seu PROPI repo git: si shares el repo del
+/// pare, el «git add -A» i el «git clean -fd» del checkpointer tocaven el
+/// projecte de l'usuari sencer.
+#[tokio::test]
+async fn la_carpeta_del_joc_te_el_seu_propi_repo_git() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let pare = dir.path();
+    // Repo git al pare (simula el workspace obert de l'usuari).
+    let ok = std::process::Command::new("git")
+        .arg("-C")
+        .arg(pare)
+        .args(["init", "-q"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !ok {
+        eprintln!("git no disponible en aquesta màquina: test omès");
+        return;
+    }
+    let joc = pare.join("prototypes").join("joc");
+    std::fs::create_dir_all(&joc).unwrap();
+
+    // Abans del repo propi: la carpeta NO és l'arrel del seu repo (és del pare).
+    assert!(!crate::commands::workspace::te_repo_propi(&joc));
+
+    crate::commands::workspace::init_git_repo(&joc).await.unwrap();
+
+    // Després: repo propi, aïllat del pare.
+    assert!(crate::commands::workspace::te_repo_propi(&joc));
+    let top = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&joc)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .unwrap();
+    let top = String::from_utf8_lossy(&top.stdout).trim().to_string();
+    let joc_real = std::fs::canonicalize(&joc).unwrap();
+    assert_eq!(
+        std::fs::canonicalize(&top).unwrap(),
+        joc_real,
+        "el repo de la carpeta del joc ha de ser EL SEU, no el del pare"
     );
 }

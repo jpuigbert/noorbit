@@ -171,3 +171,23 @@ export const unrealMcpTools = () =>
 /// Executa una eina MCP concreta (depuració / ordres puntuals).
 export const unrealMcpCall = (name: string, args: Record<string, unknown>) =>
   invoke<UnrealMcpCallResult>("unreal_mcp_call", { name, args });
+
+// ── Snippets i patrons d'Unreal ───────────────────────────────────────────
+
+/// Un snippet de patrons d'Unreal Engine: pot venir de la comunitat d'Epic
+/// Games (`font: "epic"`) o del catàleg local de reserva (`font: "local"`).
+export interface UnrealSnippet {
+  id: string;
+  titol: string;
+  autor: string;
+  url: string;
+  codi: string;
+  tags: string[];
+  font: string;
+}
+
+/// Cerca patrons/snippets d'Unreal per a una consulta: comunitat d'Epic
+/// primer i catàleg local si no hi ha xarxa. La IA local s'hi injecta
+/// com a referència abans d'escriure l'script.
+export const unrealSearchSnippets = (query: string) =>
+  invoke<UnrealSnippet[]>("unreal_search_snippets", { query });

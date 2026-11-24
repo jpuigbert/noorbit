@@ -8,6 +8,7 @@ import {
   Play,
   RefreshCw,
   Sparkles,
+  Wrench,
   X,
 } from "lucide-react";
 import { useAIStore } from "../stores/aiStore";
@@ -63,6 +64,8 @@ export default function SetupCheckModal() {
   /// quan vulgui, encara que l'hagi silenciat.
   const showSetupCheck = useUIStore((s) => s.showSetupCheck);
   const setShowSetupCheck = useUIStore((s) => s.setShowSetupCheck);
+  /// Assistent de Bevy (on instal·lar Rust i on treballar el projecte).
+  const setShowBevySetup = useUIStore((s) => s.setShowBevySetup);
 
   useEffect(() => {
     if (showSetupCheck) {
@@ -86,6 +89,18 @@ export default function SetupCheckModal() {
   /// Hi ha una IA EN LÍNIA activa? llavors Ollama és opcional.
   const cloudActive = useProviderStore((s) => s.active !== "ollama" && s.active !== "");
 
+  /// Arregla la instal·lació de Godot a macOS: li treu la marca de
+  /// quarantina, de manera que el motor deixi d'executar-se des d'una còpia
+  /// temporal (d'on pot morir amb SIGBUS).
+  const fixGodot = async () => {
+    const st = await invoke<{ quarantined: boolean }>("godot_fix_quarantine");
+    setMsg(
+      st.quarantined
+        ? "NoOrbit no ha pogut treure la marca de quarantina. Obre el Finder, prem el botó dret sobre l'app de Godot ▸ «Obre» ▸ tria l'aplicació i confirma."
+        : "Fet: macOS ja executa Godot des de la seva ruta real. Torna a obrir el motor."
+    );
+  };
+
   const detect = async () => {
     const [ollama, ollamaUp, blender, comfy, unreal, godot, rust] = await Promise.all([
       invoke<boolean>("ollama_installed").catch(() => false),
@@ -93,8 +108,24 @@ export default function SetupCheckModal() {
       invoke<{ installed: boolean }>("blender_status").catch(() => ({ installed: false })),
       invoke<boolean>("comfyui_installed").catch(() => false),
       invoke<string[]>("unreal_detect_installations").catch(() => []),
-      invoke<{ installed: boolean }>("godot_status").catch(() => ({ installed: false })),
-      invoke<{ installed: boolean }>("bevy_status").catch(() => ({ installed: false })),
+      invoke<{
+        installed: boolean;
+        version?: string;
+        path?: string;
+        appPath?: string;
+        volatile?: boolean;
+        quarantined?: boolean;
+      }>("godot_status").catch(() => ({
+        installed: false,
+        version: "",
+        path: "",
+        appPath: "",
+        volatile: false,
+        quarantined: false,
+      })),
+      invoke<{ installed: boolean; version?: string; path?: string }>("bevy_status").catch(
+        () => ({ installed: false, version: "", path: "" }),
+      ),
     ]);
     await loadModels().catch(() => undefined);
     let starterName = starter;
@@ -195,10 +226,21 @@ export default function SetupCheckModal() {
       {
         id: "godot",
         name: "Godot 4 — videojuegos (opcional)",
-        desc: "Per treballar en projectes de Godot 4 amb la IA, exactament com amb Unreal. Un clic obre la descàrrega oficial del teu sistema operatiu.",
-        state: godot.installed ? "ok" : "warn",
+        desc: godot.installed
+          ? godot.quarantined
+            ? "Godot és instal·lat, però macOS el fa executar des d'una còpia temporal (quarantena): es pot morir en qualsevol moment. Un clic ho arregla."
+            : godot.volatile
+              ? "Godot és instal·lat, però viu en una carpeta temporal o a les Descàrregues: macOS el pot desmuntar i el motor es queda penjat. Mou'l a «Aplicacions»."
+              : "Godot 4 ja és a punt per treballar-hi amb la IA, exactament com amb Unreal."
+          : "Per treballar en projectes de Godot 4 amb la IA, exactament com amb Unreal. Un clic obre la descàrrega oficial del teu sistema operatiu.",
+        state: godot.installed ? (godot.quarantined || godot.volatile ? "warn" : "ok") : "warn",
         action: godot.installed
-          ? undefined
+          ? godot.quarantined || godot.volatile
+            ? {
+                label: "Arregla",
+                run: fixGodot,
+              }
+            : undefined
           : {
               label: "Instal·la",
               run: async () => {
@@ -212,19 +254,20 @@ export default function SetupCheckModal() {
       {
         id: "rust",
         name: "Rust — Bevy (opcional)",
-        desc: "Bevy és un motor de jocs escrit en Rust: cal el «cargo» per compilar-lo. Un clic obre l'instal·lador oficial.",
+        desc: rust.installed
+          ? `Bevy és un motor de jocs en Rust: el «cargo» ja és a «${rust.path ?? "?"}». Un clic obre l'assistent per triar on treballar el projecte Bevy.`
+          : "Bevy és un motor de jocs escrit en Rust: cal el «cargo» per compilar-lo. Un clic obre l'assistent: tria on instal·lar Rust i on treballar-hi.",
         state: rust.installed ? "ok" : "warn",
-        action: rust.installed
-          ? undefined
-          : {
-              label: "Instal·la",
-              run: async () => {
-                await invoke("open_tool_download", { tool: "rust" });
-                setMsg(
-                  "S'ha obert l'instal·lador oficial de Rust (rustup). Executa'l i, quan acabi, prem «Revisa» i NoOrbit detectarà el «cargo» sol."
-                );
-              },
-            },
+        action: {
+          label: rust.installed ? "Configura" : "Instal·la i configura",
+          run: async () => {
+            // L'assistent de Bevy fa les preguntes (on instal·lar Rust i on
+            // treballar el projecte): el modal d'entorn es tanca per no
+            // encavalcar dues finestres.
+            setVisible(false);
+            setShowBevySetup(true);
+          },
+        },
       },
       {
         id: "comfyui",
@@ -351,6 +394,8 @@ export default function SetupCheckModal() {
                       <Sparkles size={12} />
                     ) : s.id === "serve" ? (
                       <Play size={12} />
+                    ) : s.id === "godot" && s.action?.label === "Arregla" ? (
+                      <Wrench size={12} />
                     ) : (
                       <Download size={12} />
                     )}

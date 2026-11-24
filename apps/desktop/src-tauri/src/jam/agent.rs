@@ -123,6 +123,9 @@ impl ProgressSink for StdoutProgress {
             Progress::Thinking { id, text } => serde_json::json!({
                 "kind": "thinking", "task": id, "detail": text, "ok": true
             }),
+            Progress::Streaming { id, text } => serde_json::json!({
+                "kind": "stream", "task": id, "detail": text, "ok": true
+            }),
             Progress::MemoryPressure { id, peak_bytes } => serde_json::json!({
                 "kind": "memory", "task": id,
                 "detail": format!(
@@ -379,6 +382,11 @@ async fn run_agent(args: AgentArgs) -> i32 {
     }
     let worker: Arc<dyn Worker> = Arc::new(
         NoOrbitWorker::new(llm, args.repo_path.clone())
+            // El BRIEF ORIGINAL i el MOTOR arriben al worker. Sense el brief, la
+            // IA només veia el pla (un resum del brief) i construïa «una altra
+            // cosa»; sense el motor, escrivia en el llenguatge que li sembla.
+            .with_brief(brief.text.clone())
+            .with_engine(engine)
             .with_lessons(lessons.clone())
             // AUTOPILOTATGE: el worker cerca informació a internet sol (headless,
             // sense finestres ni permisos) per fonamentar el codi de cada tasca.

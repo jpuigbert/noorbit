@@ -1,5 +1,6 @@
 use std::path::{PathBuf};
 use std::process::Stdio;
+use std::sync::Mutex;
 use std::time::Duration;
 use async_trait::async_trait;
 use tokio::process::Command;
@@ -8,29 +9,58 @@ use noorbit_jam::{Checkpointer, Task};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Sostre del timeout ADAPTATIU: un disc extern lent (exFAT sobre USB) pot
+/// trigar minuts en un `git add -A` de centenars de fitxers.
+const MAX_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// Factor pel que es multiplica la duració REAL observada: l'ordre següent
+/// pot trigar 3× el que va trigar l'anterior (el marge és per al creixement
+/// del repositori, no per soroll).
+const TIMEOUT_FACTOR: u32 = 3;
+
 pub struct GitCheckpointer {
     repo: PathBuf,
     timeout: Duration,
     clean_untracked: bool,
     user_name: String,
     user_email: String,
+    /// Duració OBSERVADA de l'últim ordre git completat. El timeout següent
+    /// s'adapta a ella: un timeout fix de 30 s fa fallar TOT el checkpoint en
+    /// un volum lent (mesurat: `git status --porcelain` = 34,7 s), i la Jam
+    /// es queda sense commits i sense poder tirar enrere.
+    last_cost: Mutex<Duration>,
 }
 impl GitCheckpointer {
     pub fn new(repo: impl Into<PathBuf>) -> Result<Self, String> {
         let repo = repo.into();
         if !repo.exists() { return Err(format!("path no existeix: {}", repo.display())); }
-        let ckpt = Self { repo, timeout: DEFAULT_TIMEOUT, clean_untracked: true, user_name: "NoOrbit Agent".into(), user_email: "agent@noorbit.local".into() };
+        let ckpt = Self { repo, timeout: DEFAULT_TIMEOUT, clean_untracked: true, user_name: "NoOrbit Agent".into(), user_email: "agent@noorbit.local".into(), last_cost: Mutex::new(Duration::ZERO) };
         let check = std::process::Command::new("git").arg("-C").arg(&ckpt.repo).args(["rev-parse","--git-dir"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
         match check { Ok(s) if s.success() => Ok(ckpt), Ok(_) => Err(format!("no és un repo git: {}", ckpt.repo.display())), Err(e) => Err(format!("git no disponible: {e}")) }
     }
     pub fn with_timeout(mut self, t: Duration) -> Self { self.timeout = t; self }
     pub fn with_clean_untracked(mut self, yes: bool) -> Self { self.clean_untracked = yes; self }
     pub fn with_user(mut self, name: impl Into<String>, email: impl Into<String>) -> Self { self.user_name = name.into(); self.user_email = email.into(); self }
+    /// Timeout EFFECTIU de l'ordre següent: `max(timeout configurat, 3 × el
+    /// que va trigar l'últim)`, amb un sostre de 10 min. En un disc ràpid és
+    /// 30 s (com sempre); en un disc extern lent creix sol, sense que ningú
+    /// l'hagi de configurar.
+    fn effective_timeout(&self) -> Duration {
+        let last = self.last_cost.lock().map(|d| *d).unwrap_or(Duration::ZERO);
+        last.saturating_mul(TIMEOUT_FACTOR).max(self.timeout).min(MAX_TIMEOUT)
+    }
+    /// Recorda quant va trigar l'últim ordre (per adaptar el següent).
+    fn remember_cost(&self, d: Duration) {
+        if let Ok(mut l) = self.last_cost.lock() { *l = d; }
+    }
     async fn run_git(&self, args: &[&str]) -> Result<std::process::Output, String> {
         let mut cmd = Command::new("git");
         cmd.arg("-C").arg(&self.repo).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
         let child = cmd.spawn().map_err(|e| format!("spawn git: {e}"))?;
-        let out = tokio::time::timeout(self.timeout, child.wait_with_output()).await.map_err(|_| format!("git timeout"))?.map_err(|e| format!("wait git: {e}"))?;
+        let started = std::time::Instant::now();
+        let budget = self.effective_timeout();
+        let out = tokio::time::timeout(budget, child.wait_with_output()).await.map_err(|_| format!("git timeout (més de {})", budget.as_secs()))?.map_err(|e| format!("wait git: {e}"))?;
+        self.remember_cost(started.elapsed());
         Ok(out)
     }
 }
@@ -170,5 +200,32 @@ mod tests {
     async fn constructor_rebutja_no_repo() {
         let dir = TempDir::new().unwrap();
         assert!(GitCheckpointer::new(dir.path()).is_err());
+    }
+
+    /// El timeout s'adapta a la lentitud OBSERVADA del volum: en un disc
+    /// extern exFAT un `git status` pot trigar 34 s i el timeout fix de 30 s
+    /// feia fallar TOT el checkpoint de la Jam.
+    #[tokio::test]
+    async fn el_timeout_s_adapta_a_la_lentitud_del_volum() {
+        let (_dir, ckpt) = init_repo();
+        // Sense observacions: el timeout per defecte (30 s).
+        assert_eq!(ckpt.effective_timeout(), DEFAULT_TIMEOUT);
+        // Un ordre que ha trigat 40 s → el següent en té 120 (3×).
+        ckpt.remember_cost(Duration::from_secs(40));
+        assert_eq!(ckpt.effective_timeout(), Duration::from_secs(120));
+        // Sostre: mai més de 10 min.
+        ckpt.remember_cost(Duration::from_secs(600));
+        assert_eq!(ckpt.effective_timeout(), MAX_TIMEOUT);
+    }
+
+    /// El timeout configurat explícitment és el MÍNIM: un timeout
+    /// configurat més gran no es rebaixa perquè el volum sigui ràpid.
+    #[tokio::test]
+    async fn el_timeout_configurat_es_el_minim() {
+        let (_dir, ckpt) = init_repo();
+        let ckpt = ckpt.with_timeout(Duration::from_secs(120));
+        assert_eq!(ckpt.effective_timeout(), Duration::from_secs(120));
+        ckpt.remember_cost(Duration::from_secs(1));
+        assert_eq!(ckpt.effective_timeout(), Duration::from_secs(120));
     }
 }

@@ -7,6 +7,7 @@
 //! d'eines rellevants per a la tasca a partir de les paraules del prompt.
 
 use super::mcp::{self, McpTool};
+use super::snippets;
 use anyhow::{anyhow, Result};
 use serde::Serialize;
 use std::path::Path;
@@ -296,11 +297,29 @@ pub async fn run_agent_task(app: &AppHandle, prompt: &str, model: Option<String>
 
     let model = model.unwrap_or_else(|| "qwen2.5:7b".to_string());
     emit_task(app, "model", &model);
-    let system = "Ets l'agent d'Unreal Engine de NoOrbit. Tens un conjunt d'eines MCP per \
-                  treballar DINS de l'editor (crear actors, editar blueprints, moure coses…). \
-                  Respon en català, breu. Si l'eina falla, llegeix l'error i torna-ho a provar \
-                  amb uns altres paràmetres abans de dir que no es pot. Quan la feina estigui \
-                  feta, explica en una frase què has fet i marxa.";
+    // Patrons i SNIPPETS d'Unreal al prompt: la comunitat d'Epic (si hi ha
+    // xarxa) i el catàleg local de reserva. Sense aixos el model local
+    // improvisa noms d'eines i APIs que no existeixen (o que fallen en
+    // silenci per Remote Control).
+    let snips = snippets::cerca(prompt).await;
+    if !snips.is_empty() {
+        emit_task(
+            app,
+            "context",
+            &format!(
+                "{} patrons/snippets d'Unreal injectats al prompt",
+                snips.len()
+            ),
+        );
+    }
+    let system = format!(
+        "Ets l'agent d'Unreal Engine de NoOrbit. Tens un conjunt d'eines MCP per \
+         treballar DINS de l'editor (crear actors, editar blueprints, moure coses…). \
+         Respon en català, breu. Si l'eina falla, llegeix l'error i torna-ho a provar \
+         amb uns altres paràmetres abans de dir que no es pot. Quan la feina estigui \
+         feta, explica en una frase què has fet i marxa.\n\n{}",
+        snippets::context_prompt(prompt, &snips)
+    );
 
     let mut messages: Vec<serde_json::Value> = vec![
         serde_json::json!({ "role": "system", "content": system }),

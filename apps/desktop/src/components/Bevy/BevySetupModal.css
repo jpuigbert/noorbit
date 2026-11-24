@@ -1,0 +1,187 @@
+/* Assistent de Bevy — consumix NOMÉS els tokens del tema (--bg-*, --text-*,
+   --border*, --accent…) perquè el modal sembli del mateix disseny que la resta
+   de l'aplicació, també en els temes clars. */
+
+.bs-modal {
+  width: 620px;
+}
+
+.bs-intro {
+  margin: 4px 0 12px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.bs-step {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+}
+
+.bs-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.bs-step-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--bg-3);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.bs-step-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+
+.bs-desc {
+  font-size: 11.5px;
+  color: var(--text-2);
+  line-height: 1.45;
+}
+
+.bs-ok,
+.bs-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-1);
+}
+
+.bs-ok svg {
+  color: var(--success);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.bs-warn svg {
+  color: var(--warning);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.bs-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-2);
+  word-break: break-all;
+}
+
+.bs-warn-txt {
+  color: var(--warning);
+}
+
+.bs-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-1);
+  cursor: pointer;
+}
+
+.bs-radio input {
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+
+.bs-hint {
+  display: block;
+  font-size: 11px;
+  font-style: normal;
+  color: var(--text-3);
+  line-height: 1.4;
+}
+
+.bs-fields {
+  margin: 6px 0 10px;
+}
+
+.bs-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bs-row input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-size: 12.5px;
+  font-family: var(--font-mono);
+  outline: none;
+}
+
+.bs-row input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.bs-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.bs-msg {
+  margin-top: 10px;
+  padding: 9px 11px;
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--text-1);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.bs-msg-err {
+  border-color: var(--warning);
+  color: var(--text-0);
+}
+
+.bs-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.bs-spin {
+  animation: bs-rotate 0.9s linear infinite;
+}
+
+@keyframes bs-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

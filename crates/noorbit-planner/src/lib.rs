@@ -48,7 +48,7 @@ impl Engine {
     /// Versió LLIBRE per al prompt del planner: el model ha de saber QUÈ és
     /// el motor per escriure codi compatible (una joc de Bevy és Rust amb
     /// ECS; «bevy» a secas no li diu res).
-    fn describe(self) -> &'static str {
+    pub fn describe(self) -> &'static str {
         match self {
             Engine::Unreal5 => "unreal5 (Unreal Engine 5, C++/Blueprints, .uproject)",
             Engine::Godot4 => "godot4 (Godot 4, GDScript, .tscn/.gd, project.godot)",
@@ -77,6 +77,22 @@ pub trait LlmClient: Send + Sync {
     async fn complete_with_usage(&self, prompt: &str) -> std::result::Result<(String, u64), String> {
         let s = self.complete(prompt).await?;
         Ok((s, 0))
+    }
+    /// Generació amb FRAGMENTS: el callback rep el text a mida que el model
+    /// l'escriu (mai el text final sencer, que només es coneix al final).
+    ///
+    /// Per defecte no hi ha streaming (comportament antic de tothom). La Jam
+    /// l'overrideja amb el motor local perquè l'usauri vegi QUÈ està fent la
+    /// IA en lloc de tenir minuts de silenci: un model local tardà minuts a
+    /// escriure un fitxer sencer i el panell semblava penjat.
+    async fn complete_streaming(
+        &self,
+        prompt: &str,
+        on_chunk: &(dyn for<'a> Fn(&'a str) + Send + Sync),
+    ) -> std::result::Result<String, String> {
+        let s = self.complete(prompt).await?;
+        on_chunk(&s);
+        Ok(s)
     }
 }
 
@@ -122,6 +138,26 @@ fn build_prompt(brief: &Brief, feedback: Option<&str>) -> String {
     p.push_str("Retorna NOMÉS un objecte JSON vàlid, sense text addicional.\n\n");
     p.push_str("REGLES: tasques petites (≤300 línies), acceptance 1..=10, IDs únics sense espais, màx 100 tasques.\n");
     p.push_str("FORMAT: {\"title\":...,\"tasks\":[{\"id\":...,\"title\":...,\"description\":...,\"acceptance\":[...]},...]}\n\n");
+    // FIDELITAT AL BRIEF: sense això el planner resumia el brief en tasques
+    // genèriques i la Jam construïa «una altra cosa». Com més s'explicava el
+    // joc, més es perdia pel camí.
+    p.push_str(
+        "FIDELITAT AL BRIEF (la regla més important):\n\
+         - Les tasques han de construir EXACTAMENT el joc que descriu el brief. Si el\n\
+         \tbrief demana un joc de nauxes, les tasques són de nauxes: NO un joc de\n\
+         \tplataformes ni un joc genèric de «mou-te i suma punts».\n\
+         - No inventis mecàniques que el brief no demani i no n'omulguis cap que sí.\n\
+         - Si el brief enumera requisits (mecàniques, controls, personatges, objectius,\n\
+         \tcondició de guanya o de perdre), hi ha d'haver com a mínim una tasca per\n\
+         \tcadascú: el pla ha de COBRIR el brief sencer.\n\
+         - El títol del pla ha de ser el nom del joc demanat.\n\n\
+         JOC JUGABLE:\n\
+         - La PRIMERA tasca ha de deixar el projecte en un estat que es pugui EXECUTAR:\n\
+         \testructura del projecte, escena o bucle principal, entrada del jugador\n\
+         \t(teclat o ratolí) i una condició de guanya o perdre.\n\
+         - Les tasques següents afegeixen el contingut demanat al brief, i cada tasca\n\
+         \tha de deixar el projecte en un estat que es pot executar (mai trencat).\n\n",
+    );
     p.push_str(&format!("ENGINE: {engine}\nDURADA: {dur_min} min\n\n"));
     p.push_str("BRIEF (user input):\n-----\n");
     p.push_str(brief.text.trim());
@@ -276,5 +312,19 @@ mod tests {
     fn el_bevy_s_explica_al_planner() {
         assert!(Engine::Bevy.describe().contains("Rust"));
         assert!(Engine::Godot4.describe().contains("GDScript"));
+    }
+
+    /// El prompt del planner ha d'insistir en la FIDELITAT al brief i en un joc
+    /// JUGABLE: sense aquestes regles les tasques eren genèriques i la Jam
+    /// construïa «una altra cosa» (com més s'explicava el joc, pitjor).
+    #[test]
+    fn el_prompt_demana_fidelitat_al_brief_i_un_joc_jugable() {
+        let mut b = brief();
+        b.text = "un joc de nauxes que es mouen amb les fletxes".into();
+        let p = build_prompt(&b, None);
+        assert!(p.contains("FIDELITAT AL BRIEF"), "{p}");
+        assert!(p.contains("JOC JUGABLE"), "{p}");
+        assert!(p.contains("un joc de nauxes que es mouen amb les fletxes"), "{p}");
+        assert!(p.contains("godot4") || p.contains("custom"), "{p}");
     }
 }

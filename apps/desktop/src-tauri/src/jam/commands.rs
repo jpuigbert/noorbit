@@ -15,6 +15,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tokio_util::sync::CancellationToken;
 
+use noorbit_planner::Engine;
+
 use crate::jam::{
     emit, store_plan, derive_jam_id, jam_ai_path, jam_data_dir, jam_workdir, write_jam_ai,
     JamRequest, JamRunner, JamState,
@@ -55,7 +57,7 @@ impl Default for JamHandle {
 }
 
 impl JamHandle {
-    fn snapshot(&self) -> JamState {
+    pub(crate) fn snapshot(&self) -> JamState {
         // Sense `unwrap`: si el mutex s'havia envenenat (un panell va fallar
         // dins del lock), la Jam encara ha de poder pintar l'estat en comptes
         // de fer caure el panell sencer.
@@ -151,14 +153,43 @@ pub async fn jam_start(
         return Err("el brief és buit".into());
     }
 
-    // Arrel del projecte: la que l'usuari té oberta (o la que demana).
-    let root = match &request.repo_path {
+    // Motor triat: decideix amb què s'escriu el joc i on viu.
+    let engine = Engine::parse(&request.engine).map_err(|e| e.to_string())?;
+
+    // Arrel del projecte: la que l'usuari ha demanat o la que té oberta.
+    let base = match &request.repo_path {
         Some(p) if !p.trim().is_empty() => std::path::PathBuf::from(p),
         _ => crate::commands::workspace::current_root()
             .ok_or_else(|| "no hi ha cap projecte obert".to_string())?,
     };
-    if !root.is_dir() {
-        return Err(format!("la carpeta no existeix: {}", root.display()));
+    if !base.is_dir() {
+        return Err(format!("la carpeta no existeix: {}", base.display()));
+    }
+
+    // ── CARPETA DEL JOC ──────────────────────────────────────────────────
+    // La Jam ha de construir EL JOC que s'ha demanat. Si el workspace obert no
+    // és un projecte del motor triat, el joc es crea a la SEVA carpeta
+    // (`prototypes/<nom>/`): el resultat és un projecte del joc, i el projecte
+    // que l'usuari té obert no queda ple de fitxers solts.
+    let explicit = request
+        .repo_path
+        .as_deref()
+        .map(|p| !p.trim().is_empty())
+        .unwrap_or(false);
+    let mut root = if explicit {
+        base.clone()
+    } else {
+        crate::jam::game::carpeta_del_joc(&base, engine, &brief)
+    };
+
+    // Estructura del projecte de joc (manifest, escena principal, entrada):
+    // sense això la Jam escriu fitxers solts i no hi ha res a obrir ni a
+    // executar — és a dir, el resultat NO és un joc.
+    match crate::jam::game::prepara_projecte(&root, engine) {
+        Ok(dir) => root = dir,
+        Err(e) => {
+            eprintln!("jam: no s'ha pogut preparar el projecte de joc: {e}");
+        }
     }
 
     // La Jam desa cada tasca com un commit per poder tornar enrere, però git
@@ -170,7 +201,14 @@ pub async fn jam_start(
     // possible (git sense instal·lar, permisos), la Jam corre IGUALMENT sense
     // checkpoints: el fill ho detecta, ho diu al registre i treballa
     // generant i verificant tasques sense desfer-les.
-    if noorbit_git::GitCheckpointer::new(root.clone()).is_err()
+    //
+    // I si la carpeta del joc és una SUBCARPETA d'un altre repo (el workspace
+    // obert en pot ser un), la Jam ha de fer el seu PROPI repo: amb el del
+    // pare, el «git add -A» i el «git clean -fd» del checkpointer tocaven el
+    // projecte de l'usuari sencer.
+    let repo_propi = crate::commands::workspace::te_repo_propi(&root);
+    if !repo_propi
+        || noorbit_git::GitCheckpointer::new(root.clone()).is_err()
         || !crate::commands::workspace::te_base_commit(&root)
     {
         if let Err(e) = crate::commands::workspace::init_git_repo(&root).await {
@@ -243,6 +281,15 @@ pub async fn jam_start(
         };
     });
     let _ = app.emit("jam://state", jam.snapshot());
+    // L'usuari ha de saber ON s'està construint el joc (pot ser una carpeta
+    // nova dins del workspace obert).
+    emit(
+        &app,
+        "note",
+        "",
+        &format!("el joc es construeix a: {}", root.display()),
+        true,
+    );
 
     // Fitxers interns FORA del repo del projecte: escrits a l'arrel, el
     // `git add -A` del checkpointer els incloïa als commits i el
@@ -265,7 +312,7 @@ pub async fn jam_start(
     // esborraria la compilació sencera entre tasques.
     if let Err(e) = noorbit_persistence::ensure_git_excluded(
         &root,
-        &[".noorbit/", ".noorbit-jam/", "target/"],
+        &[".noorbit/", ".noorbit-jam/", "target/", "._*"],
     )
         .await
     {
@@ -503,6 +550,26 @@ pub async fn jam_start(
                                     jam3.set(|s| s.current_detail = detail.to_string());
                                     let _ = app3.emit("jam://state", jam3.snapshot());
                                 }
+                                if kind == "stream" {
+                                    // TEXT EN VIU: el que la IA està escrivint
+                                    // ara mateix (streaming del model local).
+                                    // `current_detail` en mostra un retall (la
+                                    // línia és d'una sola fila); el text sencer
+                                    // arriba a la UI pel registre i pel requadre
+                                    // «en viu» del panell.
+                                    let curt: String = detail
+                                        .chars()
+                                        .rev()
+                                        .take(140)
+                                        .collect::<Vec<_>>()
+                                        .into_iter()
+                                        .rev()
+                                        .collect();
+                                    jam3.set(|s| {
+                                        s.current_detail = format!("la IA està escrivint: {curt}")
+                                    });
+                                    let _ = app3.emit("jam://state", jam3.snapshot());
+                                }
                                 if kind == "task_done" || kind == "task_error" {
                                     // El text del `detail` és el que dona
                                     // context a l'usuari (fitxers tocats, error).
@@ -592,6 +659,18 @@ pub async fn jam_start(
         // El resum de memòria s'escriu DESPRÉS (el pare és l'únic que el
         // té) i s'hi afegeix al REPORT.md que va escriure el fill.
         append_memory_summary(&summary_path, &report_path);
+        // Si el fill NO ha pogut deixar cap informe (l'ha mort el guardian, la
+        // màquina s'ha apagat, el supervisor ha fallat…), es deixa un
+        // REPORT.md MÍNIM que explica què ha passat. Abans el projecte
+        // quedava sense informe i l'usuari només veia un «No such file or
+        // directory» sense cap pista. Si l'ha aturat el mateix usuari, no:
+        // una aturada ordenada no és un fracàs i no ha de deixar res escrit.
+        if !token.is_cancelled() {
+            let reason = jam_handle.snapshot().error.unwrap_or_else(|| {
+                "l'agent s'ha aturat sense deixar l'informe complet (el procés pot haver estat aturat pel supervisor o pel sistema)".to_string()
+            });
+            write_fallback_report(&report_path, &reason);
+        }
         let _ = std::fs::remove_dir_all(&workdir);
 
         jam_handle.set_ai_path(None);
@@ -665,6 +744,70 @@ fn append_memory_summary(summary_path: &std::path::Path, report_path: &std::path
         md.push_str(&extra);
         let _ = std::fs::write(report_path, md);
     }
+}
+
+/// Llegeix el REPORT.md de la Jam amb un missatge HONEST quan encara no hi és.
+///
+/// Abans el frontend llegia el fitxer directament (`read_file`) i, si el
+/// REPORT.md no existia (Jam aturada, fallida, o projecte en un volum lent on
+/// la Jam no arriba a acabar), l'usuari veia l'error cru de Rust: «No s'ha
+/// pogut llegir /Volumes/…/REPORT.md: No such file or directory (os error 2)».
+/// Ara el backend diu què està passant de veritat i per què.
+#[tauri::command]
+pub async fn jam_read_report(jam: State<'_, Arc<JamHandle>>) -> Result<String, String> {
+    let st = jam.snapshot();
+    if st.report_path.trim().is_empty() {
+        return Err("Encara no s'ha fet cap Jam: no hi ha cap REPORT.md.".into());
+    }
+    let path = std::path::PathBuf::from(&st.report_path);
+    match tokio::fs::read_to_string(&path).await {
+        Ok(text) => Ok(text),
+        Err(e) => {
+            // El motiu importa: si la Jam va fallar, el diu; si encara corre,
+            // diu que és a punt; si el problema és el disc, ho diu.
+            let mut msg = format!("Encara no hi ha cap REPORT.md a {}.", st.report_path);
+            if let Some(err) = st.error.as_deref() {
+                msg.push_str(&format!(" La Jam va fallar: {err}"));
+            } else if st.finished_at.is_some() {
+                msg.push_str(
+                    " La Jam va acabar sense deixar l'informe (si el projecte és en un \
+                     disc extern lent, és sovint que el git no arribi a temps).",
+                );
+            } else {
+                msg.push_str(" La Jam encara no ha acabat: l'informe s'escriu quan acaba.");
+            }
+            if e.kind() == std::io::ErrorKind::NotFound {
+                msg.push_str(" (El fitxer no existeix.)");
+            }
+            Err(msg)
+        }
+    }
+}
+
+/// Escript un REPORT.md MÍNIM quan el fill no ha pogut deixar-ne cap.
+///
+/// Sense això, una Jam que mor (procés killed, màquina apagada, error del
+/// supervisor) deixa el projecte sense informe i l'usuari es queda amb un
+/// «no such file or directory» sense cap pista del que va passar.
+fn write_fallback_report(report_path: &std::path::Path, reason: &str) {
+    if report_path.exists() {
+        return;
+    }
+    let md = format!(
+        "# Jam Report\n\n\
+         - **Generat:** {}\n\
+         - **Estat:** la Jam no va poder acabar\n\n\
+         ## Per què\n\n\
+         {}\n\n\
+         _Aquest fitxer l'escriu NoOrbit quan la Jam s'atura sense haver pogut \
+         deixar l'informe complet._\n",
+        chrono::Local::now().to_rfc3339(),
+        reason.trim()
+    );
+    if let Some(parent) = report_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(report_path, md);
 }
 
 /// Marca la Jam com a fallada i l'atura.
