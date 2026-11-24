@@ -45,6 +45,30 @@ describe("tokenizeChat", () => {
     ]);
   });
 
+  it("«@branch:» es converteix en un xip de branca", () => {
+    const segs = tokenizeChat("@branch: create feature/joc");
+    expect(segs).toEqual([{ kind: "branch", action: "create", name: "feature/joc" }]);
+  });
+
+  it("les àlies en català es NORMALITZEN («crea» no es veu com a esborrat)", () => {
+    // El materialitzador accepta «crea» com a creació: el xip ho ha de
+    // reflectir, no caure a l'etiqueta vermella d'esborrat.
+    expect(tokenizeChat("@branch: crea nova")).toEqual([
+      { kind: "branch", action: "create", name: "nova" },
+    ]);
+    expect(tokenizeChat("@branca: canvia develop")).toEqual([
+      { kind: "branch", action: "checkout", name: "develop" },
+    ]);
+    expect(tokenizeChat("@branch: esborra temporal")).toEqual([
+      { kind: "branch", action: "delete", name: "temporal" },
+    ]);
+  });
+
+  it("una acció de branca que no existeix queda en prosa (no fa res)", () => {
+    const segs = tokenizeChat("@branch: inventat x");
+    expect(segs).toEqual([{ kind: "prose", text: "@branch: inventat x" }]);
+  });
+
   it("netja els artefactes de la interfície dins de la targeta", () => {
     const segs = tokenizeChat("@file: index.php\nPHP\nCopia\n<?php echo 1;");
     expect(segs).toEqual([{ kind: "file", path: "index.php", code: "<?php echo 1;\n" }]);

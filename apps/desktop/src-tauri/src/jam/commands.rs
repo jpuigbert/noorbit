@@ -813,6 +813,16 @@ fn write_fallback_report(report_path: &std::path::Path, reason: &str) {
 /// Marca la Jam com a fallada i l'atura.
 fn fail(app: &AppHandle, jam: &Arc<JamHandle>, msg: String) {
     emit(app, "error", "", &msg, false);
+    // Informe de rescat: `fail` es crida quan la Jam mor ABANS que el fill
+    // pugui escriure el REPORT.md (el cas més habitual: el pla ha fallat).
+    // Sense això el projecte quedava sense informe i l'usuari es trobava
+    // «Encara no hi ha cap REPORT.md… (El fitxer no existeix.)» en lloc del
+    // motiu. El guard de `write_fallback_report` fa que un informe bo ja
+    // escrit pel fill no es trepitgi mai.
+    let report_path = jam.snapshot().report_path;
+    if !report_path.trim().is_empty() {
+        write_fallback_report(std::path::Path::new(&report_path), &msg);
+    }
     jam.set(|s| {
         s.running = false;
         s.stopping = false;

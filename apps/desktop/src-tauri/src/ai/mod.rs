@@ -30,6 +30,12 @@ pub mod native;
 /// afegir al final, crear amb contingut enganxat).
 pub mod edit;
 
+/// Ordres GIT de la IA nativa (branques: llistar, crear, canviar, esborrar).
+/// Viu al costat de `edit`: les dues coses són ordres deterministes que
+/// escriuen la intenció en forma de directriu («@branch:», «@delete:») i
+/// deixen que el materialitzador l'apliqui.
+pub mod gitops;
+
 /// Plantilles de codi de la IA nativa: el que el motor simbòlic sap crear de
 /// soca-rel i emet en format «@file:» perquè el programa el materialitze.
 pub mod codegen;
@@ -2796,42 +2802,57 @@ impl AiManager {
         let text = if let Some(topic) = native::improvement_request(prompt) {
             let n = self.native_improve(&topic, prompt).await;
             native::improved_message(&topic, n)
-        } else if let Some(ed) = edit::handle(prompt) {
-            ed
         } else {
-            let brain = native::load_brain();
-            let lessons = native::lessons_from_system(system);
-            // 1) Capacitats deterministes (matemàtiques exactes, plantilles de
-            //    codi, skills, informe del vagueig, resum factual del projecte):
-            //    manen SEMPRE, també al LLM neuronal, perquè són més fiables.
-            if let Some(d) = native::deterministic(prompt, &brain, &lessons) {
-                d
-            // 2) IA NEURONAL de ple dret: un LLM local (GGUF petit + llama.cpp)
-            //    que cab en 4 GB, amb internet sota demanda i alimentat per les
-            //    lliçons d'aprenentatge. És la resposta principal quan hi ha
-            //    model, motor i RAM.
-            } else if let Some(llm) =
-                native_llm::ask(&self.http_client(), prompt, system, &lessons).await
-            {
-                llm
-            // 3) Sense LLM disponible: reserva simbòlica (cervell + lliçons +
-            //    conversa) i, si cal, delegació a una IA disponible o la reserva
-            //    honesta.
-            } else {
-                match native::generic(prompt, &brain, &lessons) {
-                    Some(a) => a,
-                    None => {
-                        // Generació lliure (articles, programes sencers…): la
-                        // nativa encarrega la feina a una IA disponible i la torna
-                        // com a resposta pròpia (cap event delata el teacher).
-                        ctl.set_thinking(Some(
-                            "El meu motor simbòlic no ho genera: encarrego la feina a una IA disponible…"
-                                .to_string(),
-                        ))
-                        .await;
-                        match self.native_task_delegate(prompt, system).await {
-                            Some(gen) => gen,
-                            None => native::fallback(),
+            // Ordres deterministes: BRANQUES (Git) i EDICIÓ de fitxers. Poden
+            // venir les dues alhora («esborra la carpeta del joc i la seva
+            // branca»): s'uneixen i el frontend materialitza les dues.
+            // `gitops::handle` pot llençar subprocessos de git (el llistat
+            // de branques): fora del worker async, amb `spawn_blocking`.
+            let prompt_owned = prompt.to_string();
+            let branques = tokio::task::spawn_blocking(move || gitops::handle(&prompt_owned))
+                .await
+                .unwrap_or(None);
+            let edicio = edit::handle(prompt);
+            match (branques, edicio) {
+                (Some(b), Some(e)) => format!("{}\n\n{}", b, e),
+                (Some(b), None) => b,
+                (None, Some(e)) => e,
+                (None, None) => {
+                    let brain = native::load_brain();
+                    let lessons = native::lessons_from_system(system);
+                    // 1) Capacitats deterministes (matemàtiques exactes, plantilles de
+                    //    codi, skills, informe del vagueig, resum factual del projecte):
+                    //    manen SEMPRE, també al LLM neuronal, perquè són més fiables.
+                    if let Some(d) = native::deterministic(prompt, &brain, &lessons) {
+                        d
+                    // 2) IA NEURONAL de ple dret: un LLM local (GGUF petit + llama.cpp)
+                    //    que cab en 4 GB, amb internet sota demanda i alimentat per les
+                    //    lliçons d'aprenentatge. És la resposta principal quan hi ha
+                    //    model, motor i RAM.
+                    } else if let Some(llm) =
+                        native_llm::ask(&self.http_client(), prompt, system, &lessons).await
+                    {
+                        llm
+                    // 3) Sense LLM disponible: reserva simbòlica (cervell + lliçons +
+                    //    conversa) i, si cal, delegació a una IA disponible o la reserva
+                    //    honesta.
+                    } else {
+                        match native::generic(prompt, &brain, &lessons) {
+                            Some(a) => a,
+                            None => {
+                                // Generació lliure (articles, programes sencers…): la
+                                // nativa encarrega la feina a una IA disponible i la torna
+                                // com a resposta pròpia (cap event delata el teacher).
+                                ctl.set_thinking(Some(
+                                    "El meu motor simbòlic no ho genera: encarrego la feina a una IA disponible…"
+                                        .to_string(),
+                                ))
+                                .await;
+                                match self.native_task_delegate(prompt, system).await {
+                                    Some(gen) => gen,
+                                    None => native::fallback(),
+                                }
+                            }
                         }
                     }
                 }

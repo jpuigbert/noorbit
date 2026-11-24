@@ -185,9 +185,13 @@ export function parseFileBlocks(
       continue;
     }
     // Una directriu d'execució o d'estructura INTERROMP el bloc: tot el que
-    // ve després ja no és contingut d'aquest fitxer.
+    // ve després ja no és contingut d'aquest fitxer. «@branch:» també
+    // interromp, però amb «@» OBLIGATÒRI i sense «\w*»: una clau YAML real
+    // («branch: main», «branches: [main]») dins d'un fitxer no és mai una
+    // directriu, i truncaria el contingut en silenci.
     if (
       /^[ \t>#*-]*(?:\d+[.)]\s+)?@?(dir|directori|carpeta|folder|delete|esborra|borra|elimina|remove|rm)\w*:/i.test(line) ||
+      /^[ \t>#*-]*(?:\d+[.)]\s+)?@(branch|branca|git-branch)\s*:/i.test(line) ||
       /^[ \t>#*-]*(?:\d+[.)]\s+)?@?(edit|modifica|substitueix|reemplaça)\w*:/i.test(line) ||
       /^[ \t>#*-]*(RUN|IMG|NB)\|/i.test(line)
     ) {
@@ -492,6 +496,55 @@ export function parseDeleteDirectives(raw: string): string[] {
       .replace(/\\/g, "/");
     if (!d || d.split("/").includes("..")) continue;
     if (!out.includes(d)) out.push(d);
+  }
+  return out;
+}
+
+/// Directrius de BRANCA (Git) que la IA emet: «@branch: create feature/x»,
+/// «@branch: checkout develop», «@branch: delete temporal». Formes tolerades:
+/// «@branch:», «@branca:», «@git-branch:». L'acció pot venir en català
+/// («crea», «canvia», «esborra») o en anglès.
+export interface BranchDirective {
+  action: "create" | "checkout" | "delete";
+  name: string;
+}
+
+/// Directriu de BRANCA: única regex compartida pel xip del xat
+/// (`tokenizeChat`) i el materialitzador (`parseBranchDirectives`), perquè
+/// l'usuari veja exactament el que s'aplicarà. El «@» és OBLIGATORI: sense
+/// ell, una clau «branch: main» d'un YAML o un exemple documentat executaria
+/// directrius de git reals (fins i tot destructives) des de prosa.
+export const BRANCH_DIRECTIVE_RE =
+  /^[ \t>#*-]*(?:\d+[.)]\s+)?@(?:branch|branca|git-branch)\s*:\s*(.+?)\s*$/i;
+
+/// Extreu les directrius de branca de la resposta de la IA.
+/// Acció normalitzada amb les MATEIXES àlies que reconeix el tokenitzador del
+/// xat (chatSegments.ts): una única font de la veritat, perquè l'usuari vegi
+/// la mateixa etiqueta que el que realment s'aplicarà.
+export function normalizeBranchAction(
+  accio: string
+): "create" | "checkout" | "delete" | null {
+  const a = accio.toLowerCase();
+  if (["create", "crea", "crear", "new", "nova"].includes(a)) return "create";
+  if (["checkout", "switch", "canvia", "canviar"].includes(a)) return "checkout";
+  if (["delete", "remove", "esborra", "elimina", "borra"].includes(a)) return "delete";
+  return null;
+}
+
+export function parseBranchDirectives(raw: string): BranchDirective[] {
+  const out: BranchDirective[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const m = BRANCH_DIRECTIVE_RE.exec(line);
+    if (!m) continue;
+    const body = m[1]
+      .replace(/^[`'"]+|[`'"]+$/g, "")
+      .trim();
+    if (!body) continue;
+    const parts = body.split(/\s+/);
+    const name = parts.slice(1).join(" ").trim();
+    if (!name) continue;
+    const action = normalizeBranchAction(parts[0]);
+    if (action) out.push({ action, name });
   }
   return out;
 }

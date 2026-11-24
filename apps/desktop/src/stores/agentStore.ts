@@ -76,6 +76,7 @@ import {
   extractFromProse,
   extractRecommendedPaths,
   parseDeleteDirectives,
+  parseBranchDirectives,
   esBlocDeDocumentacio,
   nomesDocumentacio,
   extractTreePaths,
@@ -533,6 +534,14 @@ export async function applyEditBlocks(
   return { edited, failed, noops, outside };
 }
 
+/// Resultat d'esborrar una ruta al projecte: què s'ha netejat de GIT.
+/// El backend (commands/fs.rs) el retorna juntament amb l'esborrat.
+interface DeleteOutcome {
+  removed_branches?: string[];
+  kept_branches?: [string, string][];
+  removed_worktrees?: string[];
+}
+
 /// Exportada NOMÉS per als tests de regressió (agentStore.test.ts).
 export async function autoMaterialize(raw: string): Promise<string | null> {
   const ws = useWorkspaceStore.getState();
@@ -625,10 +634,18 @@ export async function autoMaterialize(raw: string): Promise<string | null> {
   const delReqs = parseDeleteDirectives(raw)
     .map((d) => keepRel(d))
     .filter((d): d is string => !!d);
+  // BRANQUES (Git) que la IA ha demanat tocar: «@branch: create/checkout/delete».
+  const branchReqs = parseBranchDirectives(raw);
   // Edicions QUIRÚRGIQUES «@edit:» (CERCA/NOU): modificar o esborrar codi
   // existent sense reemetre fitxers sencers (els models locals els tallen).
   const editBlocks = parseEditBlocks(raw);
-  if (files.length === 0 && dirReqs.length === 0 && delReqs.length === 0 && editBlocks.length === 0) {
+  if (
+    files.length === 0 &&
+    dirReqs.length === 0 &&
+    delReqs.length === 0 &&
+    editBlocks.length === 0 &&
+    branchReqs.length === 0
+  ) {
     // Sense res materialitzable: si la IA només demanava rutes FORA del
     // projecte, l'usuari ha de saber PER QUÈ no s'ha escrit res.
     if (outside.size > 0) {
@@ -686,7 +703,13 @@ export async function autoMaterialize(raw: string): Promise<string | null> {
       /* si un fitxer falla, continua amb la resta */
     }
   }
-  if (written.length === 0 && createdDirs.length === 0 && delReqs.length === 0 && editBlocks.length === 0)
+  if (
+    written.length === 0 &&
+    createdDirs.length === 0 &&
+    delReqs.length === 0 &&
+    editBlocks.length === 0 &&
+    branchReqs.length === 0
+  )
     return outside.size > 0
       ? t("agentFlow.pathsOutsideProject", { root: base, paths: [...outside].join(", ") })
       : null;
@@ -695,11 +718,22 @@ export async function autoMaterialize(raw: string): Promise<string | null> {
   //    de les escriptures: si un fitxer s'ha reescrit i alhora s'ha demanat
   //    d'esborrar-lo, mana l'esborrat (l'usuari vol netejar el projecte).
   const deleted: string[] = [];
+  // Branches i worktrees netejats EN ESBORRAR carpetes: l'esborrat d'una
+  // carpeta arrossega les branques que hi vivien (worktrees orfes i branches
+  // que quedaven penjades al repositori).
+  const branchesCleaned: string[] = [];
+  const branchesKept: { name: string; motiu: string }[] = [];
   for (const d of delReqs) {
     try {
-      await invoke("delete_path", { path: `${base}/${d}` });
+      const res = await invoke<DeleteOutcome | undefined>("delete_path", {
+        path: `${base}/${d}`,
+      });
       dropMark(`${base}/${d}`);
       deleted.push(d);
+      for (const b of res?.removed_branches ?? []) branchesCleaned.push(b);
+      for (const kv of res?.kept_branches ?? []) {
+        if (kv) branchesKept.push({ name: kv[0], motiu: kv[1] });
+      }
       // Si era també un fitxer escrit aquest torn, ix de la llista: ja no hi és.
       const i = written.indexOf(d);
       if (i >= 0) written.splice(i, 1);
@@ -713,6 +747,32 @@ export async function autoMaterialize(raw: string): Promise<string | null> {
   let editReport: { edited: string[]; failed: string[]; noops: string[]; outside: string[] } | null = null;
   if (editBlocks.length > 0) {
     editReport = await applyEditBlocks(base, editBlocks);
+  }
+  // 5) BRANQUES (Git): «@branch: create/checkout/delete». Van AL FINAL de tot:
+  //    canviar de branca toca l'arbre de treball, així que es fa quan ja no
+  //    hi ha res pendent d'escriure ni d'esborrar.
+  const branchReport: string[] = [];
+  for (const b of branchReqs) {
+    try {
+      if (b.action === "create") {
+        await invoke("git_branch_create", { name: b.name, from: null, checkout: true });
+        branchReport.push(t("agentFlow.branchCreatedActive", { name: b.name }));
+      } else if (b.action === "checkout") {
+        await invoke("git_branch_checkout", { name: b.name });
+        branchReport.push(t("agentFlow.branchCheckedOut", { name: b.name }));
+      } else {
+        await invoke("git_branch_delete", { name: b.name, force: false });
+        branchReport.push(t("agentFlow.branchDeletedOk", { name: b.name }));
+      }
+    } catch (e) {
+      const accio =
+        b.action === "create"
+          ? t("agentFlow.branchActionCreate")
+          : b.action === "checkout"
+            ? t("agentFlow.branchActionCheckout")
+            : t("agentFlow.branchActionDelete");
+      branchReport.push(t("agentFlow.branchError", { action: accio, name: b.name, error: String(e) }));
+    }
   }
   await ws.refreshTree();
   // La materialització definitiva ha acabat: els fitxers escrits en directe
@@ -777,6 +837,25 @@ export async function autoMaterialize(raw: string): Promise<string | null> {
       `🗑 Esborrats del projecte (${deleted.length}):\n` +
         deleted.map((p) => `• ${p}`).join("\n")
     );
+  }
+  // Branques netejades en esborrar carpetes (worktrees orfes i branques
+  // penjades que ja no tenien res a veure amb el projecte).
+  if (branchesCleaned.length > 0) {
+    parts.push(
+      t("agentFlow.branchesCleaned", { n: branchesCleaned.length }) +
+        "\n" +
+        branchesCleaned.map((b) => `• ${b}`).join("\n")
+    );
+  }
+  if (branchesKept.length > 0) {
+    parts.push(
+      t("agentFlow.branchesKept") +
+        "\n" +
+        branchesKept.map((b) => `• ${b.name} — ${b.motiu}`).join("\n")
+    );
+  }
+  if (branchReport.length > 0) {
+    parts.push(branchReport.join("\n"));
   }
   if (editReport && (editReport.edited.length > 0 || editReport.failed.length > 0 || editReport.outside.length > 0)) {
     if (editReport.edited.length > 0) {

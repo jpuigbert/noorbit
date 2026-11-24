@@ -18,6 +18,7 @@ pub mod engine_tools;
 pub mod experts;
 pub mod external_orchestrator;
 pub mod fsutil;
+pub mod git_ops;
 pub mod godot;
 pub mod grid;
 pub mod imgen;
@@ -396,6 +397,13 @@ pub fn run() {
             commands::git::git_stash_list,
             commands::git::git_stash_pop,
             commands::git::git_log,
+            // Branques i worktrees: llistar, crear, canviar i esborrar.
+            commands::git::git_branches,
+            commands::git::git_branch_create,
+            commands::git::git_branch_checkout,
+            commands::git::git_branch_delete,
+            commands::git::git_worktrees,
+            commands::git::git_worktree_prune,
             // Snapshots git shadow per pas d'agent (desfer fiable, Fase 1d).
             commands::snapshot::snapshot_count,
             commands::snapshot::snapshot_undo,

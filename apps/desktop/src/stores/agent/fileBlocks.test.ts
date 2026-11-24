@@ -12,6 +12,7 @@ import {
   fragmentMesSemblant,
   nomesDocumentacio,
   parseDeleteDirectives,
+  parseBranchDirectives,
   parseDirDirectives,
   parseEditBlocks,
   parseFileBlocks,
@@ -42,6 +43,14 @@ describe("parseFileBlocks", () => {
     const raw = "@file: a.txt\nlínia 1\nlínia 2\n@dir: carpeta/\nmés text";
     const b = parseFileBlocks(raw);
     expect(b[0].content).toBe("línia 1\nlínia 2\n");
+  });
+
+  it("«@branch:» també interromp el bloc (no s'escriu dins del fitxer)", () => {
+    // Coherència amb `tokenizeChat`: el xat fa xip de branca on el
+    // materialitzador ha de tallar el bloc, no embolicar la directriu al fitxer.
+    const raw = "@file: a.txt\nlínia 1\n@branch: create feature/x\nmés text";
+    const b = parseFileBlocks(raw);
+    expect(b[0].content).toBe("línia 1\n");
   });
 
   it("netja els artefactes de la interfície (etiqueta de llenguatge i «Copia»)", () => {
@@ -95,6 +104,22 @@ describe("parseDeleteDirectives", () => {
     expect(parseDeleteDirectives("@delete: /Volumes/Toshi/proj/a.py")).toEqual([
       "/Volumes/Toshi/proj/a.py",
     ]);
+  });
+});
+
+describe("parseBranchDirectives", () => {
+  it("llegeix les tres accions de branca", () => {
+    const raw = "@branch: create feature/joc\n@branch: checkout develop\n@branch: delete temporal";
+    expect(parseBranchDirectives(raw)).toEqual([
+      { action: "create", name: "feature/joc" },
+      { action: "checkout", name: "develop" },
+      { action: "delete", name: "temporal" },
+    ]);
+  });
+
+  it("accepta àlies en català i l'acció sense nom no fa res", () => {
+    const raw = "@branca: crea nova\n@branch: checkout\n@branch: inventat x";
+    expect(parseBranchDirectives(raw)).toEqual([{ action: "create", name: "nova" }]);
   });
 });
 

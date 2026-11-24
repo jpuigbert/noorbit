@@ -30,7 +30,11 @@ pub enum PlannerError {
     #[error("llm: {0}")] Llm(String),
     #[error("json invàlid: {0}")] Json(String),
     #[error("validació: {0}")] Validation(String),
-    #[error("esgotats {0} intents")] RetriesExhausted(u32),
+    /// Porta la causa de l'ÚLTIM intent: sense això l'usuari veia només
+    /// «esgotats 3 intents» i no podia saber si la IA estava caiguda, el
+    /// model no existia o el JSON sortia mal format.
+    #[error("esgotats {attempts} intents{last}")]
+    RetriesExhausted { attempts: u32, last: String },
 }
 pub type Result<T> = std::result::Result<T, PlannerError>;
 
@@ -126,7 +130,14 @@ impl Planner {
                 Err(e) => { warn!(attempt, "validació: {e}"); last_err = Some(format!("validació fallida: {e}")); continue; }
             }
         }
-        Err(PlannerError::RetriesExhausted(MAX_RETRIES + 1))
+        // La causa de l'últim intent viatja dins l'error: el panell de la Jam
+        // i l'informe de rescat la mostren, i l'usuari pot arreglar-ho (canviar
+        // d'IA, instal·lar el model que falta…).
+        let last = last_err.map(|e| format!(" ({e})")).unwrap_or_default();
+        Err(PlannerError::RetriesExhausted {
+            attempts: MAX_RETRIES + 1,
+            last,
+        })
     }
 }
 
@@ -326,5 +337,19 @@ mod tests {
         assert!(p.contains("JOC JUGABLE"), "{p}");
         assert!(p.contains("un joc de nauxes que es mouen amb les fletxes"), "{p}");
         assert!(p.contains("godot4") || p.contains("custom"), "{p}");
+    }
+
+    /// L'error final ha de dir PER QUÈ han fallat els intents: «esgotats 3
+    /// intents» a seques deixa l'usuari sense saber si era la IA caiguda, un
+    /// model absent o un JSON mal format.
+    #[tokio::test]
+    async fn l_error_final_porta_la_causa_de_l_ultim_intent() {
+        let llm = Arc::new(MockLlm {
+            replies: Mutex::new(vec![Ok("no és json".into()), Ok("tampoc".into()), Ok("ni això".into())]),
+        });
+        let err = Planner::new(llm).plan(&brief()).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.starts_with("esgotats 3 intents"), "{msg}");
+        assert!(msg.contains("JSON invàlid"), "{msg}");
     }
 }

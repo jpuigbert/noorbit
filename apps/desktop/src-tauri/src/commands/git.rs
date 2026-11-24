@@ -5,7 +5,13 @@
 //! libgit2 C i infla el binari), usem el binari `git` del sistema, que a
 //! macOS sempre hi és. Són comandes curtes i bloquejants, per això totes
 //! corren amb `spawn_blocking`.
+//!
+//! Les BRANQUES i els WORKTREES viuen al mòdul `crate::git_ops`: allà hi ha
+//! la lògica pura (comprovar noms, rebutjar branques amb feina perduda,
+//! netejar worktrees orfes) i les proves. Aquí només hi ha els comandaments
+//! Tauri que l'UI crida.
 
+use crate::git_ops::{self, BranchInfo, WorktreeInfo};
 use serde::Serialize;
 use std::path::Path;
 use std::process::Command;
@@ -475,4 +481,83 @@ pub async fn git_sync(message: Option<String>) -> Result<String, String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+// --- Branques i worktrees --------------------------------------------------
+// Fins ara NoOrbit sabia fer commit, push i stash, però de les branques no
+// en sabia res. Aquests comandaments ho canvien: llistar, crear, canviar i
+// esborrar branques, i veure els worktrees registrats.
+
+/// Llista les branques locals amb la seva situació: quina és l'actual, quin
+/// remot segueix, on està comprovada i quant commits va per davant o per
+/// darrere.
+#[command]
+pub async fn git_branches() -> Result<Vec<BranchInfo>, String> {
+    let root = root_or_err()?;
+    tokio::task::spawn_blocking(move || git_ops::branches(&root))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Crea una branca nova. `from` és el punt de partida (per defecte, la
+/// branca actual). Amb `checkout` la deixa comprovada immediatament.
+#[command]
+pub async fn git_branch_create(
+    name: String,
+    from: Option<String>,
+    checkout: Option<bool>,
+) -> Result<String, String> {
+    let root = root_or_err()?;
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("Cal el nom de la branca.".into());
+    }
+    let from = from.map(|f| f.trim().to_string()).filter(|f| !f.is_empty());
+    let checkout = checkout.unwrap_or(false);
+    tokio::task::spawn_blocking(move || {
+        git_ops::create_branch(&root, &name, from.as_deref(), checkout)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Canvia a una branca ja existent.
+#[command]
+pub async fn git_branch_checkout(name: String) -> Result<String, String> {
+    let root = root_or_err()?;
+    let name = name.trim().to_string();
+    tokio::task::spawn_blocking(move || git_ops::checkout_branch(&root, &name))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Esborra una branca. Sense `force` es rebutja si no està fusionada (com el
+/// `git branch -d`); amb `force` s'esborra igual (`-D`).
+#[command]
+pub async fn git_branch_delete(name: String, force: Option<bool>) -> Result<String, String> {
+    let root = root_or_err()?;
+    let name = name.trim().to_string();
+    let force = force.unwrap_or(false);
+    tokio::task::spawn_blocking(move || git_ops::delete_branch(&root, &name, force))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Llista els worktrees registrats al repositori, amb la branca que hi ha
+/// comprovada i si la carpeta encara existeix (si no, és un registre orfe).
+#[command]
+pub async fn git_worktrees() -> Result<Vec<WorktreeInfo>, String> {
+    let root = root_or_err()?;
+    tokio::task::spawn_blocking(move || git_ops::worktrees(&root))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Neteja els registres de worktree orfes (carpetes que ja no hi són).
+#[command]
+pub async fn git_worktree_prune() -> Result<String, String> {
+    let root = root_or_err()?;
+    tokio::task::spawn_blocking(move || git_ops::prune_worktrees(&root))
+        .await
+        .map_err(|e| e.to_string())?
 }

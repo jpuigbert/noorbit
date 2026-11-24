@@ -3,7 +3,40 @@
 Totes les releases amb els seus binaris: <https://github.com/jpuigbert/noorbit/releases>.
 Les notes completes de cada release són a la pàgina del release corresponent.
 
-## 0.71.19-alpha (en curs)
+## 0.71.19-alpha (2026-11-24)
+
+**Branques de veritat: la IA en crea, activa i esborra, i el Git ho aguanta**
+
+L'autopilotat i el xat ara treballen per branques sense obrir un terminal: la IA nativa
+reconeix ordres com «crea la branca nova FEATURE» o «esborra la branca «velleta»» i emet
+directrius `@branch: create|checkout|delete <nom>` que el materialitzador executa al final
+de cada torn (després d'escriure i esborrar fitxers, perquè canviar de branca toca l'arbre
+de treball). Dos mòduls nous i una revisió de seguretat de tres passades:
+
+- *branca pura* (`git_ops.rs`): llibreria sense estat per crear, activar i esborrar branques
+  i worktrees, amb comandaments Tauri `git_branch_*`. Els noms es validen abans d'arribar a
+  la línia d'ordres (`valid_branch_name` + separador `--`): un nom amb forma de flag
+  (`-a`) hauria esborrat totes les branques fusionades d'un cop.
+- *intencions de la IA* (`ai/gitops.rs`): guarda que la frase parli realment de branques
+  (també el plural «branques»), extreu el nom per cometes, per posició o amb connectors
+  possessius («la seva branca de proves»), i mai endevina noms fragmentables. Els
+  subprocessos git van dins `spawn_blocking` per no bloquejar el runtime async.
+- *neteja sense danys* (`git_ops.rs`, `commands/fs.rs`): esborrar una carpeta neteja els
+  worktrees orfes i reporta les branques que es conserven i per què; cap branca es borra
+  per coincidir només el nom de la carpeta, i un worktree només es dona per eliminat si
+  `git worktree list` ja no el llista (un de bloquejat o en sol de lectura no marxa i
+  mentia en el report).
+- *xat i materialitzador, la mateixa regla* (`chatSegments.ts`, `fileBlocks.ts`): una única
+  `BRANCH_DIRECTIVE_RE` compartida — l'usuari veu exactament el que s'aplicarà. El `@` és
+  obligatori: sense ell, una clau `branch: main` d'un YAML hauria executat (o tallat blocs
+  de) git real des de documentació.
+- *UI*: xips de branca al xat amb l'acció normalitzada («CREA/ACTIVA/ESBORRA »), la paperera
+  del panell Git demana confirmació abans d'esborrar, i tots els missatges nous van per i18n
+  (`ca.json`).
+- *proves*: 11 tests nous a `git_ops` i 11 a `ai::gitops` (rebuig de flags, plurals, cometes
+  que no poden ser branca, worktrees que no marxen) i 3 al frontend; tres passades de
+  revisió (CodeRabbit) sobre el diff: 2 criticals i 5 warnings trobats i reparats; 453 tests
+  Rust, 366 Vitest, `tsc`, ESLint, `cargo check --all-targets` i `vite build` en verd.
 
 **La Jam construïa «una altra cosa»: el brief original no arribava a la IA**
 
@@ -80,6 +113,22 @@ Treballar en un projecte de `/Volumes/...` (un disc exFAT sobre USB) donava semp
   la Jam continua; «no hi ha canvis a commitar» es reintenta) i dos a `noorbit-git` (el timeout
   s'adapta al volum i el timeout configurat és el mínim); `cargo test` dels crates, `cargo check
   --all-targets` del backend, `tsc --noEmit`, ESLint i Vitest (359) en verd.
+
+**El pla de la Jam fallava sense dir per què, i sense deixar informe**
+
+«Encara no hi ha cap REPORT.md … (El fitxer no existeix.)» després d'un «esgotats 3 intents»: la Jam
+moria a la fase de PLA i l'usuari no podia saber ni per què havia fallat ni què fer-hi. Dos forats,
+tots dos tancats:
+
+- *l'error amagava la causa* (`noorbit-planner`): el planner guarda l'error de cada intent per donar-lo
+  de feedback al següent, però al final tornava només «esgotats 3 intents»: era impossible distingir
+  una IA caiguda d'un model absent (p. ex. el model per defecte del config que no és instal·lat a
+  Ollama) d'un JSON mal format. Ara l'error final porta la causa de l'últim intent
+  («esgotats 3 intents (JSON invàlid: …)»).
+- *cap informe quan fallava el pla* (`jam/commands.rs`): l'informe de rescat només s'escrivia quan
+  moria el fill, però si la Jam queia ABANS (a la fase de pla) el projecte es quedava sense REPORT.md
+  i l'usuari veia el missatge cru. Ara `fail` deixa sempre un REPORT.md mínim amb el motiu.
+- *proves*: un test nou al planner (l'error final porta la causa de l'últim intent).
 
 **El menú de l'editor en català, la pantalla de feina que s'obre sola i la xarxa altruista P2P**
 

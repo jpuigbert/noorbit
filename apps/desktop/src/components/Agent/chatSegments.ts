@@ -8,19 +8,28 @@
 /// projecte): mateixa tolerància a marques decoratives, mateixes directrius
 /// que interrompen un fitxer, mateixa neteja de camins.
 
-import { stripUiArtifacts } from "../../stores/agent/fileBlocks";
+import {
+  BRANCH_DIRECTIVE_RE,
+  normalizeBranchAction,
+  stripUiArtifacts,
+} from "../../stores/agent/fileBlocks";
 
 export type ChatSeg =
   | { kind: "prose"; text: string }
   | { kind: "code"; lang: string; code: string }
   | { kind: "file"; path: string; code: string }
   | { kind: "dir"; path: string }
-  | { kind: "del"; path: string };
+  | { kind: "del"; path: string }
+  | { kind: "branch"; action: string; name: string };
 
 /// Línia «@file: ruta» (tolerant a «file:», numeració «1.», decoracions).
 const FILE_RE = /^[ \t>#*-]*(?:\d+[.)]\s+)?@?file:\s*(.+?)\s*$/i;
 const DIR_RE = /^[ \t>#*-]*(?:\d+[.)]\s+)?@?(?:dir|directori|carpeta|folder)\w*:\s*(.+?)\s*$/i;
 const DEL_RE = /^[ \t>#*-]*(?:\d+[.)]\s+)?@?(?:delete|esborra|borra|elimina|remove|rm)\w*:\s*(.+?)\s*$/i;
+/// Directriu de BRANCA (Git): «@branch: create feature/x». La regex és la
+/// MESMA que usa el materialitzador (`BRANCH_DIRECTIVE_RE` de fileBlocks):
+/// «@» obligatori, perquè un «branch: main» d'un YAML no és cap directriu.
+const BRANCH_RE = BRANCH_DIRECTIVE_RE;
 /// Directrius que INTERROMPEN un bloc @file: en curs (mateixes que el
 /// materialitzador): edicions, execució i arbres d'imatge.
 const EDIT_RE = /^[ \t>#*-]*@?(?:edit|modifica|substitueix|reempla[çc]a)\w*:/i;
@@ -90,6 +99,24 @@ export function tokenizeChat(text: string): ChatSeg[] {
       flushProse();
       if (dpath) segs.push({ kind: dm ? "dir" : "del", path: dpath });
       else prose.push(line);
+      continue;
+    }
+    // Directriu de BRANCA (Git): «@branch: create feature/x». L'acció es
+    // NORMALITZA amb la mateixa funció que el materialitzador (fileBlocks):
+    // «@branch: crea X» es veu com a «create», no com a esborrat.
+    const bm = BRANCH_RE.exec(line);
+    if (bm) {
+      flushFile();
+      flushProse();
+      const body = bm[1].replace(/^[`'"]+|[`'"]+$/g, "").trim();
+      const bp = body.split(/\s+/);
+      const action = normalizeBranchAction(bp[0] || "");
+      const bname = bp.slice(1).join(" ").trim();
+      if (bname && action) {
+        segs.push({ kind: "branch", action, name: bname });
+      } else {
+        prose.push(line);
+      }
       continue;
     }
     // Dins d'@file:: les tanques ``` són decoració (el marc ja és la

@@ -338,6 +338,8 @@ export const COMPACT_SYSTEM =
   "El text NOU ha de ser DIFERENT del CERCA: mai edicions buides; si no cal " +
   "canviar res, no emetis res. " +
   "Per esborrar un fitxer: «@delete: ruta». Per crear carpetes: «@dir: ruta». " +
+  "Per tocar branques de Git: «@branch: create|checkout|delete nom» (una línia " +
+  "per branca, sense cap altra línia al costat). " +
   "EMET CADA FITXER UNA SOLA VEGADA. Sigues breu: escriu el codi i una " +
   "frase de resum, res més.";
 
@@ -360,6 +362,9 @@ export const MEMORY_SYSTEM =
   "@file: ni el mateix bloc de codi). Si un fitxer ja existeix, reemet-lo " +
   "amb «@edit:» o «@file:» una sola vegada i prou.\n" +
   "PER ESBORRAR un fitxer sencer: una línia «@delete: ruta». " +
+  "PER TREBALLAR AMB BRANQUES DE GIT: una línia «@branch: create nom» " +
+  "(la crea i hi canvia), «@branch: checkout nom» (hi canvia) o " +
+  "«@branch: delete nom» (l'esborra; només si està fusionada). " +
   "Si la petició és FER codi («fes…», «implementa…», «crea…», «afegeix…», " +
   "«arregla…») o PROVES («tests», «proves»), la resposta HA de portar els " +
   "fitxers amb «@file:» i el codi COMPLET; les proves són fitxers reals " +

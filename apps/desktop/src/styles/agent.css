@@ -877,6 +877,14 @@
 .cmd-dir.del svg {
   color: var(--error);
 }
+/* Xip de BRANCA (Git): «@branch: create feature/x». */
+.cmd-dir.branch {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--accent-2) 40%, transparent);
+}
+.cmd-dir.branch svg {
+  color: var(--accent-2);
+}
 .cmd-dir-path {
   color: var(--text-0);
 }

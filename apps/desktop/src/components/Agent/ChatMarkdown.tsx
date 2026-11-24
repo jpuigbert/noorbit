@@ -1,5 +1,5 @@
 import { Fragment, useState, type ReactNode } from "react";
-import { Check, ChevronDown, ChevronUp, Copy, FileCode, FilePlus2, FolderPlus, Trash2 } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Copy, FileCode, FilePlus2, FolderPlus, GitBranch, Trash2 } from "lucide-react";
 import { useT } from "../../i18n";
 import { copyText } from "../CopyButton";
 import { tokenizeChat } from "./chatSegments";
@@ -228,6 +228,27 @@ function DirectiveChip({ kind, path }: { kind: "dir" | "del"; path: string }) {
   );
 }
 
+/// Xip d'una directriu de BRANCA (Git): «@branch: create feature/x».
+/// Informatiu: l'operació real la fa el materialitzador. L'acció ja ve
+/// NORMALITZADA de `tokenizeChat` («crea» → «create»): un xip mai no pot
+/// mostrar-se com a esborrat quan el que es fa és crear.
+function BranchChip({ action, name }: { action: string; name: string }) {
+  const { t } = useT();
+  const label =
+    action === "create"
+      ? t("agent.branchCreate")
+      : action === "checkout"
+        ? t("agent.branchCheckout")
+        : t("agent.branchDelete");
+  return (
+    <div className="cmd-dir branch" title={t("agent.branchHint")}>
+      <GitBranch size={12} />
+      <span className="cmd-dir-path">{name}</span>
+      <span className="cmd-dir-tag">{label}</span>
+    </div>
+  );
+}
+
 /// Converteix un segment SENSE blocs de codi en pàgrafs (+ llistes/cites).
 function Prose({ text }: { text: string }): ReactNode {
   const lines = text.split(/\r?\n/);
@@ -321,6 +342,8 @@ export function ChatMarkdown({
             return <DirectiveChip key={i} kind="dir" path={s.path} />;
           case "del":
             return <DirectiveChip key={i} kind="del" path={s.path} />;
+          case "branch":
+            return <BranchChip key={i} action={s.action} name={s.name} />;
         }
       })}
     </div>

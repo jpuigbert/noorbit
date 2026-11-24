@@ -288,10 +288,99 @@ fn locate_in(content: &str, needle: &str) -> Option<(usize, usize)> {
 
 // ── Esborrat ──────────────────────────────────────────────────────────────
 
+/// Carpetes que NO s'esborren mai amb «borra totes les carpetes»: les
+/// ocultes (».git», ».vscode»…) i les que es tornen a generar soles. Els
+/// fitxers del projecte tampoc s'esborren (l'ordre parla de carpetes).
+const CARPETES_PROTEGIDES: &[&str] = &["node_modules", "target", "dist", "build", "out"];
+
+/// El quantificador («tot/totes») queia JUSTAMENT sobre les carpetes
+/// («totes LES carpetes», «tots els directoris»)? És la diferència entre
+/// «esborra totes les carpetes» (ordre massiva) i «elimina TOTS ELS FITXERS de
+/// la carpeta temporal» (que NO demana tocar cap carpeta: si no ho mirem,
+/// esborraríem totes les carpetes d'arrel per una frase sobre fitxers).
+fn quant_sobre_carpetes(low: &str) -> bool {
+    let toks: Vec<&str> = low
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    for (i, t) in toks.iter().enumerate() {
+        if !["totes", "tots", "tota", "tot", "todas", "todos", "all"].contains(t) {
+            continue;
+        }
+        // Entre el quantificador i la carpeta només hi poden haver determinants
+        // («totes LES carpetes»); qualsevol altra paraula trenca el vincle.
+        let mut j = i + 1;
+        while j < toks.len() && ["les", "els", "la", "el", "las", "los", "the", "l"].contains(&toks[j]) {
+            j += 1;
+        }
+        if j < toks.len() && ["carpetes", "carpetas", "directoris", "directorios", "folders"].contains(&toks[j]) {
+            return true;
+        }
+    }
+    false
+}
+
+/// «esborra totes les carpetes», «borra tots els directoris»… Emet un
+/// «@delete:» per cada carpeta de PRIMER NIVELL del projecte (les ocultes i
+/// les que es regeneren soles es deixen fora). El netejat de branques i
+/// worktrees associats el fa el backend en esborrar cada carpeta.
+fn handle_delete_all(low: &str) -> Option<String> {
+    if !conte_paraula(
+        low,
+        &[
+            "esborra", "esborrar", "esborra'm", "borra", "elimina", "eliminar", "suprimeix",
+            "suprimir", "treu", "treure", "delete", "remove", "rm",
+        ],
+    ) {
+        return None;
+    }
+    // El «tot/totes» ha de queure DIRECTAMENT sobre les carpetes: la presència
+    // solta de «tots» + «carpeta» no n'hi ha prou (vegeu `quant_sobre_carpetes`).
+    if !quant_sobre_carpetes(low) {
+        return None;
+    }
+    let root = crate::commands::workspace::current_root()?;
+    let mut dirs: Vec<String> = Vec::new();
+    for e in std::fs::read_dir(&root).ok()? {
+        let Ok(e) = e else { continue };
+        let name = e.file_name().to_string_lossy().to_string();
+        if !e.path().is_dir() {
+            continue;
+        }
+        // Ocultes (».git», ».vscode»…) i carpetes que es regeneren soles.
+        if name.starts_with('.') || CARPETES_PROTEGIDES.contains(&name.as_str()) {
+            continue;
+        }
+        dirs.push(name);
+    }
+    dirs.sort();
+    if dirs.is_empty() {
+        return Some(
+            "El projecte no té cap carpeta a l'arrel: no hi ha res a esborrar.".to_string(),
+        );
+    }
+    let mut out = format!(
+        "Esboro les {} carpetes de l'arrel del projecte (deixo fora les ocultes i \
+         `node_modules`, `target`, `dist`, `build` i `out`):\n\n",
+        dirs.len()
+    );
+    for d in &dirs {
+        out.push_str(&format!("@delete: {}/\n", d));
+    }
+    out.push_str(
+        "\nTambé hi netejo les branques i els worktrees que hi pengaven. \
+         Els fitxers de l'arrel NO s'esborren: digues-me-ho si els vols endur.",
+    );
+    Some(out)
+}
+
 /// «esborra src/vell.py», «elimina la carpeta dist», «treu el README.md»…
 /// Emet «@delete: ruta» (verificant que la ruta existeix al projecte).
 fn handle_delete(prompt: &str) -> Option<String> {
     let low = pla(prompt);
+    if let Some(r) = handle_delete_all(&low) {
+        return Some(r);
+    }
     if !conte_paraula(
         &low,
         &[
@@ -597,6 +686,22 @@ mod tests {
         let r = handle("guarda demo.rs:\n```rust\nfn main() {}\n```").unwrap();
         assert!(r.contains("@file: demo.rs"), "{}", r);
         assert!(r.contains("fn main() {}"), "{}", r);
+    }
+
+    #[test]
+    fn el_quantificador_ha_de_queure_sobre_les_carpetes() {
+        // Forma afirmativa: el vincle quantificador+carpeta és directe.
+        assert!(quant_sobre_carpetes(&pla("esborra totes les carpetes")));
+        assert!(quant_sobre_carpetes(&pla("borra tots els directoris del projecte")));
+        // Fals positiu criticat: el quantificador porta sobre els FITXERS, no
+        // sobre les carpetes: no hem d'esborrar totes les carpetes d'arrel.
+        assert!(!quant_sobre_carpetes(&pla("elimina tots els fitxers de la carpeta temporal")));
+        assert!(!quant_sobre_carpetes(&pla("esborra tots els fitxers de la carpeta dist")));
+        assert!(!quant_sobre_carpetes(&pla("elimina tot el contingut de la carpeta")));
+        // I el mateix via `handle_delete_all`: sense workspace obert no arriba
+        // mai al llistat, però el guard de frase ja el talla abans.
+        let low = pla("elimina tots els fitxers de la carpeta temporal");
+        assert!(handle_delete_all(&low).is_none());
     }
 
     #[test]

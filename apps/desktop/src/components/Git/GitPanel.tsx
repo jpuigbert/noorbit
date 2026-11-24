@@ -4,7 +4,7 @@ import { DiffEditor } from "@monaco-editor/react";
 import { useMonacoReady } from "../../editor/monReady";
 import {
   GitBranch, RefreshCw, ArrowDown, ArrowUp, Check, Archive, History, Undo2,
-  Cloud, CloudUpload, Repeat,
+  Cloud, CloudUpload, Repeat, Trash2,
 } from "lucide-react";
 import { useT } from "../../i18n";
 import { useUIStore } from "../../stores/uiStore";
@@ -44,6 +44,21 @@ interface SyncStatus {
   remote: boolean;
   ahead: number;
   behind: number;
+}
+/// Una branca local del repositori.
+interface BranchInfo {
+  name: string;
+  current: boolean;
+  upstream: string | null;
+  worktree: string | null;
+  ahead: number;
+  behind: number;
+}
+/// Un worktree registrat al repositori (pot ser ORFE: la carpeta ja no hi és).
+interface WorktreeInfo {
+  path: string;
+  branch: string | null;
+  exists: boolean;
 }
 
 /// Dedueix el llenguatge de Monaco per a l'extensió del fitxer (per al color
@@ -98,6 +113,10 @@ export default function GitPanel() {
   const [diff, setDiff] = useState<FileDiff | null>(null);
   // Stash + gràfic de branques (funcions estil VS Code).
   const [stashes, setStashes] = useState<StashEntry[]>([]);
+  // BRANQUES i WORKTREES: crear, canviar i esborrar branques (com VS Code).
+  const [branches, setBranches] = useState<BranchInfo[]>([]);
+  const [worktrees, setWorktrees] = useState<WorktreeInfo[]>([]);
+  const [newBranch, setNewBranch] = useState("");
   const [showGraph, setShowGraph] = useState(false);
   const [log, setLog] = useState("");
   // ── Núvol d'equip: més d'un NoOrbit (dispositius diferents) editant el
@@ -133,9 +152,22 @@ export default function GitPanel() {
       if (st.repo) {
         setRemote(await invoke<RemoteInfo>("git_remote_get"));
         setSync(await invoke<SyncStatus>("git_sync_status"));
+        // Branches i worktrees: si el repositori no en té, no és un error.
+        try {
+          setBranches(await invoke<BranchInfo[]>("git_branches"));
+        } catch {
+          setBranches([]);
+        }
+        try {
+          setWorktrees(await invoke<WorktreeInfo[]>("git_worktrees"));
+        } catch {
+          setWorktrees([]);
+        }
       } else {
         setRemote(null);
         setSync(null);
+        setBranches([]);
+        setWorktrees([]);
       }
     } catch (e) {
       setStatus(null);
@@ -363,6 +395,111 @@ export default function GitPanel() {
           </div>
         )}
       </div>
+
+      {/* ── BRANQUES: crear, canviar i esborrar (com la vista de VS Code).
+          També hi ha els worktrees registrats: els ORFES (la carpeta ja no
+          hi és) es poden netejar amb un clic. ── */}
+      {branches.length > 0 && (
+        <div className="git-branches">
+          <div className="git-branches-title">
+            <GitBranch size={11} /> {t("git.branchCount", { n: branches.length })}
+          </div>
+          {branches.map((b) => (
+            <div key={b.name} className={"git-branch-row" + (b.current ? " current" : "")}>
+              <button
+                className="git-branch-name"
+                disabled={busy || b.current}
+                title={b.current ? t("git.branchCurrent") : t("git.branchCheckout")}
+                onClick={() =>
+                  act(
+                    () => invoke("git_branch_checkout", { name: b.name }),
+                    t("git.branchSwitched")
+                  )
+                }
+              >
+                {b.current ? <Check size={11} /> : <GitBranch size={11} />} {b.name}
+              </button>
+              {b.worktree && (
+                <span className="git-branch-wt" title={b.worktree}>
+                  worktree
+                </span>
+              )}
+              {(b.ahead > 0 || b.behind > 0) && (
+                <span className="git-branch-sync" title={t("git.cloudUpHint")}>
+                  ↑{b.ahead} ↓{b.behind}
+                </span>
+              )}
+              <button
+                className="btn sm"
+                disabled={busy || b.current}
+                title={t("git.branchDelete")}
+                onClick={() => {
+                  // Acció destructiva: confirmació (mateix patró que la resta
+                  // de l'app), no un clic sec cap a la paperera.
+                  if (!window.confirm(t("git.branchDeleteConfirm", { name: b.name }))) return;
+                  void act(
+                    () => invoke("git_branch_delete", { name: b.name, force: false }),
+                    t("git.branchDeleted")
+                  );
+                }}
+              >
+                <Trash2 size={11} />
+              </button>
+            </div>
+          ))}
+          <div className="git-branch-new">
+            <input
+              className="input sm"
+              placeholder={t("git.branchNewPh")}
+              value={newBranch}
+              onChange={(e) => setNewBranch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && newBranch.trim() && !busy) {
+                  void act(async () => {
+                    await invoke("git_branch_create", {
+                      name: newBranch.trim(),
+                      from: null,
+                      checkout: true,
+                    });
+                    setNewBranch("");
+                  }, t("git.branchCreated"));
+                }
+              }}
+            />
+            <button
+              className="btn sm primary"
+              disabled={busy || !newBranch.trim()}
+              title={t("git.branchNew")}
+              onClick={() =>
+                void act(async () => {
+                  await invoke("git_branch_create", {
+                    name: newBranch.trim(),
+                    from: null,
+                    checkout: true,
+                  });
+                  setNewBranch("");
+                }, t("git.branchCreated"))
+              }
+            >
+              <GitBranch size={11} /> {t("git.branchCreate")}
+            </button>
+          </div>
+          {worktrees.filter((w) => !w.exists).length > 0 && (
+            <div className="git-worktrees">
+              <span>{t("git.worktreeOrphans", { n: worktrees.filter((w) => !w.exists).length })}</span>
+              <button
+                className="btn sm"
+                disabled={busy}
+                onClick={() =>
+                  act(() => invoke("git_worktree_prune"), t("git.worktreePruned"))
+                }
+              >
+                {t("git.worktreePrune")}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {diff && !monReady ? (
         <div className="git-diff">

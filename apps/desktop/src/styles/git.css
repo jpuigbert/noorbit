@@ -150,6 +150,75 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Branches: llista, canvi i esborrat (com la vista de VS Code). */
+.git-branches {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.git-branches-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.git-branch-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.git-branch-name {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 0;
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-branch-name:hover:not(:disabled) {
+  color: var(--accent-hover);
+}
+.git-branch-row.current .git-branch-name {
+  color: var(--accent-2);
+  cursor: default;
+}
+.git-branch-wt,
+.git-branch-sync {
+  font-size: 10px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.git-branch-new {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+.git-branch-new .input {
+  flex: 1;
+  min-width: 0;
+}
+.git-worktrees {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
 .btn.active {
   border-color: var(--accent);
   color: var(--accent);

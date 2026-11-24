@@ -214,9 +214,28 @@ pub async fn create_dir(path: String) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Resultat d'esborrar una ruta: què s'ha esborrat del projecte i què s'ha
+/// netejat de GIT (branches i worktrees que vivien dins la carpeta).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct DeleteOutcome {
+    /// Branches esborrades perquè eren del worktree de la carpeta esborrada.
+    pub removed_branches: Vec<String>,
+    /// Branches que NO s'han esborrat perquè tenen feina que es podria perdre:
+    /// (nom, motiu).
+    pub kept_branches: Vec<(String, String)>,
+    /// Worktrees desregistrats (i eliminats) de dins la carpeta.
+    pub removed_worktrees: Vec<String>,
+}
+
 /// Esborra un fitxer o carpeta (recursivament) dins del projecte.
+///
+/// Abans d'esborrar, NETEJA GIT: els worktrees registrats dins la carpeta i
+/// les seves branques. Sense això, esborrar «la carpeta del joc» deixava al
+/// repositori un registre de worktree que ja no existia i una branca orfina
+/// per sempre (el `git branch` mostrava branches que no tenien res a veure
+/// amb el projecte).
 #[tauri::command]
-pub async fn delete_path(path: String) -> Result<(), String> {
+pub async fn delete_path(path: String) -> Result<DeleteOutcome, String> {
     let p = guard_in_root(&path)?;
     // Mai esborrar l'arrel sencera del projecte.
     if let Some(root) = super::workspace::current_root() {
@@ -228,12 +247,31 @@ pub async fn delete_path(path: String) -> Result<(), String> {
     }
     // spawn_blocking: esborrar una carpeta gran és lent i bloquejava el runtime.
     tauri::async_runtime::spawn_blocking(move || {
-        let res = if p.is_dir() {
-            std::fs::remove_dir_all(&p)
-        } else {
+        // Carpeta o fitxer? Ho decidim ABANS de netejar: `git worktree
+        // remove` pot esborrar la carpeta del worktree i llavors `is_dir`
+        // ja no ho seria.
+        let era_carpeta = p.is_dir();
+        // Neteja de GIT (worktrees dins la carpeta + les seves branques).
+        // Si el projecte no és un repositori, no hi ha res a netejar.
+        let neteja = crate::git_ops::cleanup_folder(&p, false).unwrap_or_default();
+        let res = if era_carpeta {
+            if p.exists() {
+                std::fs::remove_dir_all(&p)
+            } else {
+                // El worktree ja l'havia esborrat git: no hi ha res a fer.
+                Ok(())
+            }
+        } else if p.exists() {
             std::fs::remove_file(&p)
+        } else {
+            Ok(())
         };
-        res.map_err(|e| format!("No s'ha pogut esborrar {}: {}", p.display(), e))
+        res.map_err(|e| format!("No s'ha pogut esborrar {}: {}", p.display(), e))?;
+        Ok(DeleteOutcome {
+            removed_branches: neteja.removed_branches,
+            kept_branches: neteja.kept_branches,
+            removed_worktrees: neteja.removed_worktrees,
+        })
     })
     .await
     .map_err(|e| e.to_string())?
