@@ -201,6 +201,13 @@ pub async fn android_install_sdk(dest: Option<String>) -> Result<String, String>
     let spawned = std::process::Command::new("x-terminal-emulator")
         .args(["-e", "bash", "-lc", &cmd])
         .spawn();
+    // Fora Unix la funció ja ha retornat més amunt (el camí de Windows és
+    // manual), però el
+    // nom `spawned` ha d'existir en totes les platforms o el compilador de
+    // Windows no el troba (E0425): valor de conveni mai llegit.
+    #[cfg(not(unix))]
+    let spawned: Result<std::process::Child, std::io::Error> =
+        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "sense terminal"));
 
     spawned.map_err(|e| format!("No s'ha pogut obrir el Terminal: {}", e))?;
     let pes = if amb_emulador {
