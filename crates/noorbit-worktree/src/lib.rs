@@ -38,8 +38,34 @@ impl GitWorktreeCheckpointer {
         let worktree = std::env::temp_dir().join(format!("noorbit-jam-{id}"));
         if worktree.exists() { return Err(format!("worktree path ja existeix: {}", worktree.display())); }
         if worktree.starts_with(&main_repo) { return Err(format!("worktree path dins del repo principal: {}", worktree.display())); }
-        let out = std::process::Command::new("git").arg("-C").arg(&main_repo).args(["worktree","add","-b",&branch, worktree.to_str().ok_or("worktree path no UTF-8")?, &base]).output().map_err(|e| format!("git worktree add: {e}"))?;
-        if !out.status.success() { return Err(format!("git worktree add fallà: {}", String::from_utf8_lossy(&out.stderr).trim())); }
+        // El `worktree add` pot fallar per un lock fals o transitari (a CI
+        // s'ha vist: «index.lock: File exists» en repositoris acabats de
+        // crear). Reintentem netejant les restes de l'intent mig fet:
+        // el directori fantasma, la branca òrfena i les metadades orfes.
+        let mut ultim_error = String::new();
+        let mut creat = false;
+        for intent in 1..=3u64 {
+            let out = match std::process::Command::new("git")
+                .arg("-C")
+                .arg(&main_repo)
+                .args(["worktree", "add", "-b", &branch, worktree.to_str().ok_or("worktree path no UTF-8")?, &base])
+                .output()
+            {
+                Ok(o) => o,
+                Err(e) => return Err(format!("git worktree add: {e}")),
+            };
+            if out.status.success() {
+                creat = true;
+                break;
+            }
+            ultim_error = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            warn!(intent, err = %ultim_error, "git worktree add fallà; netejant i reintentant");
+            let _ = std::process::Command::new("git").arg("-C").arg(&main_repo).args(["worktree", "prune"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+            let _ = std::fs::remove_dir_all(&worktree);
+            let _ = std::process::Command::new("git").arg("-C").arg(&main_repo).args(["branch", "-D", "--", &branch]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+            if intent < 3 { std::thread::sleep(Duration::from_millis(150 * intent)); }
+        }
+        if !creat { return Err(format!("git worktree add fallà: {ultim_error}")); }
         info!(main = %main_repo.display(), worktree = %worktree.display(), branch = %branch, base = %base, "worktree creat");
         Ok(Self { main_repo, worktree, branch, timeout: DEFAULT_TIMEOUT, user_name: "NoOrbit Agent".into(), user_email: "agent@noorbit.local".into(), cleaned: AtomicBool::new(false) })
     }
